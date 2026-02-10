@@ -18,7 +18,7 @@ use serde::{
 };
 
 use crate::{
-    Interface, InterfaceType, JsonDisplayHideSecrets, NipartstateInterface,
+    Interface, InterfaceType, JsonDisplayHideSecrets, NipartInterface,
 };
 
 /// Represent a list of [Interface].

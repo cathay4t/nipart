@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use nipart::{
     Interface, InterfaceType, MergedInterfaces, MergedNetworkState,
-    NetworkState, NipartError, NipartIpcConnection, NipartNoDaemon,
-    NipartstateApplyOption, NipartstateInterface,
+    NetworkState, NipartError, NipartInterface, NipartIpcConnection,
+    NipartNoDaemon, NipartstateApplyOption,
 };
 
 use super::commander::NipartCommander;

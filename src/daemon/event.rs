@@ -4,8 +4,8 @@ use std::time::SystemTime;
 
 use nipart::{
     ErrorKind, Interface, InterfaceState, InterfaceType, MergedNetworkState,
-    NetworkState, NipartError, NipartNoDaemon, NipartstateApplyOption,
-    NipartstateInterface, NipartstateQueryOption, WifiPhyInterface,
+    NetworkState, NipartError, NipartInterface, NipartNoDaemon,
+    NipartstateApplyOption, NipartstateQueryOption, WifiPhyInterface,
 };
 
 use super::commander::NipartCommander;

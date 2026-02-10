@@ -13,7 +13,7 @@ use futures_util::{SinkExt, stream::StreamExt};
 use nipart::{ErrorKind, InterfaceType, NipartError};
 use rtnetlink::{
     MulticastGroup, new_multicast_connection,
-    packet_core::{NetlinkMessage, NetlinkPayload},
+    packet_core::{Emitable, NetlinkMessage, NetlinkPayload},
     packet_route::{
         RouteNetlinkMessage,
         link::{
@@ -347,6 +347,11 @@ fn parse_link_msg(link_msg: &LinkMessage) -> Option<NipartLinkEvent> {
                     "parse_link_msg(): ignoring netlink message due to \
                      unsupported LinkAttribute::OperState value: {op_state:?}"
                 );
+                println!("HAHA954 {:?}", link_msg);
+                let mut buf = vec![0; link_msg.buffer_len()];
+
+                link_msg.emit(&mut buf);
+                println!("HAHA198 {:?}", buf);
                 return None;
             }
         };

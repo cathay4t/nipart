@@ -7,7 +7,7 @@ use super::{
 use crate::{
     BondInterface, DummyInterface, ErrorKind, EthernetInterface, Interface,
     InterfaceType, LinuxBridgeInterface, LoopbackInterface, NetworkState,
-    NipartError, NipartNoDaemon, NipartstateInterface, NipartstateQueryOption,
+    NipartError, NipartInterface, NipartNoDaemon, NipartstateQueryOption,
     UnknownInterface, VlanInterface, WifiPhyInterface, WireguardInterface,
 };
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{Interface, MergedInterface, NipartstateInterface};
+use crate::{Interface, MergedInterface, NipartInterface};
 
 impl MergedInterface {
     /// Removing loopback is treated as reset to default

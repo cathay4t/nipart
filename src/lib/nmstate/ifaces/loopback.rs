@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     BaseInterface, ErrorKind, InterfaceIpAddr, InterfaceIpv4, InterfaceIpv6,
-    InterfaceState, InterfaceType, JsonDisplay, NipartError,
-    NipartstateInterface,
+    InterfaceState, InterfaceType, JsonDisplay, NipartError, NipartInterface,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonDisplay)]
@@ -68,7 +67,7 @@ impl Default for LoopbackInterface {
     }
 }
 
-impl NipartstateInterface for LoopbackInterface {
+impl NipartInterface for LoopbackInterface {
     fn base_iface(&self) -> &BaseInterface {
         &self.base
     }

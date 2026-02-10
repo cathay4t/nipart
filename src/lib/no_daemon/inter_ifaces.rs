@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     ErrorKind, Interface, InterfaceType, MergedInterface, MergedInterfaces,
-    NipartError, NipartstateInterface,
+    NipartError, NipartInterface,
 };
 
 pub(crate) async fn apply_ifaces(

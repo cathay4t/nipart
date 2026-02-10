@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     BaseInterface, ErrorKind, InterfaceType, JsonDisplay,
-    JsonDisplayHideSecrets, NipartError, NipartstateInterface,
+    JsonDisplayHideSecrets, NipartError, NipartInterface,
     nmstate::{
         deserializer::{number_as_string, option_number_as_string},
         value::copy_undefined_value,
@@ -49,7 +49,7 @@ impl Default for WifiPhyInterface {
     }
 }
 
-impl NipartstateInterface for WifiPhyInterface {
+impl NipartInterface for WifiPhyInterface {
     fn base_iface(&self) -> &BaseInterface {
         &self.base
     }
@@ -252,7 +252,7 @@ impl Default for WifiCfgInterface {
     }
 }
 
-impl NipartstateInterface for WifiCfgInterface {
+impl NipartInterface for WifiCfgInterface {
     fn base_iface(&self) -> &BaseInterface {
         &self.base
     }

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     BaseInterface, ErrorKind, InterfaceType, JsonDisplay, NipartError,
-    NipartstateInterface,
+    NipartInterface,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonDisplay)]
@@ -58,7 +58,7 @@ impl Default for EthernetInterface {
     }
 }
 
-impl NipartstateInterface for EthernetInterface {
+impl NipartInterface for EthernetInterface {
     fn base_iface(&self) -> &BaseInterface {
         &self.base
     }

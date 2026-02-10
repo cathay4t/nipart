@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     BaseInterface, ErrorKind, InterfaceType, JsonDisplay, NipartError,
-    NipartstateInterface,
+    NipartInterface,
 };
 
 /// Bond interface.
@@ -195,7 +195,7 @@ impl Default for BondInterface {
     }
 }
 
-impl NipartstateInterface for BondInterface {
+impl NipartInterface for BondInterface {
     fn base_iface(&self) -> &BaseInterface {
         &self.base
     }

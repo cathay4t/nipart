@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ErrorKind, Interface, InterfaceState, InterfaceType, JsonDisplay,
-    NipartError, NipartstateInterface,
+    NipartError, NipartInterface,
 };
 
 #[derive(

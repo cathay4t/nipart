@@ -10,8 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BaseInterface, InterfaceType, JsonDisplay, NipartError,
-    NipartstateInterface,
+    BaseInterface, InterfaceType, JsonDisplay, NipartError, NipartInterface,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonDisplay)]
@@ -51,7 +50,7 @@ impl Default for OvsInterface {
     }
 }
 
-impl NipartstateInterface for OvsInterface {
+impl NipartInterface for OvsInterface {
     fn base_iface(&self) -> &BaseInterface {
         &self.base
     }
