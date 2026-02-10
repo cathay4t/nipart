@@ -15,7 +15,7 @@ use super::value::get_json_value_difference;
 use crate::{
     BaseInterface, BondInterface, DummyInterface, ErrorKind, EthernetInterface,
     InterfaceState, InterfaceType, JsonDisplayHideSecrets,
-    LinuxBridgeInterface, LoopbackInterface, NipartError, NipartstateInterface,
+    LinuxBridgeInterface, LoopbackInterface, NipartError, NipartInterface,
     OvsBridgeInterface, OvsInterface, UnknownInterface, VlanInterface,
     WifiCfgInterface, WifiPhyInterface, WireguardInterface,
 };
@@ -332,7 +332,7 @@ macro_rules! gen_iface_trait_impl_mut {
     }
 }
 
-impl NipartstateInterface for Interface {
+impl NipartInterface for Interface {
     gen_iface_trait_impl!(
         (is_virtual, bool),
         (base_iface, &BaseInterface),

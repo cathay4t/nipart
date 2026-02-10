@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    Interface, InterfaceState, InterfaceType, MergedInterfaces,
-    NipartstateInterface,
+    Interface, InterfaceState, InterfaceType, MergedInterfaces, NipartInterface,
 };
 
 impl MergedInterfaces {

@@ -3,7 +3,7 @@
 use super::{inter_ifaces::apply_ifaces, route::apply_routes};
 use crate::{
     InterfaceType, MergedNetworkState, NetworkState, NipartError,
-    NipartNoDaemon, NipartstateApplyOption, NipartstateInterface,
+    NipartInterface, NipartNoDaemon, NipartstateApplyOption,
 };
 
 const RETRY_COUNT_COMMON: usize = 10;

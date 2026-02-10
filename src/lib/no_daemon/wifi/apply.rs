@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     ErrorKind, Interface, InterfaceType, MergedInterfaces, NipartError,
-    NipartstateInterface, WifiConfig,
+    NipartInterface, WifiConfig,
 };
 
 impl NipartWpaConn {

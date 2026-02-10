@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use futures_channel::mpsc::UnboundedSender;
 use nipart::{
-    InterfaceType, NetworkState, NipartError, NipartNoDaemon,
-    NipartstateInterface, NipartstateQueryOption,
+    InterfaceType, NetworkState, NipartError, NipartInterface, NipartNoDaemon,
+    NipartstateQueryOption,
 };
 
 use super::{

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use nipart::{
-    NetworkState, NipartClient, NipartNoDaemon, NipartstateInterface,
+    NetworkState, NipartClient, NipartInterface, NipartNoDaemon,
     NipartstateQueryOption,
 };
 

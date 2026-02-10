@@ -2,7 +2,7 @@
 
 use crate::{
     BaseInterface, EthernetInterface, Interface, InterfaceState, InterfaceType,
-    Interfaces, MergedInterface, MergedInterfaces, NipartstateInterface,
+    Interfaces, MergedInterface, MergedInterfaces, NipartInterface,
 };
 
 impl MergedInterfaces {

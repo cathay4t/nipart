@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     BaseInterface, BridgeVlanConfig, ErrorKind, InterfaceType, JsonDisplay,
-    NipartError, NipartstateInterface, VlanProtocol,
+    NipartError, NipartInterface, VlanProtocol,
 };
 
 /// Bridge interface provided by linux kernel.
@@ -105,7 +105,7 @@ impl Default for LinuxBridgeInterface {
     }
 }
 
-impl NipartstateInterface for LinuxBridgeInterface {
+impl NipartInterface for LinuxBridgeInterface {
     fn base_iface(&self) -> &BaseInterface {
         &self.base
     }

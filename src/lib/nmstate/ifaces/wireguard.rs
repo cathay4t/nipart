@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     BaseInterface, ErrorKind, InterfaceType, JsonDisplay,
-    JsonDisplayHideSecrets, NipartError, NipartstateInterface,
+    JsonDisplayHideSecrets, NipartError, NipartInterface,
 };
 
 #[derive(
@@ -47,7 +47,7 @@ impl Default for WireguardInterface {
     }
 }
 
-impl NipartstateInterface for WireguardInterface {
+impl NipartInterface for WireguardInterface {
     fn base_iface(&self) -> &BaseInterface {
         &self.base
     }

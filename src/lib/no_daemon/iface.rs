@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     BaseInterface, Interface, InterfaceState, InterfaceType, MergedInterfaces,
-    NipartError, NipartstateInterface,
+    NipartError, NipartInterface,
 };
 
 pub(crate) fn nmstate_iface_type_to_nispor(

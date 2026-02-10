@@ -2,7 +2,7 @@
 
 use super::super::value::{copy_undefined_value, gen_diff_json_value};
 use crate::{
-    Interface, Interfaces, MergedInterfaces, NipartError, NipartstateInterface,
+    Interface, Interfaces, MergedInterfaces, NipartError, NipartInterface,
 };
 
 impl MergedInterfaces {

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ErrorKind, Interface, InterfaceType, Interfaces, JsonDisplayHideSecrets,
-    MergedInterface, NipartError, NipartstateInterface,
+    MergedInterface, NipartError, NipartInterface,
 };
 
 // The max loop count for Interfaces.set_ifaces_up_priority()

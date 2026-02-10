@@ -23,7 +23,7 @@ pub(crate) mod serializer;
 pub use self::{
     iface::Interface,
     iface_state::InterfaceState,
-    iface_trait::NipartstateInterface,
+    iface_trait::NipartInterface,
     iface_type::InterfaceType,
     ifaces::{
         BaseInterface, BondAdSelect, BondAllPortActive, BondArpAllTargets,
