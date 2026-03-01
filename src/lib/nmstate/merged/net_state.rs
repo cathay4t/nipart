@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     JsonDisplayHideSecrets, MergedInterfaces, MergedRoutes, NetworkState,
-    NipartError, NipartstateApplyOption,
+    NipartError, NmstateApplyOption,
 };
 
 #[derive(
@@ -22,14 +22,14 @@ pub struct MergedNetworkState {
     pub description: Option<String>,
     pub ifaces: MergedInterfaces,
     pub routes: MergedRoutes,
-    pub option: NipartstateApplyOption,
+    pub option: NmstateApplyOption,
 }
 
 impl MergedNetworkState {
     pub fn new(
         desired: NetworkState,
         current: NetworkState,
-        option: NipartstateApplyOption,
+        option: NmstateApplyOption,
     ) -> Result<Self, NipartError> {
         let merged_ifaces =
             MergedInterfaces::new(desired.ifaces, current.ifaces)?;

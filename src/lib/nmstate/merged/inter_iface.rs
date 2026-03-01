@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ErrorKind, Interface, InterfaceType, Interfaces, JsonDisplayHideSecrets,
-    MergedInterface, NipartError, NipartInterface,
+    MergedInterface, NipartError, NmstateInterface,
 };
 
 // The max loop count for Interfaces.set_ifaces_up_priority()
@@ -380,6 +380,29 @@ impl MergedInterfaces {
         }
 
         ret
+    }
+
+    /// Change `MergedInterface.for_apply` to know if certain interface holds
+    /// `up-trigger` but not equal to `InterfaceTrigger::Always`.
+    pub fn remove_conditional_activation(&mut self) {
+        for merged_iface in self.iter_mut() {
+            if merged_iface
+                .for_apply
+                .as_ref()
+                .map(|i| i.base_iface().is_up_always())
+                == Some(false)
+            {
+                log::trace!(
+                    "Interface {}/{} is ignored for instant apply because it \
+                     is conditional activation",
+                    merged_iface.merged.name(),
+                    merged_iface.merged.iface_type()
+                );
+                merged_iface.for_apply = None;
+                merged_iface.desired = None;
+                merged_iface.for_verify = None;
+            }
+        }
     }
 }
 

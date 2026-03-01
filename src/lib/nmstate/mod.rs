@@ -12,6 +12,7 @@ mod net_state;
 mod revert;
 mod route;
 mod state_options;
+mod trigger;
 mod value;
 mod version;
 
@@ -23,7 +24,7 @@ pub(crate) mod serializer;
 pub use self::{
     iface::Interface,
     iface_state::InterfaceState,
-    iface_trait::NipartInterface,
+    iface_trait::NmstateInterface,
     iface_type::InterfaceType,
     ifaces::{
         BaseInterface, BondAdSelect, BondAllPortActive, BondArpAllTargets,
@@ -48,9 +49,8 @@ pub use self::{
     },
     net_state::NetworkState,
     route::{RouteEntry, RouteState, RouteType, Routes},
-    state_options::{
-        NipartstateApplyOption, NipartstateQueryOption, NipartstateStateKind,
-    },
+    state_options::{NmstateApplyOption, NmstateQueryOption, NmstateStateKind},
+    trigger::InterfaceTrigger,
     version::CUR_SCHEMA_VERSION,
 };
 

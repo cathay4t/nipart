@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{
     ErrorKind, NetworkState, NipartError, NipartIpcConnection,
     NipartIpcListener, NipartPluginClient, NipartPluginCmd, NipartPluginInfo,
-    NipartstateApplyOption, NipartstateQueryOption,
+    NmstateApplyOption, NmstateQueryOption,
 };
 
 pub trait NipartPlugin: Send + Sync + Sized + 'static {
@@ -102,7 +102,7 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
     /// Default implementation is return no support error.
     fn query_network_state(
         _plugin: &Arc<Self>,
-        _opt: NipartstateQueryOption,
+        _opt: NmstateQueryOption,
         _conn: &mut NipartIpcConnection,
     ) -> impl Future<Output = Result<NetworkState, NipartError>> + Send {
         async {
@@ -121,7 +121,7 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
     fn apply_network_state(
         _plugin: &Arc<Self>,
         _desired_state: NetworkState,
-        _opt: NipartstateApplyOption,
+        _opt: NmstateApplyOption,
         _conn: &mut NipartIpcConnection,
     ) -> impl Future<Output = Result<(), NipartError>> + Send {
         async {

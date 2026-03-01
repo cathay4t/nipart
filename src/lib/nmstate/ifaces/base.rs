@@ -9,8 +9,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ErrorKind, InterfaceIpv4, InterfaceIpv6, InterfaceState, InterfaceType,
-    JsonDisplay, NipartError,
+    ErrorKind, InterfaceIpv4, InterfaceIpv6, InterfaceState, InterfaceTrigger,
+    InterfaceType, JsonDisplay, NipartError,
 };
 
 #[derive(
@@ -71,6 +71,15 @@ pub struct BaseInterface {
     /// bond is not allowed to hold IP information).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ipv6: Option<InterfaceIpv6>,
+    /// When the daemon should apply the state and bring the interface in up
+    /// state. By default, daemon always bring interface up and ignore carrier
+    /// changes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub up_trigger: Option<InterfaceTrigger>,
+    /// When the daemon should bring the interface in down state and purge
+    /// applied config. By default never bring interface down.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub down_trigger: Option<InterfaceTrigger>,
 }
 
 impl BaseInterface {
@@ -183,6 +192,12 @@ impl BaseInterface {
         (!self.has_controller())
             || self.iface_type == InterfaceType::OvsInterface
             || self.controller_type == Some(InterfaceType::Vrf)
+    }
+
+    /// Return true if this interface holds `up-trigger: always` or
+    /// `up-trigger` undefined.
+    pub(crate) fn is_up_always(&self) -> bool {
+        matches!(self.up_trigger, None | Some(InterfaceTrigger::Always))
     }
 }
 

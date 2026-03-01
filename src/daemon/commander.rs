@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use futures_channel::mpsc::UnboundedSender;
 use nipart::{
-    InterfaceType, NetworkState, NipartError, NipartInterface, NipartNoDaemon,
-    NipartstateQueryOption,
+    InterfaceType, NetworkState, NipartError, NipartNoDaemon, NmstateInterface,
+    NmstateQueryOption,
 };
 
 use super::{
@@ -105,7 +105,7 @@ async fn get_initialized_nics(
     saved_state: &NetworkState,
 ) -> Result<Vec<String>, NipartError> {
     let cur_state =
-        NipartNoDaemon::query_network_state(NipartstateQueryOption::running())
+        NipartNoDaemon::query_network_state(NmstateQueryOption::running())
             .await?;
 
     let mut ret = Vec::new();

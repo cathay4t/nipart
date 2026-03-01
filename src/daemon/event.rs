@@ -3,189 +3,250 @@
 use std::time::SystemTime;
 
 use nipart::{
-    ErrorKind, Interface, InterfaceState, InterfaceType, MergedNetworkState,
-    NetworkState, NipartError, NipartInterface, NipartNoDaemon,
-    NipartstateApplyOption, NipartstateQueryOption, WifiPhyInterface,
+    BaseInterface, Interface, InterfaceIpv4, InterfaceIpv6, InterfaceState,
+    InterfaceTrigger, InterfaceType, Interfaces, JsonDisplay,
+    MergedNetworkState, NetworkState, NipartError, NipartNoDaemon,
+    NmstateApplyOption, NmstateInterface, NmstateQueryOption,
 };
+use serde::Serialize;
 
 use super::commander::NipartCommander;
 
-const MAX_SCAN_RETRY: usize = 5;
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonDisplay)]
 pub(crate) struct NipartLinkEvent {
     pub iface_name: String,
+    pub iface_index: u32,
     pub iface_type: InterfaceType,
-    pub event_type: NipartLinkEventType,
+    pub is_up: bool,
     pub time_stamp: SystemTime,
+    /// For WIFI interface only, SSID connected
+    pub ssid: Option<String>,
 }
 
 impl NipartLinkEvent {
     pub(crate) fn new(
         iface_name: String,
+        iface_index: u32,
         iface_type: InterfaceType,
-        event_type: NipartLinkEventType,
+        is_up: bool,
+        ssid: Option<String>,
     ) -> Self {
         Self {
             iface_name,
+            iface_index,
             iface_type,
-            event_type,
+            is_up,
             time_stamp: SystemTime::now(),
+            ssid,
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NipartLinkEventType {
-    CarrierUp,
-    CarrierDown,
-}
-
-impl NipartLinkEvent {
-    pub(crate) fn is_carrier_up(&self) -> bool {
-        self.event_type == NipartLinkEventType::CarrierUp
-    }
-
-    pub(crate) fn is_carrier_down(&self) -> bool {
-        self.event_type == NipartLinkEventType::CarrierDown
     }
 }
 
 impl NipartCommander {
     pub(crate) async fn handle_link_event(
         &mut self,
-        event: NipartLinkEvent,
+        mut event: NipartLinkEvent,
     ) -> Result<(), NipartError> {
-        let iface_name = event.iface_name.as_str();
+        log::trace!("Handle link event {event}");
         let saved_state = self.conf_manager.query_state().await?;
-        let cur_state = NipartNoDaemon::query_network_state(
-            NipartstateQueryOption::running(),
-        )
-        .await?;
+        let cur_state =
+            NipartNoDaemon::query_network_state(NmstateQueryOption::running())
+                .await?;
 
-        if let Some(cur_iface) = cur_state.ifaces.kernel_ifaces.get(iface_name)
-        {
-            match cur_iface {
-                Interface::WifiPhy(wifi_phy_iface) => {
-                    self.handle_wifi_phy_iface(
-                        &event,
-                        wifi_phy_iface,
-                        &saved_state,
-                        &cur_state,
-                    )
-                    .await?;
-                }
-                _ => {
-                    log::warn!(
-                        "handle_link_event: unsupported interface {cur_iface}"
-                    );
-                }
+        let cur_iface = cur_state
+            .ifaces
+            .get(&event.iface_name, Some(&event.iface_type));
+        if let Some(cur_iface) = cur_iface {
+            log::trace!("Current interface state: {cur_iface}");
+
+            if event.ssid.is_none()
+                && event.iface_type == InterfaceType::WifiPhy
+                && let Interface::WifiPhy(cur_wifi_iface) = cur_iface
+            {
+                event.ssid = cur_wifi_iface.ssid().map(|s| s.to_string());
             }
+        }
+
+        let mut desired_state = NetworkState::default();
+
+        // Purge IP if WIFI PHY interface is down
+        if !event.is_up && event.iface_type == InterfaceType::WifiPhy {
+            let mut desired_iface = BaseInterface::new(
+                event.iface_name.to_string(),
+                event.iface_type.clone(),
+            );
+            desired_iface.state = InterfaceState::Up;
+            desired_iface.ipv4 = Some(InterfaceIpv4::new_disabled());
+            desired_iface.ipv6 = Some(InterfaceIpv6::new_disabled());
+            desired_state.ifaces.push(desired_iface.into());
+        }
+
+        for iface in saved_state.ifaces.iter() {
+            if is_event_matches(&event, iface, &cur_state.ifaces) {
+                let mut desired_iface = iface.clone();
+                desired_iface.base_iface_mut().state = InterfaceState::Up;
+                if event.is_up {
+                    desired_iface.base_iface_mut().up_trigger = None;
+                    if event.iface_type == InterfaceType::WifiPhy
+                        && iface.iface_type() == &InterfaceType::WifiCfg
+                    {
+                        desired_iface = wifi_cfg_to_wifi_phy(
+                            event.iface_name.as_str(),
+                            iface,
+                        );
+                    }
+                } else {
+                    if !matches!(
+                        iface.base_iface().up_trigger.as_ref(),
+                        Some(InterfaceTrigger::Carrier(_))
+                    ) && iface.iface_type() != &InterfaceType::WifiCfg
+                    {
+                        desired_iface.base_iface_mut().state =
+                            if iface.is_virtual() {
+                                InterfaceState::Absent
+                            } else {
+                                InterfaceState::Down
+                            };
+                    }
+                    desired_iface.base_iface_mut().down_trigger = None;
+                    desired_iface.base_iface_mut().ipv4 =
+                        Some(InterfaceIpv4::new_disabled());
+                    desired_iface.base_iface_mut().ipv6 =
+                        Some(InterfaceIpv6::new_disabled());
+
+                    // WifiCfg bind to any SSID should changed to event
+                    // interface only, so other interface is not impacted
+                    if let Interface::WifiCfg(saved_iface) = iface
+                        && saved_iface.parent().is_none()
+                        && let Interface::WifiCfg(desired_iface) =
+                            &mut desired_iface
+                    {
+                        desired_iface.wifi = saved_iface.wifi.clone();
+                        if let Some(wifi_cfg) = desired_iface.wifi.as_mut() {
+                            wifi_cfg.base_iface =
+                                Some(event.iface_name.to_string());
+                        }
+                    }
+                }
+                desired_state.ifaces.push(desired_iface);
+            }
+        }
+        if !desired_state.is_empty() {
+            log::trace!("Applying desired state due to event {event}");
+            log::trace!("Applying desired state {desired_state}");
+            let merged_state = MergedNetworkState::new(
+                desired_state,
+                cur_state,
+                NmstateApplyOption::new().no_verify(),
+            )?;
+            self.apply_merged_state(None, &merged_state).await?;
+        } else {
+            log::trace!("No change required for event {event}");
         }
 
         Ok(())
     }
+}
 
-    async fn handle_wifi_phy_iface(
-        &mut self,
-        event: &NipartLinkEvent,
-        cur_iface: &WifiPhyInterface,
-        saved_state: &NetworkState,
-        cur_state: &NetworkState,
-    ) -> Result<(), NipartError> {
-        if let Some(ssid) = cur_iface.wifi.as_ref().map(|w| w.ssid.as_str()) {
-            if let Some(wifi_cfg_iface) =
-                saved_state.ifaces.user_ifaces.values().find_map(|i| {
-                    if let Interface::WifiCfg(wifi_cfg_iface) = i {
-                        if wifi_cfg_iface.wifi.as_ref().map(|w| w.ssid.as_str())
-                            == Some(ssid)
-                        {
-                            Some(wifi_cfg_iface)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                })
-            {
-                let mut new_iface = cur_iface.clone();
-                new_iface.base_iface_mut().state = InterfaceState::Up;
-                if event.is_carrier_up() {
-                    new_iface.base.ipv4 = wifi_cfg_iface.base.ipv4.clone();
-                    new_iface.base.ipv6 = wifi_cfg_iface.base.ipv6.clone();
-                } else if event.is_carrier_down() {
-                    new_iface.base.ipv4 = Some(Default::default());
-                    new_iface.base.ipv6 = Some(Default::default());
-                } else {
-                    return Err(NipartError::new(
-                        ErrorKind::Bug,
-                        format!("Unsupported link event {event:?}"),
-                    ));
-                }
-                new_iface.wifi = None;
-                let mut new_state = NetworkState::default();
-                new_state
-                    .ifaces
-                    .push(Interface::WifiPhy(Box::new(new_iface)));
-                let merged_state = MergedNetworkState::new(
-                    new_state,
-                    cur_state.clone(),
-                    NipartstateApplyOption::new().no_verify().memory_only(),
-                )?;
-
-                NipartNoDaemon::apply_merged_state(&merged_state).await?;
-                self.dhcpv4_manager
-                    .apply_dhcp_config(None, &merged_state)
-                    .await?;
+/// Event is considered match for specified interface when any of these
+/// conditions met:
+/// * WiFi NIC found(down) with `Interface::WifiCfg` with bind-to-any SSID.
+/// * WiFi event for `Interface::WifiPhy`.
+/// * Up event with `up_trigger` matches.
+/// * Down event with `down_trigger` matches.
+fn is_event_matches(
+    event: &NipartLinkEvent,
+    saved_iface: &Interface,
+    cur_ifaces: &Interfaces,
+) -> bool {
+    if let Interface::WifiCfg(wifi_iface) = saved_iface
+        && event.iface_type == InterfaceType::WifiPhy
+    {
+        if event.is_up {
+            // WIFI connected, we should apply settings on wifi-cfg iface
+            // to wifi-phy iface
+            if event.ssid.as_deref() == wifi_iface.ssid() {
+                return true;
             }
         } else {
-            // New wifi NIC found, we should wait wpa_supplicant to finish its
-            // work on it by waiting its initial scan to finish in this
-            // interface.
-            for _ in 0..MAX_SCAN_RETRY {
-                if NipartNoDaemon::wifi_scan(Some(event.iface_name.as_str()))
-                    .await
-                    .is_ok()
-                {
-                    break;
+            // New WIFI NIC found, we should update WIFI network on it so
+            // it could up again when WIFI SSID shows up.
+            if let Some(parent) = wifi_iface.parent() {
+                if parent == event.iface_name.as_str() {
+                    return true;
                 }
-            }
-
-            let mut new_state = NetworkState::default();
-            for wifi_cfg_iface in
-                saved_state.ifaces.user_ifaces.values().filter_map(|i| {
-                    if let Interface::WifiCfg(wifi_cfg_iface) = i {
-                        Some(wifi_cfg_iface)
-                    } else {
-                        None
-                    }
-                })
-            {
-                if wifi_cfg_iface.parent().is_none()
-                    || wifi_cfg_iface.parent() == Some(&event.iface_name)
-                {
-                    let mut wifi_cfg_iface = *wifi_cfg_iface.clone();
-                    if let Some(wifi_cfg) = wifi_cfg_iface.wifi.as_mut() {
-                        wifi_cfg.base_iface =
-                            Some(event.iface_name.to_string());
-                    }
-
-                    new_state
-                        .ifaces
-                        .push(Interface::WifiCfg(Box::new(wifi_cfg_iface)));
-                }
-            }
-            if !new_state.is_empty() {
-                let merged_state = MergedNetworkState::new(
-                    new_state,
-                    cur_state.clone(),
-                    NipartstateApplyOption::new().no_verify().memory_only(),
-                )?;
-
-                NipartNoDaemon::apply_merged_state(&merged_state).await?;
+            } else {
+                return true;
             }
         }
-        Ok(())
     }
+
+    if saved_iface.iface_type() == &InterfaceType::WifiPhy
+        && event.iface_type == InterfaceType::WifiPhy
+        && event.iface_name.as_str() == saved_iface.name()
+    {
+        return true;
+    }
+
+    if event.is_up
+        && let Some(up_trigger) = saved_iface.base_iface().up_trigger.as_ref()
+    {
+        is_trigger_matches(event, up_trigger, saved_iface, cur_ifaces)
+    } else if !event.is_up
+        && let Some(down_trigger) =
+            saved_iface.base_iface().down_trigger.as_ref()
+    {
+        is_trigger_matches(event, down_trigger, saved_iface, cur_ifaces)
+    } else {
+        false
+    }
+}
+
+fn is_trigger_matches(
+    event: &NipartLinkEvent,
+    trigger: &InterfaceTrigger,
+    saved_iface: &Interface,
+    cur_ifaces: &Interfaces,
+) -> bool {
+    match trigger {
+        InterfaceTrigger::Never | InterfaceTrigger::Always => false,
+        InterfaceTrigger::Carrier(_) => {
+            saved_iface.name() == event.iface_name.as_str()
+                && saved_iface.iface_type() == &event.iface_type
+        }
+        InterfaceTrigger::WifiUp(ssid) => {
+            event.is_up && event.ssid.as_deref() == Some(ssid.as_str())
+        }
+        InterfaceTrigger::WifiDown(ssid) => cur_ifaces
+            .iter()
+            .filter_map(|i| {
+                if let Interface::WifiPhy(i) = i {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .all(|i| i.ssid() != Some(ssid)),
+        InterfaceTrigger::WifiUpNot(ssid) => {
+            event.is_up && event.ssid.as_deref() != Some(ssid.as_str())
+        }
+        _ => {
+            log::error!(
+                "BUG: is_trigger_matches(): unexpected InterfaceTrigger: \
+                 {trigger} for event {event}"
+            );
+            false
+        }
+    }
+}
+
+fn wifi_cfg_to_wifi_phy(
+    iface_name: &str,
+    saved_iface: &Interface,
+) -> Interface {
+    let mut desired = saved_iface.base_iface().clone();
+    desired.name = iface_name.to_string();
+    desired.iface_type = InterfaceType::WifiPhy;
+
+    desired.into()
 }

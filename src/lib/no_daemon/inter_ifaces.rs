@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     ErrorKind, Interface, InterfaceType, MergedInterface, MergedInterfaces,
-    NipartError, NipartInterface,
+    NipartError, NmstateInterface,
 };
 
 pub(crate) async fn apply_ifaces(
@@ -131,23 +131,18 @@ async fn apply_ifaces_link_changes(
         };
         match apply_iface {
             Interface::Bond(bond_iface) => {
-                np_ifaces
-                    .extend(bond_iface.apply_bond_port_configs().into_iter());
+                np_ifaces.extend(bond_iface.apply_bond_port_configs());
             }
             Interface::LinuxBridge(br_iface) => {
-                np_ifaces.extend(
-                    br_iface
-                        .apply_linux_bridge_port_configs(
-                            if let Some(Interface::LinuxBridge(cur_br_iface)) =
-                                merged_iface.current.as_ref()
-                            {
-                                Some(cur_br_iface)
-                            } else {
-                                None
-                            },
-                        )
-                        .into_iter(),
-                );
+                np_ifaces.extend(br_iface.apply_linux_bridge_port_configs(
+                    if let Some(Interface::LinuxBridge(cur_br_iface)) =
+                        merged_iface.current.as_ref()
+                    {
+                        Some(cur_br_iface)
+                    } else {
+                        None
+                    },
+                ));
             }
             Interface::OvsBridge(_) => {
                 // Place holder

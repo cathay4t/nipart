@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet, hash_map::Entry};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ErrorKind, JsonDisplay, MergedInterfaces, NipartError, NipartInterface,
+    ErrorKind, JsonDisplay, MergedInterfaces, NipartError, NmstateInterface,
     RouteEntry, RouteState, Routes,
 };
 
