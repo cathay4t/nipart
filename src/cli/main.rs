@@ -1,0 +1,122 @@
+// SPDX-License-Identifier: Apache-2.0
+
+mod apply;
+mod diff;
+mod edit;
+mod error;
+mod merge;
+mod show;
+mod state;
+mod wait_online;
+mod wifi;
+
+use nipart::{ErrorKind, NipartClient};
+
+pub(crate) use self::error::CliError;
+use self::{
+    apply::CommandApply, diff::CommandDiff, edit::CommandEdit,
+    merge::CommandMerge, show::CommandShow, wait_online::CommandWaitOnline,
+    wifi::CommandWifi,
+};
+
+const RC_FAIL: i32 = 1;
+// The error code used by /usr/bin/timeout
+const RC_TIMEOUT: i32 = 124;
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), CliError> {
+    let mut cli_cmd = clap::Command::new("npt")
+        .about("nipart CLI")
+        .arg_required_else_help(true)
+        .subcommand_required(true)
+        .arg(
+            clap::Arg::new("quiet")
+                .short('q')
+                .action(clap::ArgAction::SetTrue)
+                .help("Disable logging")
+                .global(true),
+        )
+        .arg(
+            clap::Arg::new("verbose")
+                .short('v')
+                .action(clap::ArgAction::Count)
+                .help("Increase verbose level")
+                .global(true),
+        )
+        .subcommand(clap::Command::new("ping").about("Check daemon connection"))
+        .subcommand(CommandShow::new_cmd())
+        .subcommand(CommandEdit::new_cmd())
+        .subcommand(CommandApply::new_cmd())
+        .subcommand(CommandWifi::new_cmd())
+        .subcommand(CommandDiff::new_cmd())
+        .subcommand(CommandWaitOnline::new_cmd())
+        .subcommand(CommandMerge::new_cmd());
+
+    let matches = cli_cmd.get_matches_mut();
+
+    let (log_groups, log_level) = match matches.get_count("verbose") {
+        0 => (vec!["nipart"], log::LevelFilter::Info),
+        1 => (vec!["nipart"], log::LevelFilter::Debug),
+        2 => (vec!["nipart"], log::LevelFilter::Trace),
+        3 => (vec!["nipart", "nispor"], log::LevelFilter::Trace),
+        _ => (vec![""], log::LevelFilter::Trace),
+    };
+
+    if !matches.get_flag("quiet") {
+        let mut log_builder = env_logger::Builder::new();
+        if log_groups.is_empty() {
+            log_builder.filter(None, log_level);
+        } else {
+            for log_group in log_groups {
+                log_builder.filter(Some(log_group), log_level);
+            }
+        }
+        log_builder.init();
+    }
+
+    log::info!("npt version: {}", clap::crate_version!());
+
+    if let Err(e) = call_subcommand(&matches).await {
+        eprintln!("{e}");
+        if e.nipart_error.as_ref().map(|e| e.kind) == Some(ErrorKind::Timeout) {
+            std::process::exit(RC_TIMEOUT);
+        } else {
+            std::process::exit(RC_FAIL);
+        }
+    }
+
+    Ok(())
+}
+
+async fn call_subcommand(matches: &clap::ArgMatches) -> Result<(), CliError> {
+    if matches.subcommand_matches("ping").is_some() {
+        let mut cli = NipartClient::new().await?;
+        println!("{}", cli.ping().await?);
+        Ok(())
+    } else if let Some(matches) = matches.subcommand_matches(CommandShow::CMD) {
+        CommandShow::handle(matches).await?;
+        Ok(())
+    } else if matches.subcommand_matches(CommandEdit::CMD).is_some() {
+        CommandEdit::handle().await?;
+        Ok(())
+    } else if let Some(matches) = matches.subcommand_matches(CommandApply::CMD)
+    {
+        CommandApply::handle(matches).await?;
+        Ok(())
+    } else if let Some(matches) = matches.subcommand_matches(CommandMerge::CMD)
+    {
+        CommandMerge::handle(matches).await?;
+        Ok(())
+    } else if let Some(matches) = matches.subcommand_matches(CommandWifi::CMD) {
+        CommandWifi::handle(matches).await?;
+        Ok(())
+    } else if let Some(matches) = matches.subcommand_matches(CommandDiff::CMD) {
+        CommandDiff::handle(matches).await?;
+        Ok(())
+    } else if matches.subcommand_matches(CommandWaitOnline::CMD).is_some() {
+        CommandWaitOnline::handle().await?;
+        Ok(())
+    } else {
+        Err(CliError::from("Unknown command"))
+    }
+}

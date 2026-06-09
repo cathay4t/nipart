@@ -1,0 +1,27 @@
+[package]
+name = "nipart-plugin-wifi"
+version.workspace = true
+authors.workspace = true
+description = "WIFI plugin of nipart"
+documentation.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+env_logger = { workspace = true }
+futures-util = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+nispor = { workspace = true }
+rtnetlink = { workspace = true }
+wl-nl80211 = { workspace = true }
+zbus = { workspace = true }
+zvariant = { workspace = true }
+nipart = { path = "../lib" }
+
+[[bin]]
+name = "nipart-plugin-wifi"
+path = "main.rs"

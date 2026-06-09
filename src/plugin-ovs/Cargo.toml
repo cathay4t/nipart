@@ -1,0 +1,22 @@
+[package]
+name = "nipart-plugin-ovs"
+version.workspace = true
+authors.workspace = true
+description = "Open vSwitch plugin of nipart"
+documentation.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+env_logger = { workspace = true }
+futures-util = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+nipart = { path = "../lib" }
+
+[[bin]]
+name = "nipart-plugin-ovs"
+path = "main.rs"
