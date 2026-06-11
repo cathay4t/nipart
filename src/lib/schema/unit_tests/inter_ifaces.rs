@@ -164,3 +164,33 @@ fn test_resolve_mac_identifier_absent_skipped() {
 }
 
 /// Test resolving unknown interface type to the matched current type.
+#[test]
+fn test_resolve_mac_identifier_unknown_type() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: wan0
+          type: unknown
+          identifier: mac-address
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    desired.resolve_mac_identifier(&current).unwrap();
+
+    let resolved = desired.kernel_ifaces.get("eth0").unwrap();
+    // Should have resolved to Ethernet type
+    assert_eq!(resolved.iface_type(), &InterfaceType::Ethernet);
+    assert_eq!(resolved.base_iface().kernel_iface_name.as_str(), "eth0");
+}
+
+/// Test error when mac_address is not provided.
