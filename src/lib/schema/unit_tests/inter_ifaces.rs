@@ -69,3 +69,29 @@ fn test_resolve_mac_identifier_perm_mac() {
 }
 
 /// Test error when MAC does not match any current interface.
+#[test]
+fn test_resolve_mac_identifier_no_match() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: wan0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:00:00:00:00:00
+        "#,
+    )
+    .unwrap();
+
+    let result = desired.resolve_mac_identifier(&current);
+    assert!(result.is_err());
+}
+
+/// Test re-resolution when profile_name already set and NIC name changed.
