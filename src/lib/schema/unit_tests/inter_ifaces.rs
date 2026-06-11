@@ -131,3 +131,36 @@ fn test_resolve_mac_identifier_re_resolve() {
 }
 
 /// Test that absent interfaces are skipped.
+#[test]
+fn test_resolve_mac_identifier_absent_skipped() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: wan0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:23:45:67:89:1a
+          state: absent
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    desired.resolve_mac_identifier(&current).unwrap();
+
+    // Absent interface should NOT be resolved, but kernel_iface_name
+    // should be set from name by push()
+    assert!(desired.kernel_ifaces.contains_key("wan0"));
+    assert!(!desired.kernel_ifaces.contains_key("eth0"));
+    let resolved = desired.kernel_ifaces.get("wan0").unwrap();
+    assert_eq!(resolved.base_iface().kernel_iface_name, "wan0");
+}
+
+/// Test resolving unknown interface type to the matched current type.
