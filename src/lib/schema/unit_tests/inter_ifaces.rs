@@ -39,3 +39,33 @@ fn test_resolve_mac_identifier_basic_with_mac() {
 }
 
 /// Test MAC address matching with `permanent-mac-address`.
+#[test]
+fn test_resolve_mac_identifier_perm_mac() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: wan0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:00:00:00:00:00
+          permanent-mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    desired.resolve_mac_identifier(&current).unwrap();
+
+    let resolved = desired.kernel_ifaces.get("eth0").unwrap();
+    assert_eq!(resolved.base_iface().kernel_iface_name.as_str(), "eth0");
+    assert_eq!(resolved.base_iface().profile_name.as_deref(), Some("wan0"));
+}
+
+/// Test error when MAC does not match any current interface.
