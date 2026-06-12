@@ -219,3 +219,36 @@ fn test_resolve_mac_identifier_missing_mac() {
 }
 
 /// Test that already-resolved interface (name matches kernel name) is skipped.
+#[test]
+fn test_resolve_mac_identifier_already_resolved() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:23:45:67:89:1a
+          profile-name: wan0
+          kernel-iface-name: eth0
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    desired.resolve_mac_identifier(&current).unwrap();
+
+    // Should still have eth0 (no changes)
+    assert!(desired.kernel_ifaces.contains_key("eth0"));
+    let resolved = desired.kernel_ifaces.get("eth0").unwrap();
+    assert_eq!(resolved.base_iface().kernel_iface_name.as_str(), "eth0");
+    assert_eq!(resolved.base_iface().profile_name.as_deref(), Some("wan0"));
+}
+
+/// Test case-insensitive MAC address matching.
