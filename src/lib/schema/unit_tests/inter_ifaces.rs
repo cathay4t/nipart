@@ -281,3 +281,42 @@ fn test_resolve_mac_identifier_case_insensitive() {
 }
 
 /// Test resolving multiple interfaces with MAC identifiers.
+#[test]
+fn test_resolve_mac_identifier_multiple_ifaces() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: wan0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:11:22:33:44:55
+        - name: wan1
+          type: ethernet
+          identifier: mac-address
+          mac-address: aa:bb:cc:dd:ee:ff
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:11:22:33:44:55
+        - name: eth1
+          type: ethernet
+          mac-address: aa:bb:cc:dd:ee:ff
+        "#,
+    )
+    .unwrap();
+
+    desired.resolve_mac_identifier(&current).unwrap();
+
+    let resolved1 = desired.kernel_ifaces.get("eth0").unwrap();
+    assert_eq!(resolved1.base_iface().kernel_iface_name.as_str(), "eth0");
+    assert_eq!(resolved1.base_iface().profile_name.as_deref(), Some("wan0"));
+    let resolved2 = desired.kernel_ifaces.get("eth1").unwrap();
+    assert_eq!(resolved2.base_iface().kernel_iface_name.as_str(), "eth1");
+    assert_eq!(resolved2.base_iface().profile_name.as_deref(), Some("wan1"));
+}
+
+/// Test that permanent_mac_address is preferred over mac_address when matching.
