@@ -252,3 +252,32 @@ fn test_resolve_mac_identifier_already_resolved() {
 }
 
 /// Test case-insensitive MAC address matching.
+#[test]
+fn test_resolve_mac_identifier_case_insensitive() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: wan0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:23:45:67:89:1A
+        "#,
+    )
+    .unwrap();
+
+    desired.resolve_mac_identifier(&current).unwrap();
+
+    let resolved = desired.kernel_ifaces.get("eth0").unwrap();
+    assert_eq!(resolved.base_iface().kernel_iface_name.as_str(), "eth0");
+    assert_eq!(resolved.base_iface().profile_name.as_deref(), Some("wan0"));
+}
+
+/// Test resolving multiple interfaces with MAC identifiers.
