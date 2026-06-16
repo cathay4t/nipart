@@ -357,3 +357,46 @@ fn test_resolve_mac_identifier_perm_mac_preferred() {
 }
 
 /// Test when multiple NICs hold the same MAC address (first match wins).
+#[test]
+fn test_resolve_mac_identifier_duplicate_mac_across_nics() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: wan0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:11:22:33:44:55
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:11:22:33:44:55
+        - name: eth1
+          type: ethernet
+          mac-address: 00:11:22:33:44:55
+        "#,
+    )
+    .unwrap();
+
+    desired.resolve_mac_identifier(&current).unwrap();
+
+    // Exactly one interface should match (first found in HashMap iteration)
+    let matched = if desired.kernel_ifaces.contains_key("eth0") {
+        "eth0"
+    } else if desired.kernel_ifaces.contains_key("eth1") {
+        "eth1"
+    } else {
+        panic!("No interface matched");
+    };
+    assert!(["eth0", "eth1"].contains(&matched));
+    assert!(!desired.kernel_ifaces.contains_key("wan0"));
+    let resolved = desired.kernel_ifaces.get(matched).unwrap();
+    assert_eq!(resolved.base_iface().name, matched);
+    assert_eq!(resolved.base_iface().kernel_iface_name.as_str(), matched);
+    assert_eq!(resolved.base_iface().profile_name.as_deref(), Some("wan0"));
+}
+
+/// Test re-resolution when NIC renamed (eth0 -> eth1).
