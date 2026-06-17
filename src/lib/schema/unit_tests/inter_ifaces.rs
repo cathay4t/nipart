@@ -534,3 +534,16 @@ fn test_kernel_iface_name_method() {
 
 /// Test that sanitize does NOT override kernel_iface_name for MacAddress
 /// identifier.
+#[test]
+fn test_sanitize_does_not_override_mac_kernel_iface_name() {
+    let mut base =
+        BaseInterface::new("wan0".to_string(), InterfaceType::Ethernet);
+    base.identifier = Some(InterfaceIdentifier::MacAddress);
+    base.kernel_iface_name = "eth0".to_string();
+    base.sanitize(None).unwrap();
+    // kernel_iface_name should be preserved (not overwritten by sanitize)
+    assert_eq!(base.kernel_iface_name.as_str(), "eth0");
+}
+
+/// Test that resolve_name_identifier copies name to kernel_iface_name when
+/// identifier not defined.
