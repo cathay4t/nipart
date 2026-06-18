@@ -547,3 +547,16 @@ fn test_sanitize_does_not_override_mac_kernel_iface_name() {
 
 /// Test that resolve_name_identifier copies name to kernel_iface_name when
 /// identifier not defined.
+#[test]
+fn test_resolve_name_identifier_copies_name() {
+    let mut ifaces: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+        "#,
+    )
+    .unwrap();
+    ifaces.resolve_name_identifier();
+    let resolved = ifaces.kernel_ifaces.get("eth0").unwrap();
+    assert_eq!(resolved.kernel_iface_name(), "eth0");
+}
