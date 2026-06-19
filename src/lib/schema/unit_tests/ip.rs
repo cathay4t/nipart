@@ -44,3 +44,8 @@ fn test_sanitize_ip_network_ipv4_gateway() {
     assert_eq!(sanitize_ip_network("0.0.0.1/0").unwrap(), "0.0.0.0/0");
 }
 
+#[test]
+fn test_sanitize_ip_network_ipv6_gateway() {
+    assert_eq!(sanitize_ip_network("::1/0").unwrap(), "::/0");
+}
+
