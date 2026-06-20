@@ -62,3 +62,8 @@ fn test_sanitize_ip_network_ipv6_host_only() {
     );
 }
 
+#[test]
+fn test_sanitize_ip_network_ipv4_host_only_explicit() {
+    assert_eq!(sanitize_ip_network("192.0.2.1/32").unwrap(), "192.0.2.1/32");
+}
+
