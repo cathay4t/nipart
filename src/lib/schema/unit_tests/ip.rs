@@ -49,3 +49,8 @@ fn test_sanitize_ip_network_ipv6_gateway() {
     assert_eq!(sanitize_ip_network("::1/0").unwrap(), "::/0");
 }
 
+#[test]
+fn test_sanitize_ip_network_ipv4_host_only() {
+    assert_eq!(sanitize_ip_network("192.0.2.1").unwrap(), "192.0.2.1/32");
+}
+
