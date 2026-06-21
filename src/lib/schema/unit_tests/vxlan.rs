@@ -36,3 +36,13 @@ fn test_sanitize_vxlan_id_too_large() {
     }
 }
 
+#[test]
+fn test_sanitize_vxlan_id_max_valid() {
+    let mut iface = vxlan_iface_with_config(VxlanConfig {
+        id: Some(16777215),
+        base_iface: Some("eth0".to_string()),
+        ..Default::default()
+    });
+    assert!(iface.sanitize(None).is_ok());
+}
+
