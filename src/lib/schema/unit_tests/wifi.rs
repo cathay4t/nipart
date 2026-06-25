@@ -142,3 +142,24 @@ fn test_wifi_phy_password_in_merge() {
     assert_eq!(wifi_iface.password.as_deref(), Some("12345678"));
 }
 
+#[test]
+fn test_wifi_phy_password_in_gen_diff() {
+    let safe_state = gen_wifi_phy_state_with_hidden_password();
+    let plain_state = gen_wifi_phy_state_with_password();
+
+    let diff_state = plain_state.gen_diff(&safe_state).unwrap();
+
+    let diff_wifi = diff_state
+        .ifaces
+        .get("wlan0", Some(&InterfaceType::WifiPhy))
+        .and_then(|i| {
+            if let Interface::WifiPhy(w) = i {
+                w.wifi.as_ref()
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(diff_wifi.password.as_deref(), Some("12345678"));
+}
+
