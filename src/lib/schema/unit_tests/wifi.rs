@@ -163,3 +163,38 @@ fn test_wifi_phy_password_in_gen_diff() {
     assert_eq!(diff_wifi.password.as_deref(), Some("12345678"));
 }
 
+#[test]
+fn test_wifi_cfg_password_in_hide_secrets() {
+    let mut state = gen_wifi_cfg_state_with_password();
+    let secrets = state.hide_secrets();
+
+    let wifi_iface = state
+        .ifaces
+        .get("Test-WIFI", Some(&InterfaceType::WifiCfg))
+        .and_then(|i| {
+            if let Interface::WifiCfg(w) = i {
+                w.wifi.as_ref()
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        wifi_iface.password.as_deref(),
+        Some(NetworkState::HIDE_SECRET_STR)
+    );
+
+    let secrets_wifi = secrets
+        .ifaces
+        .get("Test-WIFI", Some(&InterfaceType::WifiCfg))
+        .and_then(|i| {
+            if let Interface::WifiCfg(w) = i {
+                w.wifi.as_ref()
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(secrets_wifi.password.as_deref(), Some("12345678"));
+}
+
