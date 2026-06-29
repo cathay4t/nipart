@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+
+import pathlib
+import time
+
+import pytest
+
+import nipart
+from nipart import NipartClient, NipartStateKind, NipartQueryOption
+
+from .testlib.cmdlib import exec_cmd
+from .testlib.statelib import load_yaml, state_match
+
+project_dir = pathlib.Path(__file__).parent.parent.resolve()
+OVS_PLUGIN_BIN = f"{project_dir}/target/debug/nipart-plugin-ovs"
+OVS_DB_SOCK = "/run/openvswitch/db.sock"
+
+TEST_OVS_BR = "br0"
+RETRY_TIMEOUT = 30
+
+
+def _get_ifaces_by_name(name):
+    client = NipartClient()
+    state = client.query_network_state(
+        NipartQueryOption(kind=NipartStateKind.RUNNING)
+    )
+    return [i for i in state["interfaces"] if i["name"] == name]
+
+
+def _wait_for_ovs_bridge(br_name, timeout):
+    for _ in range(timeout):
+        ifaces = _get_ifaces_by_name(br_name)
+        types = {i.get("type") for i in ifaces}
+        if "ovs-bridge" in types and "ovs-interface" in types:
+            return True
+        time.sleep(1)
+    return False
+
+
+def _wait_for_ovs_bridge_gone(br_name, timeout):
+    for _ in range(timeout):
+        ifaces = _get_ifaces_by_name(br_name)
+        if not ifaces:
+            return True
+        time.sleep(1)
+    return False
+
+
+@pytest.fixture
+def ovs_bridge():
+    exec_cmd(["ovs-vsctl", "add-br", TEST_OVS_BR], check=False)
+    yield
+    exec_cmd(["ovs-vsctl", "del-br", TEST_OVS_BR], check=False)
+
+
+def test_ovs_bridge_query(ovs_bridge):
+    assert _wait_for_ovs_bridge(
+        TEST_OVS_BR, RETRY_TIMEOUT
+    ), f"Timed out waiting for {TEST_OVS_BR} to appear in nipart query"
+
+    br_ifaces = _get_ifaces_by_name(TEST_OVS_BR)
+    assert len(br_ifaces) == 2, (
+        f"Expected two entries for {TEST_OVS_BR} "
+        f"(ovs-bridge + ovs-interface), got {len(br_ifaces)}"
+    )
+
+    br_map = {}
+    for i in br_ifaces:
+        br_map[i["type"]] = i
+
+    # Verify ovs-bridge entry
+    assert (
+        "ovs-bridge" in br_map
+    ), f"Missing ovs-bridge entry for {TEST_OVS_BR}"
+    br_entry = br_map["ovs-bridge"]
+    assert state_match(
+        {"name": TEST_OVS_BR, "type": "ovs-bridge", "state": "up"},
+        br_entry,
+    ), f"ovs-bridge entry mismatch: {br_entry}"
+    # Ports list should include br0 itself as an internal port
+    assert (
+        br_entry.get("bridge", {}).get("ports") is not None
+    ), f"ovs-bridge {TEST_OVS_BR} missing ports in bridge config"
+    assert any(
+        p.get("name") == TEST_OVS_BR for p in br_entry["bridge"]["ports"]
+    ), f"ovs-bridge {TEST_OVS_BR} ports list missing {TEST_OVS_BR}"
+
+    # Verify ovs-interface entry
+    assert (
+        "ovs-interface" in br_map
+    ), f"Missing ovs-interface entry for {TEST_OVS_BR}"
+    iface_entry = br_map["ovs-interface"]
+    assert state_match(
+        {
+            "name": TEST_OVS_BR,
+            "type": "ovs-interface",
+            "controller": TEST_OVS_BR,
+            "controller-type": "ovs-bridge",
+        },
+        iface_entry,
+    ), f"ovs-interface entry mismatch: {iface_entry}"
+
+
