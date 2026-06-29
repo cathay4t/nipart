@@ -68,3 +68,50 @@ def clean_up_loopback():
         "query_saved",
     ],
 )
+def test_add_ip_to_loopback(clean_up_loopback, query_kind):
+    nipart.apply(load_yaml("""---
+                version: 1
+                interfaces:
+                - name: lo
+                  type: loopback
+                  ipv4:
+                    enabled: true
+                    address:
+                    - ip: 127.0.0.2
+                      prefix-length: 32
+                  ipv6:
+                    enabled: true
+                    address:
+                    - ip: ::2
+                      prefix-length: 128
+                """))
+
+    iface_state = show_only("lo", kind=query_kind)
+    if query_kind == NipartStateKind.SAVED:
+        assert state_match(
+            [
+                {"ip": "127.0.0.2", "prefix-length": 32},
+            ],
+            iface_state["ipv4"]["address"],
+        )
+        assert state_match(
+            [
+                {"ip": "::2", "prefix-length": 128},
+            ],
+            iface_state["ipv6"]["address"],
+        )
+    else:
+        assert state_match(
+            [
+                {"ip": "127.0.0.2", "prefix-length": 32},
+                {"ip": "127.0.0.1", "prefix-length": 8},
+            ],
+            iface_state["ipv4"]["address"],
+        )
+        assert state_match(
+            [
+                {"ip": "::2", "prefix-length": 128},
+                {"ip": "::1", "prefix-length": 128},
+            ],
+            iface_state["ipv6"]["address"],
+        )
