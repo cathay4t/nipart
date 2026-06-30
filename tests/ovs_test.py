@@ -156,3 +156,22 @@ def _count_plugin_processes():
     return 0
 
 
+def test_no_orphan_plugins_after_daemon_stop(restart_daemon):
+    assert _count_plugin_processes() > 0, (
+        "Expected plugin processes to be running"
+    )
+    rc, out, _ = exec_cmd(
+        ["pgrep", "-x", "nipartd"], check=False
+    )
+    assert rc == 0, "Cannot find daemon PID via pgrep -x nipartd"
+    daemon_pid = out.strip()
+    exec_cmd(["kill", "-TERM", daemon_pid], check=False)
+    for _ in range(20):
+        if _count_plugin_processes() == 0:
+            break
+        time.sleep(0.5)
+    assert _count_plugin_processes() == 0, (
+        "Plugin processes were not cleaned up after daemon shutdown"
+    )
+
+
