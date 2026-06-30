@@ -175,3 +175,15 @@ def test_no_orphan_plugins_after_daemon_stop(restart_daemon):
     )
 
 
+def test_ovs_apply_dependency_error_daemon_not_running(no_ovs_db_socket):
+    desired_state = load_yaml("""---
+        interfaces:
+          - name: test-br
+            type: ovs-bridge
+            state: up
+    """)
+    with pytest.raises(nipart.NipartError) as err:
+        nipart.apply(desired_state)
+    assert err.value.kind == "dependency-error", (
+        f"Expected dependency-error, got {err.value.kind}: {err.value.msg}"
+    )
