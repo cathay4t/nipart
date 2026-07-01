@@ -21,3 +21,13 @@ def test_veth_exceeded_max_mtu():
                      """))
 
 
+def test_veth_exceeded_min_mtu():
+    with veth_interface("veth-test1", "veth-test1-ep"):
+        with pytest.raises(NipartValueError):
+            nipart.apply(load_yaml("""---
+                        version: 1
+                        interfaces:
+                        - name: veth-test1
+                          type: ethernet
+                          mtu: 1
+                     """))
