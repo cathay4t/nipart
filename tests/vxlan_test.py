@@ -67,3 +67,46 @@ def dummy2():
             """))
 
 
+def test_vxlan_change_property(vxlan_over_dummy, dummy2):
+    for prop_name, prop_value in [
+        ("id", 101),
+        ("base-iface", "dummy2"),
+        ("learning", True),
+        ("learning", "true"),
+        ("learning", "false"),
+        ("learning", False),
+        ("destination-port", 4789),
+        ("destination-port", "1235"),
+        ("ttl", 16),
+        ("ttl", "32"),
+        ("tos", 24),
+        ("tos", "0"),
+        ("ageing", 300),
+        ("max-address", 512),
+        ("proxy", True),
+        ("proxy", "false"),
+        ("rsc", True),
+        ("rsc", "false"),
+        ("l2miss", True),
+        ("l2miss", "false"),
+        ("l3miss", True),
+        ("l3miss", "false"),
+    ]:
+        print(f"Changing VxLAN prop {prop_name} to {prop_value}")
+        state = load_yaml(f"""---
+                interfaces:
+                  - name: {TEST_VXLAN_NIC}
+                    type: vxlan
+                    state: up
+                """)
+        state["interfaces"][0]["vxlan"] = {prop_name: prop_value}
+        nipart.apply(state)
+        vxlan_iface = show_only(TEST_VXLAN_NIC)
+        if prop_value == "true":
+            prop_value = True
+        if prop_value == "false":
+            prop_value = False
+        if isinstance(prop_value, str) and prop_value.isdigit():
+            prop_value = int(prop_value)
+        assert vxlan_iface["state"] == "up"
+        assert vxlan_iface["vxlan"].get(prop_name) == prop_value
