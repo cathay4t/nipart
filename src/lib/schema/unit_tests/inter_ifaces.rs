@@ -2,7 +2,8 @@
 
 use crate::{
     BaseInterface, Interface, InterfaceIdentifier, InterfaceType, Interfaces,
-    MergedNetworkState, NetworkState, NipartInterface,
+    MergedInterface, MergedInterfaces, MergedNetworkState, NetworkState,
+    NipartInterface,
 };
 
 /// Test basic MAC address matching with MAC provided.
@@ -356,7 +357,7 @@ fn test_resolve_mac_identifier_perm_mac_preferred() {
     assert_eq!(resolved.base_iface().profile_name.as_deref(), Some("wan0"));
 }
 
-/// Test when multiple NICs hold the same MAC address (first match wins).
+/// Test that matching against multiple NICs with the same MAC raises error.
 #[test]
 fn test_resolve_mac_identifier_duplicate_mac_across_nics() {
     let mut desired: Interfaces = serde_yaml::from_str(
@@ -381,22 +382,9 @@ fn test_resolve_mac_identifier_duplicate_mac_across_nics() {
     )
     .unwrap();
 
-    desired.resolve_mac_identifier(&current).unwrap();
-
-    // Exactly one interface should match (first found in HashMap iteration)
-    let matched = if desired.kernel_ifaces.contains_key("eth0") {
-        "eth0"
-    } else if desired.kernel_ifaces.contains_key("eth1") {
-        "eth1"
-    } else {
-        panic!("No interface matched");
-    };
-    assert!(["eth0", "eth1"].contains(&matched));
-    assert!(!desired.kernel_ifaces.contains_key("wan0"));
-    let resolved = desired.kernel_ifaces.get(matched).unwrap();
-    assert_eq!(resolved.base_iface().name, matched);
-    assert_eq!(resolved.base_iface().kernel_iface_name.as_str(), matched);
-    assert_eq!(resolved.base_iface().profile_name.as_deref(), Some("wan0"));
+    let result = desired.resolve_mac_identifier(&current);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().msg.contains("Multiple interfaces"));
 }
 
 /// Test re-resolution when NIC renamed (eth0 -> eth1).
@@ -545,18 +533,257 @@ fn test_sanitize_does_not_override_mac_kernel_iface_name() {
     assert_eq!(base.kernel_iface_name.as_str(), "eth0");
 }
 
-/// Test that resolve_name_identifier copies name to kernel_iface_name when
-/// identifier not defined.
+/// Test that route next-hop-interface with MAC identifier resolves from
+/// logical name (profile_name) to kernel name.
 #[test]
-fn test_resolve_name_identifier_copies_name() {
-    let mut ifaces: Interfaces = serde_yaml::from_str(
-        r#"---
-        - name: eth0
-          type: ethernet
+fn test_route_next_hop_iface_resolves_by_profile_name() {
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: wan0
+            type: ethernet
+            state: up
+            identifier: mac-address
+            mac-address: 00:23:45:67:89:1a
+        routes:
+          config:
+            - destination: 0.0.0.0/0
+              next-hop-interface: wan0
+              next-hop-address: 192.168.1.1
+              table-id: 254
         "#,
     )
     .unwrap();
-    ifaces.resolve_name_identifier();
-    let resolved = ifaces.kernel_ifaces.get("eth0").unwrap();
-    assert_eq!(resolved.kernel_iface_name(), "eth0");
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth0
+            type: ethernet
+            mac-address: 00:23:45:67:89:1a
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: false
+        "#,
+    )
+    .unwrap();
+
+    let merged =
+        MergedNetworkState::new(desired, current, Default::default()).unwrap();
+
+    let changed: Vec<&str> = merged
+        .routes
+        .changed_routes
+        .iter()
+        .filter_map(|r| r.next_hop_iface.as_deref())
+        .collect();
+    assert_eq!(changed, vec!["eth0"]);
+}
+
+/// Test that route next-hop-interface with direct kernel name succeeds
+/// without profile_name lookup.
+#[test]
+fn test_route_next_hop_iface_direct_kernel_name() {
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: wan0
+            type: ethernet
+            state: up
+            identifier: mac-address
+            mac-address: 00:23:45:67:89:1a
+        routes:
+          config:
+            - destination: 0.0.0.0/0
+              next-hop-interface: eth0
+              next-hop-address: 192.168.1.1
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth0
+            type: ethernet
+            mac-address: 00:23:45:67:89:1a
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: false
+        "#,
+    )
+    .unwrap();
+
+    let merged =
+        MergedNetworkState::new(desired, current, Default::default()).unwrap();
+
+    let changed: Vec<&str> = merged
+        .routes
+        .changed_routes
+        .iter()
+        .filter_map(|r| r.next_hop_iface.as_deref())
+        .collect();
+    assert_eq!(changed, vec!["eth0"]);
+}
+
+/// Test that route next-hop-interface pointing to absent interface
+/// via logical name raises error.
+#[test]
+fn test_route_next_hop_iface_absent_by_logical_name() {
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: wan0
+            type: ethernet
+            state: absent
+            identifier: mac-address
+            mac-address: 00:23:45:67:89:1a
+        routes:
+          config:
+            - destination: 0.0.0.0/0
+              next-hop-interface: wan0
+              next-hop-address: 192.168.1.1
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth0
+            type: ethernet
+            mac-address: 00:23:45:67:89:1a
+            state: up
+        "#,
+    )
+    .unwrap();
+
+    let result = MergedNetworkState::new(desired, current, Default::default());
+    assert!(result.is_err());
+    assert!(result.unwrap_err().msg.contains("marked as absent"));
+}
+
+/// Test that resolve_route_next_hop_iface returns error when multiple
+/// interfaces share the same logical name (profile_name).
+#[test]
+fn test_route_next_hop_iface_duplicate_logical_name_error() {
+    let mut kernel_ifaces = std::collections::HashMap::new();
+
+    let mut iface1 = Interface::Ethernet(Box::new(
+        serde_yaml::from_str(
+            r#"---
+            name: eth0
+            type: ethernet
+            profile-name: cunet
+            "#,
+        )
+        .unwrap(),
+    ));
+    iface1.base_iface_mut().kernel_iface_name = "eth0".to_string();
+
+    let mut iface2 = Interface::Ethernet(Box::new(
+        serde_yaml::from_str(
+            r#"---
+            name: eth1
+            type: ethernet
+            profile-name: cunet
+            "#,
+        )
+        .unwrap(),
+    ));
+    iface2.base_iface_mut().kernel_iface_name = "eth1".to_string();
+
+    let merged1 = MergedInterface::new(Some(iface1), None).unwrap();
+    let merged2 = MergedInterface::new(Some(iface2), None).unwrap();
+    kernel_ifaces.insert("eth0".to_string(), merged1);
+    kernel_ifaces.insert("eth1".to_string(), merged2);
+
+    let merged_ifaces = MergedInterfaces {
+        kernel_ifaces,
+        ..Default::default()
+    };
+
+    let result = merged_ifaces.resolve_route_next_hop_iface("cunet");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .msg
+            .contains("matches multiple interfaces")
+    );
+}
+
+/// Test that resolve_route_next_hop_iface returns the original name
+/// when no match is found (neither kernel name nor profile_name).
+#[test]
+fn test_route_next_hop_iface_no_match_returns_original() {
+    let merged_ifaces = MergedInterfaces::default();
+
+    let result = merged_ifaces.resolve_route_next_hop_iface("nonexistent");
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), "nonexistent");
+}
+
+/// Test that resolve_route_next_hop_iface returns kernel name when
+/// a single profile_name match is found.
+#[test]
+fn test_route_next_hop_iface_single_profile_match() {
+    let mut kernel_ifaces = std::collections::HashMap::new();
+
+    let mut iface = Interface::Ethernet(Box::new(
+        serde_yaml::from_str(
+            r#"---
+            name: eth0
+            type: ethernet
+            profile-name: cunet
+            "#,
+        )
+        .unwrap(),
+    ));
+    iface.base_iface_mut().kernel_iface_name = "eth0".to_string();
+
+    let merged = MergedInterface::new(Some(iface), None).unwrap();
+    kernel_ifaces.insert("eth0".to_string(), merged);
+
+    let merged_ifaces = MergedInterfaces {
+        kernel_ifaces,
+        ..Default::default()
+    };
+
+    let result = merged_ifaces.resolve_route_next_hop_iface("cunet");
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), "eth0");
+}
+
+/// Test that route with next-hop-interface pointing to a non-existent
+/// logical name still passes validation (the route is added but the
+/// interface check is handled later by kernel).
+#[test]
+fn test_route_next_hop_iface_unmatched_logical_name_adds_route() {
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"
+        routes:
+          config:
+            - destination: 0.0.0.0/0
+              next-hop-interface: nonexistent
+              next-hop-address: 192.168.1.1
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current = NetworkState::default();
+
+    let merged =
+        MergedNetworkState::new(desired, current, Default::default()).unwrap();
+
+    assert!(!merged.routes.changed_routes.is_empty());
+    assert_eq!(
+        merged.routes.changed_routes[0].next_hop_iface.as_deref(),
+        Some("nonexistent")
+    );
 }

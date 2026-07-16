@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ErrorKind, Interface, InterfaceType, Interfaces, JsonDisplayHideSecrets,
-    MergedInterface, NipartError, NipartInterface,
+    MergedInterface, NipartError, NipartInterface, schema::IfaceSearch,
 };
 
 // The max loop count for Interfaces.set_ifaces_up_priority()
@@ -134,6 +134,23 @@ impl MergedInterfaces {
         } else {
             self.kernel_ifaces.get(iface_name)
         }
+    }
+
+    /// Resolve a route next-hop-interface name to its kernel interface name.
+    ///
+    /// The route `next-hop-interface` may refer to a logical interface name
+    /// (e.g. from `identifier: mac-address`). This method first checks for a
+    /// direct match by kernel interface name, then falls back to matching by
+    /// `profile_name` (the logical name stored during MAC resolution).
+    ///
+    /// Returns `InvalidArgument` error if the name matches multiple interfaces
+    /// by logical name.
+    pub(crate) fn resolve_route_next_hop_iface(
+        &self,
+        next_hop_iface: &str,
+    ) -> Result<String, NipartError> {
+        let search = IfaceSearch::new_from_merged(self);
+        search.resolve_kernel_iface_name(next_hop_iface)
     }
 
     fn _set_up_priority(&mut self) -> Result<(), NipartError> {

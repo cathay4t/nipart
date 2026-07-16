@@ -3,6 +3,7 @@
 mod gen_diff;
 mod identifier;
 mod iface;
+mod iface_search;
 mod iface_state;
 mod iface_trait;
 mod iface_type;
@@ -24,6 +25,8 @@ mod wait_online;
 pub(crate) mod deserializer;
 #[allow(dead_code)]
 pub(crate) mod serializer;
+
+pub(crate) use iface_search::IfaceSearch;
 
 pub use self::{
     identifier::InterfaceIdentifier,
