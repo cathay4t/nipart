@@ -10,7 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    BondMode, ErrorKind, Interface, InterfaceState, InterfaceType, Interfaces,
+    BondMode, ErrorKind, Interface, InterfaceState, InterfaceType,
     MergedInterface, MergedInterfaces, NipartError, NipartInterface,
     OvsInterface,
 };
@@ -99,9 +99,56 @@ impl MergedInterfaces {
         &mut self,
     ) -> Result<(), NipartError> {
         self.handle_changed_ports()?;
+        self.resolve_controller_type()?;
         self.check_overbook_ports()?;
         self.check_infiniband_as_ports()?;
         self.validate_controller_and_port_list_confliction()?;
+        Ok(())
+    }
+
+    // Resolve controller_type for interfaces that have controller set
+    // (e.g. from merge with current state) but controller_type is None.
+    fn resolve_controller_type(&mut self) -> Result<(), NipartError> {
+        let mut pending: Vec<(String, String)> = Vec::new();
+        for merged_iface in self.iter() {
+            if let Some(for_apply) = merged_iface.for_apply.as_ref()
+                && let Some(ctrl_name) =
+                    for_apply.base_iface().controller.as_ref()
+                && !ctrl_name.is_empty()
+                && for_apply.base_iface().controller_type.is_none()
+            {
+                pending.push((
+                    merged_iface.kernel_iface_name().to_string(),
+                    ctrl_name.to_string(),
+                ));
+            }
+        }
+        for (iface_name, ctrl_name) in pending {
+            let ctrl_type = self
+                .kernel_ifaces
+                .get(&ctrl_name)
+                .map(|c| c.merged.iface_type().clone())
+                .or_else(|| {
+                    self.user_ifaces.values().find_map(|c| {
+                        if c.merged.name() == ctrl_name {
+                            Some(c.merged.iface_type().clone())
+                        } else {
+                            None
+                        }
+                    })
+                });
+            if let Some(ctrl_type) = ctrl_type
+                && let Some(merged_iface) =
+                    self.kernel_ifaces.get_mut(&iface_name)
+            {
+                if let Some(for_apply) = merged_iface.for_apply.as_mut() {
+                    for_apply.base_iface_mut().controller_type =
+                        Some(ctrl_type.clone());
+                }
+                merged_iface.merged.base_iface_mut().controller_type =
+                    Some(ctrl_type);
+            }
+        }
         Ok(())
     }
 
@@ -236,23 +283,31 @@ impl MergedInterfaces {
 
     fn handle_changed_ports(&mut self) -> Result<(), NipartError> {
         let mut pending_changes: HashMap<
+            // kernel_iface_name
             String,
+            // (controller_naem, controller_type, interface_state)
             (String, InterfaceType, InterfaceState),
         > = HashMap::new();
-        for iface in self.iter() {
-            if !iface.is_desired() || !iface.merged.is_controller() {
+        for merged_iface in self.iter().filter(|m| m.is_changed()) {
+            if !merged_iface.is_desired()
+                || !merged_iface.merged.is_controller()
+            {
                 continue;
             }
+            let Some(for_apply) = merged_iface.for_apply.as_ref() else {
+                continue;
+            };
+
             if let Some((attached_ports, detached_ports)) =
-                iface.get_changed_ports()
+                merged_iface.get_changed_ports()
             {
                 for port_name in attached_ports {
                     pending_changes.insert(
                         port_name.to_string(),
                         (
-                            iface.merged.kernel_iface_name().to_string(),
-                            iface.merged.iface_type().clone(),
-                            iface.merged.base_iface().state,
+                            for_apply.kernel_iface_name().to_string(),
+                            for_apply.iface_type().clone(),
+                            for_apply.base_iface().state,
                         ),
                     );
                 }
@@ -266,24 +321,28 @@ impl MergedInterfaces {
                             (
                                 String::new(),
                                 InterfaceType::Unknown(String::new()),
-                                iface.merged.base_iface().state,
+                                for_apply.base_iface().state,
                             )
                         });
                 }
             }
         }
 
+        // We are assuming all ports are kernel interfaces. It is true
+        // for now even for OVS bridge, but worth noting here.
         for (iface_name, (ctrl_name, ctrl_type, ctrl_state)) in
             pending_changes.drain()
         {
-            if let Some(iface) = self.kernel_ifaces.get_mut(&iface_name) {
-                if !iface.is_changed() {
+            if let Some(merged_iface) = self.kernel_ifaces.get_mut(&iface_name)
+            {
+                if !merged_iface.is_changed() {
                     self.insert_order.push((
-                        iface.merged.kernel_iface_name().to_string(),
-                        iface.merged.iface_type().clone(),
+                        merged_iface.merged.kernel_iface_name().to_string(),
+                        merged_iface.merged.iface_type().clone(),
                     ));
                 }
-                iface.apply_ctrller_change(ctrl_name, ctrl_type, ctrl_state)?;
+                merged_iface
+                    .apply_ctrller_change(ctrl_name, ctrl_type, ctrl_state)?;
             } else if ctrl_type == InterfaceType::OvsBridge {
                 // OVS internal interface could be created by its controller OVS
                 // Bridge
@@ -300,6 +359,7 @@ impl MergedInterfaces {
                                 &ctrl_name,
                             ),
                         ))),
+                        None,
                         None,
                     )?,
                 );
@@ -384,83 +444,5 @@ impl MergedInterfaces {
             }
         }
         Ok(())
-    }
-}
-
-impl Interfaces {
-    // Automatically convert ignored interface to `state: up` when all below
-    // conditions met:
-    //  1. Not mentioned in desire state.
-    //  2. Been listed as port of a controller.
-    //  3. Controller interface is new or does not contains ignored interfaces.
-    pub(crate) fn auto_managed_controller_ports(&mut self, current: &Self) {
-        // Contains ignored kernel ifaces which is not mentioned in desire
-        // states
-        let mut not_desired_ignores: HashSet<&str> = HashSet::new();
-        let mut full_ignores: HashSet<&str> = HashSet::new();
-        for iface in current.kernel_ifaces.values().filter(|i| i.is_ignore()) {
-            match self.kernel_ifaces.get(iface.kernel_iface_name()) {
-                Some(des_iface) => {
-                    if des_iface.is_ignore() {
-                        full_ignores.insert(iface.kernel_iface_name());
-                    }
-                }
-                None => {
-                    not_desired_ignores.insert(iface.kernel_iface_name());
-                    full_ignores.insert(iface.kernel_iface_name());
-                }
-            }
-        }
-        for iface in self.kernel_ifaces.values().filter(|i| i.is_ignore()) {
-            full_ignores.insert(iface.kernel_iface_name());
-        }
-
-        // Contains interface names need to be marked as `state: up` afterwards.
-        let mut pending_changes: Vec<String> = Vec::new();
-
-        for iface in self
-            .kernel_ifaces
-            .values()
-            .chain(self.user_ifaces.values())
-            .filter(|i| i.is_controller() && i.is_up())
-        {
-            let cur_iface = current
-                .get(iface.kernel_iface_name(), Some(iface.iface_type()));
-            if let Some(port_names) = iface.ports() {
-                for port_name in port_names {
-                    if not_desired_ignores.contains(port_name) {
-                        // Only pre-exist controller holding __no__
-                        // ignored ports can fit our auto-fix case.
-                        // Or new interface.
-                        if cur_iface.and_then(|i| i.ports()).map(|cur_ports| {
-                            cur_ports
-                                .as_slice()
-                                .iter()
-                                .any(|cur_port| full_ignores.contains(cur_port))
-                        }) != Some(true)
-                        {
-                            log::info!(
-                                "Controller interface {}({}) contains port \
-                                 {port_name} which is currently ignored, \
-                                 marking this port as 'state: up'. ",
-                                iface.name(),
-                                iface.iface_type()
-                            );
-                            pending_changes.push(port_name.to_string());
-                        }
-                    }
-                }
-            }
-        }
-
-        for iface_name in pending_changes {
-            if let Some(cur_iface) =
-                current.kernel_ifaces.get(iface_name.as_str())
-            {
-                let mut iface = cur_iface.clone_name_type_only();
-                iface.base_iface_mut().state = InterfaceState::Up;
-                self.kernel_ifaces.insert(iface_name, iface);
-            }
-        }
     }
 }

@@ -35,9 +35,9 @@ function build {
 
 function before_exit {
     collect_logs
-    $SUDO rm -rf /etc/nipartd/states 2>/dev/null || true
-    $SUDO mv -f /etc/nipartd/states.bak \
-        /etc/nipartd/states 2>/dev/null || true
+    $SUDO rm -rf /etc/nipart/states 2>/dev/null || true
+    $SUDO mv -f /etc/nipart/states.bak \
+        /etc/nipart/states 2>/dev/null || true
 }
 
 function collect_logs {
@@ -60,8 +60,8 @@ trap before_exit ERR EXIT
 
 build
 
-$SUDO mv -f /etc/nipartd/states/ \
-    /etc/nipartd/states.bak 2>/dev/null || true
+$SUDO mv -f /etc/nipart/states/ \
+    /etc/nipart/states.bak 2>/dev/null || true
 
 $SUDO bash -c "ulimit -c unlimited"
 

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod gen_diff;
-mod identifier;
 mod iface;
+mod iface_identifier;
 mod iface_search;
 mod iface_state;
 mod iface_trait;
@@ -29,8 +29,8 @@ pub(crate) mod serializer;
 pub(crate) use iface_search::IfaceSearch;
 
 pub use self::{
-    identifier::InterfaceIdentifier,
     iface::Interface,
+    iface_identifier::InterfaceIdentifier,
     iface_state::InterfaceState,
     iface_trait::NipartInterface,
     iface_type::InterfaceType,

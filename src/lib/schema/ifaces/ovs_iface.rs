@@ -63,11 +63,15 @@ impl NipartInterface for OvsInterface {
         true
     }
 
-    fn hide_secrets_iface_specific(&mut self) {}
+    fn hide_secrets(&mut self) {}
 
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         _current: Option<&Self>,
+        _for_save: &mut Self,
+        _for_apply: &mut Self,
+        _for_verify: &mut Self,
+        _merged: &mut Self,
     ) -> Result<(), NipartError> {
         Ok(())
     }

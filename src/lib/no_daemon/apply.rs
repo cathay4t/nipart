@@ -22,6 +22,7 @@ impl NipartNoDaemon {
         let mut merged_state = MergedNetworkState::new(
             desired_state.clone(),
             current_state.clone(),
+            None,
             option.clone(),
         )?;
 

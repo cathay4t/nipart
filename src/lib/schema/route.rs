@@ -126,11 +126,10 @@ impl Routes {
 
     pub(crate) fn mark_route_as_ignored_ifaces(&mut self, ifaces: &Interfaces) {
         let ignored_ifaces: HashSet<&str> = ifaces
-            .kernel_ifaces
             .iter()
-            .filter_map(|(name, iface)| {
-                if iface.is_ignore() {
-                    Some(name.as_str())
+            .filter_map(|iface| {
+                if iface.is_ignore() && !iface.is_userspace() {
+                    Some(iface.name())
                 } else {
                     None
                 }

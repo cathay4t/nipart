@@ -17,14 +17,31 @@ fn vxlan_iface_with_config(vxlan: VxlanConfig) -> VxlanInterface {
     }
 }
 
+fn sanitize_vxlan(
+    iface: &VxlanInterface,
+    current: Option<&VxlanInterface>,
+) -> Result<(), crate::NipartError> {
+    let mut for_save = iface.clone();
+    let mut for_apply = iface.clone();
+    let mut for_verify = iface.clone();
+    let mut merged = iface.clone();
+    iface.sanitize(
+        current,
+        &mut for_save,
+        &mut for_apply,
+        &mut for_verify,
+        &mut merged,
+    )
+}
+
 #[test]
 fn test_sanitize_vxlan_id_too_large() {
-    let mut iface = vxlan_iface_with_config(VxlanConfig {
+    let iface = vxlan_iface_with_config(VxlanConfig {
         id: Some(16777216),
         base_iface: Some("eth0".to_string()),
         ..Default::default()
     });
-    let result = iface.sanitize(None);
+    let result = sanitize_vxlan(&iface, None);
     assert!(result.is_err());
     if let Err(e) = result {
         assert_eq!(e.kind(), ErrorKind::InvalidArgument);
@@ -38,28 +55,29 @@ fn test_sanitize_vxlan_id_too_large() {
 
 #[test]
 fn test_sanitize_vxlan_id_max_valid() {
-    let mut iface = vxlan_iface_with_config(VxlanConfig {
+    let iface = vxlan_iface_with_config(VxlanConfig {
         id: Some(16777215),
         base_iface: Some("eth0".to_string()),
+        remote: Some("192.0.2.1".to_string()),
         ..Default::default()
     });
-    assert!(iface.sanitize(None).is_ok());
+    assert!(sanitize_vxlan(&iface, None).is_ok());
 }
 
 #[test]
 fn test_sanitize_vxlan_invalid_remote() {
-    let mut iface = vxlan_iface_with_config(VxlanConfig {
+    let iface = vxlan_iface_with_config(VxlanConfig {
         id: Some(100),
         base_iface: Some("eth0".to_string()),
         remote: Some("not-an-ip".to_string()),
         ..Default::default()
     });
-    let result = iface.sanitize(None);
+    let result = sanitize_vxlan(&iface, None);
     assert!(result.is_err());
     if let Err(e) = result {
         assert_eq!(e.kind(), ErrorKind::InvalidArgument);
         assert!(
-            e.msg().contains("not a valid IP address"),
+            e.msg().contains("is not valid IP address"),
             "Unexpected error: {}",
             e.msg()
         );
@@ -68,18 +86,18 @@ fn test_sanitize_vxlan_invalid_remote() {
 
 #[test]
 fn test_sanitize_vxlan_invalid_local() {
-    let mut iface = vxlan_iface_with_config(VxlanConfig {
+    let iface = vxlan_iface_with_config(VxlanConfig {
         id: Some(100),
         base_iface: Some("eth0".to_string()),
         local: Some("bad.local.value".to_string()),
         ..Default::default()
     });
-    let result = iface.sanitize(None);
+    let result = sanitize_vxlan(&iface, None);
     assert!(result.is_err());
     if let Err(e) = result {
         assert_eq!(e.kind(), ErrorKind::InvalidArgument);
         assert!(
-            e.msg().contains("not a valid IP address"),
+            e.msg().contains("is not valid IP address"),
             "Unexpected error: {}",
             e.msg()
         );
@@ -88,19 +106,19 @@ fn test_sanitize_vxlan_invalid_local() {
 
 #[test]
 fn test_sanitize_vxlan_valid_ips() {
-    let mut iface = vxlan_iface_with_config(VxlanConfig {
+    let iface = vxlan_iface_with_config(VxlanConfig {
         id: Some(100),
         base_iface: Some("eth0".to_string()),
         remote: Some("192.0.2.1".to_string()),
         local: Some("192.0.2.2".to_string()),
         ..Default::default()
     });
-    assert!(iface.sanitize(None).is_ok());
+    assert!(sanitize_vxlan(&iface, None).is_ok());
 }
 
 #[test]
 fn test_sanitize_vxlan_missing_config() {
-    let mut iface = VxlanInterface {
+    let iface = VxlanInterface {
         base: BaseInterface {
             name: "vxlan0".to_string(),
             iface_type: InterfaceType::Vxlan,
@@ -109,7 +127,7 @@ fn test_sanitize_vxlan_missing_config() {
         },
         vxlan: None,
     };
-    let result = iface.sanitize(None);
+    let result = sanitize_vxlan(&iface, None);
     assert!(result.is_err());
     if let Err(e) = result {
         assert_eq!(e.kind(), ErrorKind::InvalidArgument);
@@ -131,7 +149,7 @@ fn test_sanitize_vxlan_missing_config_with_current() {
         },
         vxlan: Some(VxlanConfig::default()),
     };
-    let mut iface = VxlanInterface {
+    let iface = VxlanInterface {
         base: BaseInterface {
             name: "vxlan0".to_string(),
             iface_type: InterfaceType::Vxlan,
@@ -140,12 +158,12 @@ fn test_sanitize_vxlan_missing_config_with_current() {
         },
         vxlan: None,
     };
-    assert!(iface.sanitize(Some(&cur)).is_ok());
+    assert!(sanitize_vxlan(&iface, Some(&cur)).is_ok());
 }
 
 #[test]
 fn test_sanitize_vxlan_absent_no_config() {
-    let mut iface = VxlanInterface {
+    let iface = VxlanInterface {
         base: BaseInterface {
             name: "vxlan0".to_string(),
             iface_type: InterfaceType::Vxlan,
@@ -154,5 +172,5 @@ fn test_sanitize_vxlan_absent_no_config() {
         },
         vxlan: None,
     };
-    assert!(iface.sanitize(None).is_ok());
+    assert!(sanitize_vxlan(&iface, None).is_ok());
 }

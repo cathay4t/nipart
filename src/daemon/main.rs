@@ -41,7 +41,7 @@ async fn main() -> Result<(), nipart::NipartError> {
 
 fn enable_logging() {
     let mut log_builder = env_logger::Builder::new();
-    log_builder.filter(Some("nipartd"), log::LevelFilter::Trace);
+    log_builder.filter(Some("nipart-daemon"), log::LevelFilter::Trace);
     log_builder.filter(Some("nipart"), log::LevelFilter::Trace);
     log_builder.init();
 }

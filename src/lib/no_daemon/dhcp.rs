@@ -180,7 +180,7 @@ async fn apply_lease(
     };
 
     let merged_routes =
-        MergedRoutes::new(des_routes, Default::default(), merged_ifaces)?;
+        MergedRoutes::new(des_routes, Default::default(), None, merged_ifaces)?;
 
     apply_routes(&merged_routes).await?;
 

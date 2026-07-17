@@ -6,7 +6,6 @@ mod ethernet;
 mod iface;
 mod inter_iface;
 mod ip;
-mod loopback;
 mod net_state;
 mod route;
 mod wifi;

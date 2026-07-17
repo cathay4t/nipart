@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::{net::IpAddr, str::FromStr};
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BaseInterface, ErrorKind, Interface, InterfaceType, JsonDisplay,
-    MergedInterface, NipartError, NipartInterface,
+    BaseInterface, ErrorKind, InterfaceType, JsonDisplay, NipartError,
+    NipartInterface,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonDisplay)]
@@ -44,10 +46,6 @@ impl Default for VxlanInterface {
 }
 
 impl NipartInterface for VxlanInterface {
-    const LIVE_CHANGE_PROP_LIST: &'static [&'static str] = &[
-        "remote", "local", "learning", "ttl", "tos", "ageing", "label",
-    ];
-
     fn base_iface(&self) -> &BaseInterface {
         &self.base
     }
@@ -64,106 +62,164 @@ impl NipartInterface for VxlanInterface {
         self.vxlan.as_ref().and_then(|v| v.base_iface.as_deref())
     }
 
-    fn config_value(&self) -> serde_json::Value {
-        match self.vxlan.as_ref() {
-            Some(c) => serde_json::to_value(c).unwrap_or_default(),
-            None => serde_json::Value::Null,
-        }
-    }
-
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         current: Option<&Self>,
+        _for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        _merged: &mut Self,
     ) -> Result<(), NipartError> {
-        if current.is_none() && self.vxlan.is_none() && !self.is_absent() {
+        let desired = self;
+        if desired.is_absent() {
+            return Ok(());
+        }
+
+        if let Some(vxlan_conf) = for_apply.vxlan.as_mut()
+            && let Err(e) = vxlan_conf.sanitize()
+        {
             return Err(NipartError::new(
                 ErrorKind::InvalidArgument,
                 format!(
-                    "`vxlan` configuration is mandatory for creating new \
-                     VxLAN {}",
-                    self.name()
+                    "Invalid VxLAN config for interface {}/{}: {e}",
+                    desired.name(),
+                    desired.iface_type()
                 ),
             ));
         }
-        if let Some(vxlan_conf) = self.vxlan.as_mut() {
-            if let Some(cur_vxlan_conf) =
-                current.as_ref().and_then(|c| c.vxlan.as_ref())
-            {
-                if vxlan_conf.id.is_none() {
-                    vxlan_conf.id = cur_vxlan_conf.id;
-                }
-                if vxlan_conf.base_iface.is_none() {
-                    vxlan_conf.base_iface = cur_vxlan_conf.base_iface.clone();
-                }
-            } else {
-                if vxlan_conf.base_iface.is_none() {
-                    return Err(NipartError::new(
-                        ErrorKind::InvalidArgument,
-                        format!(
-                            "`vxlan.base-iface` is mandatory for creating new \
-                             VxLAN {}",
-                            self.name()
-                        ),
-                    ));
-                }
-                if vxlan_conf.id.is_none() {
-                    return Err(NipartError::new(
-                        ErrorKind::InvalidArgument,
-                        format!(
-                            "`vxlan.id` is mandatory for creating new VxLAN {}",
-                            self.name()
-                        ),
-                    ));
-                }
-            }
-            if let Some(id) = vxlan_conf.id
-                && id > 16777215
-            {
+
+        if current.is_none() {
+            if desired.vxlan.is_none() {
                 return Err(NipartError::new(
                     ErrorKind::InvalidArgument,
                     format!(
-                        "`vxlan.id` {} is out of range: VNI must be 0-16777215",
-                        id
+                        "`vxlan` configuration is mandatory for creating new \
+                         VxLAN {}",
+                        desired.name()
                     ),
                 ));
             }
-            if let Some(ref remote) = vxlan_conf.remote
-                && !remote.is_empty()
-                && remote.parse::<std::net::IpAddr>().is_err()
-            {
+            if desired.vxlan.as_ref().and_then(|c| c.id.as_ref()).is_none() {
                 return Err(NipartError::new(
                     ErrorKind::InvalidArgument,
                     format!(
-                        "`vxlan.remote` '{remote}' is not a valid IP address"
+                        "`vxlan.id` is mandatory for creating new VxLAN {}",
+                        desired.name()
                     ),
-                ));
-            }
-            if let Some(ref local) = vxlan_conf.local
-                && !local.is_empty()
-                && local.parse::<std::net::IpAddr>().is_err()
-            {
-                return Err(NipartError::new(
-                    ErrorKind::InvalidArgument,
-                    format!(
-                        "`vxlan.local` '{local}' is not a valid IP address"
-                    ),
-                ));
-            }
-            if (vxlan_conf.src_port_min.is_some()
-                || vxlan_conf.src_port_max.is_some())
-                && (vxlan_conf.src_port_min.is_none()
-                    || vxlan_conf.src_port_max.is_none())
-            {
-                return Err(NipartError::new(
-                    ErrorKind::InvalidArgument,
-                    "`vxlan.src-port-min` and `vxlan.src-port-max` must be \
-                     set together"
-                        .to_string(),
                 ));
             }
         }
 
+        if let Some(apply_vxlan) = for_apply.vxlan.as_mut()
+            && apply_vxlan.base_iface.is_none()
+            && let Some(cur_iface) = current.as_ref()
+        {
+            apply_vxlan.base_iface = cur_iface
+                .vxlan
+                .as_ref()
+                .and_then(|vxlan| vxlan.base_iface.clone());
+        }
+        if let Some(verify_vxlan) = for_verify.vxlan.as_mut()
+            && verify_vxlan.base_iface.is_none()
+            && let Some(cur_iface) = current.as_ref()
+        {
+            verify_vxlan.base_iface = cur_iface
+                .vxlan
+                .as_ref()
+                .and_then(|vxlan| vxlan.base_iface.clone());
+        }
         Ok(())
+    }
+
+    fn need_delete_before_change(&self, current: &Self) -> bool {
+        let desired = self;
+        // TODO: Use gen_diff(), then compare with allow list.
+        if let Some(des) = desired.vxlan.as_ref()
+            && let Some(cur) = current.vxlan.as_ref()
+        {
+            if des.id.is_some() && des.id != cur.id {
+                return true;
+            }
+            if des.base_iface.is_some() && des.base_iface != cur.base_iface {
+                return true;
+            }
+            if des.destination_port.is_some()
+                && des.destination_port != cur.destination_port
+            {
+                return true;
+            }
+            if des.max_address.is_some() && des.max_address != cur.max_address {
+                return true;
+            }
+            if des.src_port_min.is_some()
+                && des.src_port_min != cur.src_port_min
+            {
+                return true;
+            }
+            if des.src_port_max.is_some()
+                && des.src_port_max != cur.src_port_max
+            {
+                return true;
+            }
+            if des.proxy.is_some() && des.proxy != cur.proxy {
+                return true;
+            }
+            if des.rsc.is_some() && des.rsc != cur.rsc {
+                return true;
+            }
+            if des.l2miss.is_some() && des.l2miss != cur.l2miss {
+                return true;
+            }
+            if des.l3miss.is_some() && des.l3miss != cur.l3miss {
+                return true;
+            }
+            if des.udp_check_sum.is_some()
+                && des.udp_check_sum != cur.udp_check_sum
+            {
+                return true;
+            }
+            if des.udp6_zero_check_sum_tx.is_some()
+                && des.udp6_zero_check_sum_tx != cur.udp6_zero_check_sum_tx
+            {
+                return true;
+            }
+            if des.udp6_zero_check_sum_rx.is_some()
+                && des.udp6_zero_check_sum_rx != cur.udp6_zero_check_sum_rx
+            {
+                return true;
+            }
+            if des.remote_check_sum_tx.is_some()
+                && des.remote_check_sum_tx != cur.remote_check_sum_tx
+            {
+                return true;
+            }
+            if des.remote_check_sum_rx.is_some()
+                && des.remote_check_sum_rx != cur.remote_check_sum_rx
+            {
+                return true;
+            }
+            if des.gbp.is_some() && des.gbp != cur.gbp {
+                return true;
+            }
+            if des.remote_check_sum_no_partial.is_some()
+                && des.remote_check_sum_no_partial
+                    != cur.remote_check_sum_no_partial
+            {
+                return true;
+            }
+            if des.collect_metadata.is_some()
+                && des.collect_metadata != cur.collect_metadata
+            {
+                return true;
+            }
+            if des.gpe.is_some() && des.gpe != cur.gpe {
+                return true;
+            }
+            if des.ttl_inherit.is_some() && des.ttl_inherit != cur.ttl_inherit {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -352,30 +408,49 @@ pub struct VxlanConfig {
     pub ttl_inherit: Option<bool>,
 }
 
-impl MergedInterface {
-    pub(crate) fn post_merge_sanitize_vxlan(&mut self) {
-        if let (
-            Some(Interface::Vxlan(apply_iface)),
-            Some(Interface::Vxlan(verify_iface)),
-            Some(Interface::Vxlan(cur_iface)),
-        ) = (&mut self.for_apply, &mut self.for_verify, &self.current)
+impl VxlanConfig {
+    fn sanitize(&self) -> Result<(), NipartError> {
+        if let Some(id) = self.id
+            && id > 16777215
         {
-            if let Some(apply_vxlan) = &mut apply_iface.vxlan
-                && apply_vxlan.base_iface.is_none()
-            {
-                apply_vxlan.base_iface = cur_iface
-                    .vxlan
-                    .as_ref()
-                    .and_then(|vxlan| vxlan.base_iface.clone());
-            }
-            if let Some(verify_vxlan) = &mut verify_iface.vxlan
-                && verify_vxlan.base_iface.is_none()
-            {
-                verify_vxlan.base_iface = cur_iface
-                    .vxlan
-                    .as_ref()
-                    .and_then(|vxlan| vxlan.base_iface.clone());
-            }
+            return Err(NipartError::new(
+                ErrorKind::InvalidArgument,
+                format!(
+                    "`vxlan.id` {} is out of range: VNI must be 0-16777215",
+                    id
+                ),
+            ));
         }
+        if let Some(remote) = self.remote.as_ref()
+            && !remote.is_empty()
+            && let Err(_e) = IpAddr::from_str(remote)
+        {
+            return Err(NipartError::new(
+                ErrorKind::InvalidArgument,
+                format!("`vxlan.remote` {remote} is not valid IP address"),
+            ));
+        }
+
+        if let Some(local) = self.local.as_ref()
+            && !local.is_empty()
+            && let Err(_e) = IpAddr::from_str(local)
+        {
+            return Err(NipartError::new(
+                ErrorKind::InvalidArgument,
+                format!("`vxlan.local` {local} is not valid IP address"),
+            ));
+        }
+        if (self.src_port_min.is_some() || self.src_port_max.is_some())
+            && (self.src_port_min.is_none() || self.src_port_max.is_none())
+        {
+            return Err(NipartError::new(
+                ErrorKind::InvalidArgument,
+                "`vxlan.src-port-min` and `vxlan.src-port-max` must be set \
+                 together"
+                    .to_string(),
+            ));
+        }
+
+        Ok(())
     }
 }

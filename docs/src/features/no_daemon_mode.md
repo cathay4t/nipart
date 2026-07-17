@@ -1,7 +1,7 @@
 # No Daemon mode
 
-When passing with `--no-daemon` option in `npt apply <YAML_FILE>`, 
-`npt` command will not contact nipartd daemon but apply the configuration
+When passing with `--no-daemon` option in `npt apply <YAML_FILE>`,
+`npt` command will not contact nipart daemon but apply the configuration
 directly to kernel or related daemon(e.g. OpenvSwitch daemon).
 
 Limitations:

@@ -45,8 +45,8 @@ impl NipartCanIpc for NipartPluginCmd {
 
 impl NipartPluginCmd {
     pub fn hide_secrets(&mut self) {
-        if let Self::ApplyNetworkState(cmd) = self {
-            cmd.0.hide_secrets();
+        if let Self::ApplyNetworkState(state) = self {
+            state.0.hide_secrets();
         }
     }
 }

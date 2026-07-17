@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BaseInterface, InterfaceType, JsonDisplay, NipartInterface};
+use crate::{
+    BaseInterface, InterfaceType, JsonDisplay, NipartError, NipartInterface,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonDisplay)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -47,5 +49,16 @@ impl NipartInterface for DummyInterface {
 
     fn is_virtual(&self) -> bool {
         true
+    }
+
+    fn sanitize(
+        &self,
+        _current: Option<&Self>,
+        _for_save: &mut Self,
+        _for_apply: &mut Self,
+        _for_verify: &mut Self,
+        _merged: &mut Self,
+    ) -> Result<(), NipartError> {
+        Ok(())
     }
 }

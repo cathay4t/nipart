@@ -5,9 +5,26 @@ use crate::{
     WifiPhyInterface,
 };
 
+fn sanitize_wifi_phy(
+    iface: &WifiPhyInterface,
+    current: Option<&WifiPhyInterface>,
+) -> Result<(), crate::NipartError> {
+    let mut for_save = iface.clone();
+    let mut for_apply = iface.clone();
+    let mut for_verify = iface.clone();
+    let mut merged = iface.clone();
+    iface.sanitize(
+        current,
+        &mut for_save,
+        &mut for_apply,
+        &mut for_verify,
+        &mut merged,
+    )
+}
+
 #[test]
 fn test_wifi_phy_hold_wifi_cfg_with_other_base_iface() {
-    let mut iface: WifiPhyInterface = serde_yaml::from_str(
+    let iface: WifiPhyInterface = serde_yaml::from_str(
         r#"---
         name: wlan0
         type: wifi-phy
@@ -19,7 +36,7 @@ fn test_wifi_phy_hold_wifi_cfg_with_other_base_iface() {
     )
     .unwrap();
 
-    let result = iface.sanitize(None);
+    let result = sanitize_wifi_phy(&iface, None);
     assert!(result.is_err());
 
     if let Err(e) = result {
@@ -89,11 +106,12 @@ fn gen_wifi_phy_state_with_hidden_password() -> NetworkState {
 #[test]
 fn test_wifi_phy_password_in_hide_secrets() {
     let mut state = gen_wifi_phy_state_with_password();
-    let secrets = state.hide_secrets();
+    let secrets = state.extract_secrets().unwrap();
 
     let wifi_iface = state
         .ifaces
-        .get("wlan0", Some(&InterfaceType::WifiPhy))
+        .kernel_ifaces
+        .get("wlan0")
         .and_then(|i| {
             if let Interface::WifiPhy(w) = i {
                 w.wifi.as_ref()
@@ -109,7 +127,8 @@ fn test_wifi_phy_password_in_hide_secrets() {
 
     let secrets_wifi = secrets
         .ifaces
-        .get("wlan0", Some(&InterfaceType::WifiPhy))
+        .kernel_ifaces
+        .get("wlan0")
         .and_then(|i| {
             if let Interface::WifiPhy(w) = i {
                 w.wifi.as_ref()
@@ -130,7 +149,8 @@ fn test_wifi_phy_password_in_merge() {
 
     let wifi_iface = safe_state
         .ifaces
-        .get("wlan0", Some(&InterfaceType::WifiPhy))
+        .kernel_ifaces
+        .get("wlan0")
         .and_then(|i| {
             if let Interface::WifiPhy(w) = i {
                 w.wifi.as_ref()
@@ -151,7 +171,8 @@ fn test_wifi_phy_password_in_gen_diff() {
 
     let diff_wifi = diff_state
         .ifaces
-        .get("wlan0", Some(&InterfaceType::WifiPhy))
+        .kernel_ifaces
+        .get("wlan0")
         .and_then(|i| {
             if let Interface::WifiPhy(w) = i {
                 w.wifi.as_ref()
@@ -166,11 +187,12 @@ fn test_wifi_phy_password_in_gen_diff() {
 #[test]
 fn test_wifi_cfg_password_in_hide_secrets() {
     let mut state = gen_wifi_cfg_state_with_password();
-    let secrets = state.hide_secrets();
+    let secrets = state.extract_secrets().unwrap();
 
     let wifi_iface = state
         .ifaces
-        .get("Test-WIFI", Some(&InterfaceType::WifiCfg))
+        .user_ifaces
+        .get(&("Test-WIFI".to_string(), InterfaceType::WifiCfg))
         .and_then(|i| {
             if let Interface::WifiCfg(w) = i {
                 w.wifi.as_ref()
@@ -186,7 +208,8 @@ fn test_wifi_cfg_password_in_hide_secrets() {
 
     let secrets_wifi = secrets
         .ifaces
-        .get("Test-WIFI", Some(&InterfaceType::WifiCfg))
+        .user_ifaces
+        .get(&("Test-WIFI".to_string(), InterfaceType::WifiCfg))
         .and_then(|i| {
             if let Interface::WifiCfg(w) = i {
                 w.wifi.as_ref()
@@ -207,7 +230,8 @@ fn test_wifi_cfg_password_in_merge() {
 
     let wifi_iface = safe_state
         .ifaces
-        .get("Test-WIFI", Some(&InterfaceType::WifiCfg))
+        .user_ifaces
+        .get(&("Test-WIFI".to_string(), InterfaceType::WifiCfg))
         .and_then(|i| {
             if let Interface::WifiCfg(w) = i {
                 w.wifi.as_ref()
@@ -228,7 +252,8 @@ fn test_wifi_cfg_password_in_gen_diff() {
 
     let diff_wifi = diff_state
         .ifaces
-        .get("Test-WIFI", Some(&InterfaceType::WifiCfg))
+        .user_ifaces
+        .get(&("Test-WIFI".to_string(), InterfaceType::WifiCfg))
         .and_then(|i| {
             if let Interface::WifiCfg(w) = i {
                 w.wifi.as_ref()

@@ -50,42 +50,16 @@ impl NetworkState {
     /// Nipart cannot retrieve secret
     pub const UNKNOWN_SECRET_STR: &str = "<_unknown_>";
 
-    /// Ensure `kernel_iface_name` is populated for all interfaces using
-    /// `InterfaceIdentifier::Name` or no identifier.
-    pub fn resolve_name_identifier(&mut self) {
-        self.ifaces.resolve_name_identifier();
-    }
-
-    /// Resolve interfaces with `InterfaceIdentifier::MacAddress` by matching
-    /// against current interfaces by MAC address.
-    // TODO:
-    //  * refer port by MAC address
-    //  * refer parent by MAC address
-    //  * refer route next-hop-interface by MAC address
-    pub fn resolve_mac_identifier(
-        &mut self,
-        current: &Self,
-    ) -> Result<(), NipartError> {
-        self.ifaces.resolve_mac_identifier(&current.ifaces)
-    }
-
-    /// Resolve the `kernel_iface_name` for all interfaces by first applying
-    /// `resolve_name_identifier()` for Name-based interfaces, then
-    /// `resolve_mac_identifier()` for MAC-based interfaces.
-    pub fn resolve_kernel_iface_name(
-        &mut self,
-        current: &Self,
-    ) -> Result<(), NipartError> {
-        self.resolve_name_identifier();
-        self.resolve_mac_identifier(current)
-    }
-
     /// Return a network state with secrets only leaving self without any
     /// secrets.
-    pub fn hide_secrets(&mut self) -> Self {
+    pub fn hide_secrets(&mut self) {
+        self.ifaces.hide_secrets();
+    }
+
+    pub fn extract_secrets(&mut self) -> Result<Self, NipartError> {
         let old = self.clone();
         self.ifaces.hide_secrets();
-        old.gen_diff_no_sanitize(self.clone()).unwrap_or_default()
+        old.gen_diff(self)
     }
 
     pub fn is_empty(&self) -> bool {

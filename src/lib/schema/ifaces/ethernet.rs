@@ -73,30 +73,31 @@ impl NipartInterface for EthernetInterface {
         self.veth.is_some()
     }
 
-    fn hide_secrets_iface_specific(&mut self) {}
+    fn hide_secrets(&mut self) {}
 
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         current: Option<&Self>,
+        _for_save: &mut Self,
+        _for_apply: &mut Self,
+        _for_verify: &mut Self,
+        _merged: &mut Self,
     ) -> Result<(), NipartError> {
-        if self.is_up() && current.is_none() && self.veth.is_none() {
+        let desired = self;
+        if desired.is_up() && current.is_none() && desired.veth.is_none() {
             return Err(NipartError::new(
                 ErrorKind::InvalidArgument,
                 format!(
                     "Interface {} does not exist and veth section is not \
                      defined to create it",
-                    self.base.name
+                    desired.base.name
                 ),
             ));
         }
         Ok(())
     }
 
-    fn include_revert_context_iface_specific(
-        &mut self,
-        _desired: &Self,
-        _pre_apply: &Self,
-    ) {
+    fn include_revert_context(&mut self, _desired: &Self, _pre_apply: &Self) {
         /*
         if let (Interface::Ethernet(desired), Interface::Ethernet(current)) =
             (desired, current)
@@ -116,7 +117,8 @@ impl NipartInterface for EthernetInterface {
 
     /// Should be deleted when changing veth peer
     fn need_delete_before_change(&self, current: &Self) -> bool {
-        if let Some(des_peer) = self.veth.as_ref().map(|v| v.peer.as_str())
+        let desired = self;
+        if let Some(des_peer) = desired.veth.as_ref().map(|v| v.peer.as_str())
             && let Some(cur_peer) =
                 current.veth.as_ref().map(|v| v.peer.as_str())
             && des_peer != cur_peer

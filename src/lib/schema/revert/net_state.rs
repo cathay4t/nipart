@@ -2,21 +2,15 @@
 
 use crate::{MergedNetworkState, NetworkState, NipartError};
 
-impl NetworkState {
-    /// Generate revert state of desired(&self) state
-    /// The `pre_apply_state` should be the full running state before applying
-    /// specified desired state.
-    pub fn generate_revert(
-        &self,
-        pre_apply_state: &Self,
-    ) -> Result<Self, NipartError> {
-        let merged_state = MergedNetworkState::new(
-            self.clone(),
-            pre_apply_state.clone(),
-            Default::default(),
-        )?;
-        Ok(Self {
-            ifaces: merged_state.ifaces.generate_revert()?,
+impl MergedNetworkState {
+    /// Generate revert state of MergedNetworkState which holds desired state,
+    /// pre-apply current state.
+    /// The returned state could be applied to restore network config back to
+    /// pre-apply state.
+    pub fn generate_revert(&self) -> Result<NetworkState, NipartError> {
+        Ok(NetworkState {
+            ifaces: self.ifaces.generate_revert()?,
+            routes: self.routes.generate_revert()?,
             ..Default::default()
         })
     }

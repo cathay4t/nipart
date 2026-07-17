@@ -145,7 +145,7 @@ async fn save_state_to_file(
     log::trace!("Saving state {net_state}");
 
     let mut state = net_state.clone();
-    let secret_state = state.hide_secrets();
+    let secret_state = state.extract_secrets()?;
 
     let state_yaml_str = serde_yaml::to_string(&state).map_err(|e| {
         NipartError::new(
@@ -205,8 +205,16 @@ fn discard_absent_iface(state_to_save: &mut NetworkState) {
         })
         .collect();
     for (iface_name, iface_type) in pending_changes {
-        state_to_save
-            .ifaces
-            .remove(iface_name.as_str(), Some(&iface_type));
+        if iface_type.is_userspace() {
+            state_to_save
+                .ifaces
+                .user_ifaces
+                .remove(&(iface_name, iface_type));
+        } else {
+            state_to_save
+                .ifaces
+                .kernel_ifaces
+                .remove(iface_name.as_str());
+        }
     }
 }

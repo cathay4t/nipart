@@ -19,7 +19,7 @@ from nipart import NipartClient  # noqa: E402
 
 DAEMON_LOG = "/tmp/nipart_test_daemon.log"
 CLI_PATH = f"{project_dir}/target/debug/npt"
-DAEMON_PID_FILE = "/var/run/nipart/nipartd.pid"
+DAEMON_PID_FILE = "/var/run/nipart/nipart.pid"
 DAEMON_BIN_PATH = f"{project_dir}/target/debug/nipart"
 
 
@@ -30,6 +30,8 @@ def test_env_setup(backup_config, run_daemon):
 
 @pytest.fixture(scope="session")
 def backup_config():
+    if os.path.isdir("/etc/nipart.before_test"):
+        shutil.rmtree("/etc/nipart.before_test")
     if os.path.isdir("/etc/nipart"):
         os.rename("/etc/nipart", "/etc/nipart.before_test")
     yield
@@ -52,9 +54,7 @@ def run_daemon():
         with open(DAEMON_PID_FILE) as f:
             pid = f.read().strip()
         if pid:
-            exec_cmd(
-                ["kill", "-TERM", pid], check=False
-            )
+            exec_cmd(["kill", "-TERM", pid], check=False)
 
 
 def check_daemon_connection():

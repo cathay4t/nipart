@@ -60,20 +60,25 @@ impl NipartInterface for WireguardInterface {
         true
     }
 
-    fn hide_secrets_iface_specific(&mut self) {
+    fn hide_secrets(&mut self) {
         if let Some(wg_cfg) = self.wireguard.as_mut() {
             wg_cfg.hide_secrets();
         }
     }
 
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         current: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        merged: &mut Self,
     ) -> Result<(), NipartError> {
-        if let Some(wg_conf) = self.wireguard.as_mut() {
+        let desired = self;
+        if let Some(wg_conf) = for_apply.wireguard.as_mut() {
             wg_conf.sanitize(
                 current.and_then(|c| c.wireguard.as_ref()),
-                self.base.name.as_str(),
+                desired.base.name.as_str(),
             )?;
         } else if current.is_none() {
             return Err(NipartError::new(
@@ -81,9 +86,14 @@ impl NipartInterface for WireguardInterface {
                 format!(
                     "Need wireguard section for creating wireguard interface \
                      {}",
-                    self.base.name
+                    desired.base.name
                 ),
             ));
+        }
+        if for_apply.wireguard.is_some() {
+            for_save.wireguard = for_apply.wireguard.clone();
+            for_verify.wireguard = for_apply.wireguard.clone();
+            merged.wireguard = for_apply.wireguard.clone();
         }
         Ok(())
     }

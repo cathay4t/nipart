@@ -27,6 +27,7 @@ fn test_loopback_include_default_ip() {
     let merged = MergedNetworkState::new(
         desired,
         NetworkState::default(),
+        None,
         Default::default(),
     )
     .unwrap();

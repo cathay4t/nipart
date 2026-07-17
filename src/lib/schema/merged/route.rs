@@ -38,12 +38,15 @@ pub struct MergedRoutes {
     pub changed_routes: Vec<RouteEntry>,
     pub desired: Routes,
     pub current: Routes,
+    #[serde(default)]
+    pub saved: Option<Routes>,
 }
 
 impl MergedRoutes {
     pub fn new(
         mut desired: Routes,
         current: Routes,
+        saved: Option<Routes>,
         merged_ifaces: &MergedInterfaces,
     ) -> Result<Self, NipartError> {
         desired.remove_ignored_routes();
@@ -64,10 +67,20 @@ impl MergedRoutes {
             for rt in rts {
                 let mut rt = rt.clone();
                 rt.sanitize()?;
-                if let Some(ref iface) = rt.next_hop_iface {
-                    rt.next_hop_iface = Some(
-                        merged_ifaces.resolve_route_next_hop_iface(iface)?,
-                    );
+                if let Some(name) = rt.next_hop_iface.as_ref() {
+                    if let Some(kernel_iface_name) =
+                        merged_ifaces.resolve_route_next_hop_iface(name)
+                    {
+                        rt.next_hop_iface = Some(kernel_iface_name);
+                    } else {
+                        return Err(NipartError::new(
+                            ErrorKind::InvalidArgument,
+                            format!(
+                                "Failed to find kernel interface name
+                                for route {rt}"
+                            ),
+                        ));
+                    }
                 }
                 // Kernel rejects IPv4 route with gateway defined before
                 // DHCPv4 lease acquired on next hop interface, hence we
@@ -81,8 +94,8 @@ impl MergedRoutes {
                     })
                 {
                     log::debug!(
-                        "Setting onlink flag for route '{rt}' as its next \
-                         hop interface is DHCPv4 enabled"
+                        "Setting onlink flag for route '{rt}' as its next hop \
+                         interface is DHCPv4 enabled"
                     );
                     rt.onlink = Some(true);
                 }
@@ -250,12 +263,22 @@ impl MergedRoutes {
         let route_changed_ifaces: Vec<String> =
             changed_ifaces.iter().map(|i| i.to_string()).collect();
 
-        if let Some(ref mut config_rts) = desired.config {
+        if let Some(config_rts) = desired.config.as_mut() {
             for rt in config_rts.iter_mut() {
-                if let Some(ref iface) = rt.next_hop_iface {
-                    rt.next_hop_iface = Some(
-                        merged_ifaces.resolve_route_next_hop_iface(iface)?,
-                    );
+                if let Some(name) = rt.next_hop_iface.as_ref() {
+                    if let Some(kernel_iface_name) =
+                        merged_ifaces.resolve_route_next_hop_iface(name)
+                    {
+                        rt.next_hop_iface = Some(kernel_iface_name);
+                    } else {
+                        return Err(NipartError::new(
+                            ErrorKind::InvalidArgument,
+                            format!(
+                                "Failed to find kernel interface name
+                                for route {rt}"
+                            ),
+                        ));
+                    }
                 }
             }
         }
@@ -264,6 +287,7 @@ impl MergedRoutes {
             merged,
             desired,
             current,
+            saved,
             route_changed_ifaces,
             changed_routes: changed_routes.drain().collect(),
         };
@@ -304,6 +328,24 @@ impl MergedRoutes {
         Routes {
             running: None,
             config: Some(self.changed_routes.clone()),
+        }
+    }
+
+    pub(crate) fn gen_state_for_save(&self) -> Routes {
+        if let Some(config) = self.desired.config.as_ref() {
+            Routes {
+                running: None,
+                config: Some(config.clone()),
+            }
+        } else if let Some(saved) = self.saved.as_ref()
+            && let Some(config) = saved.config.as_ref()
+        {
+            Routes {
+                running: None,
+                config: Some(config.clone()),
+            }
+        } else {
+            Routes::default()
         }
     }
 }

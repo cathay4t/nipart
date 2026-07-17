@@ -75,16 +75,34 @@ impl NipartInterface for LoopbackInterface {
         &mut self.base
     }
 
+    // Loopback interface is virtual interface, but we should never allow
+    // deletion on this interface, hence return false here.
     fn is_virtual(&self) -> bool {
-        true
+        false
     }
 
     /// * Loopback interface should always have 127.0.0.1 and ::1 IP address
     ///   regardless what user desired.
-    fn sanitize_iface_specfic(
-        &mut self,
+    /// * Absent of loopback interface means revert to default.
+    fn sanitize(
+        &self,
         _current: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        merged: &mut Self,
     ) -> Result<(), NipartError> {
+        let desired = self;
+        if desired.is_absent() {
+            log::info!(
+                "Marking loopback interface as absent means revert loopback \
+                 interface to default state"
+            );
+            *for_save = desired.clone();
+            *for_apply = Self::default();
+            *merged = Self::default();
+            return Ok(());
+        }
         let default_ipv4_addr = InterfaceIpAddr {
             ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
             prefix_length: 8,
@@ -95,7 +113,7 @@ impl NipartInterface for LoopbackInterface {
             prefix_length: 128,
             ..Default::default()
         };
-        if let Some(ipv4) = self.base.ipv4.as_mut() {
+        if let Some(ipv4) = for_apply.base.ipv4.as_mut() {
             if !ipv4.is_enabled() {
                 return Err(NipartError::new(
                     ErrorKind::InvalidArgument,
@@ -112,9 +130,13 @@ impl NipartInterface for LoopbackInterface {
                 );
                 addrs.push(default_ipv4_addr);
             }
+            for_save.base.ipv4 = Some(ipv4.clone());
+            for_verify.base.ipv4 = Some(ipv4.clone());
+            merged.base.ipv4 = Some(ipv4.clone());
         }
 
-        if let Some(ipv6) = self.base.ipv6.as_mut() {
+        // TODO: user might disable IPv6 globally.
+        if let Some(ipv6) = for_apply.base.ipv6.as_mut() {
             if !ipv6.is_enabled() {
                 return Err(NipartError::new(
                     ErrorKind::InvalidArgument,
@@ -131,6 +153,9 @@ impl NipartInterface for LoopbackInterface {
                 );
                 addrs.push(default_ipv6_addr);
             }
+            for_verify.base.ipv6 = Some(ipv6.clone());
+            for_save.base.ipv6 = Some(ipv6.clone());
+            merged.base.ipv6 = Some(ipv6.clone());
         }
         Ok(())
     }

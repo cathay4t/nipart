@@ -161,9 +161,9 @@ def test_no_orphan_plugins_after_daemon_stop(restart_daemon):
         "Expected plugin processes to be running"
     )
     rc, out, _ = exec_cmd(
-        ["pgrep", "-x", "nipartd"], check=False
+        ["pgrep", "-x", "nipart"], check=False
     )
-    assert rc == 0, "Cannot find daemon PID via pgrep -x nipartd"
+    assert rc == 0, "Cannot find daemon PID via pgrep -x nipart"
     daemon_pid = out.strip()
     exec_cmd(["kill", "-TERM", daemon_pid], check=False)
     for _ in range(20):

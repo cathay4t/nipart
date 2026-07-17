@@ -59,7 +59,7 @@ pub fn derive_json_display_hide_secrets(input: TokenStream) -> TokenStream {
         impl std::fmt::Display for #class_name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let mut self_clone = self.clone();
-                self_clone.hide_secrets();
+                let _ = self_clone.hide_secrets();
                 match serde_json::to_string(&self_clone) {
                     Ok(s) => {
                         // For simple string, remove the quote.
@@ -98,7 +98,7 @@ pub fn derive_debug_hide_secrets(input: TokenStream) -> TokenStream {
         impl std::fmt::Debug for #class_name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let mut self_clone = self.clone();
-                self_clone.hide_secrets();
+                let _ = self_clone.hide_secrets();
                 match serde_json::to_string(&self_clone) {
                     Ok(s) => {
                         // For simple string, remove the quote.

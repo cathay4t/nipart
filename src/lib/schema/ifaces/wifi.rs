@@ -66,15 +66,20 @@ impl NipartInterface for WifiPhyInterface {
         false
     }
 
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         _current: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        merged: &mut Self,
     ) -> Result<(), NipartError> {
-        let iface_name = self.name().to_string();
-        if let Some(wifi_cfg) = self.wifi.as_mut() {
+        let desired = self;
+        let iface_name = desired.name();
+        if let Some(wifi_cfg) = for_apply.wifi.as_mut() {
             wifi_cfg.sanitize();
             if let Some(base_iface_name) = wifi_cfg.base_iface.as_ref()
-                && base_iface_name != &iface_name
+                && base_iface_name != iface_name
             {
                 return Err(NipartError::new(
                     ErrorKind::InvalidArgument,
@@ -85,57 +90,57 @@ impl NipartInterface for WifiPhyInterface {
                     ),
                 ));
             } else {
-                wifi_cfg.base_iface = Some(iface_name);
+                wifi_cfg.base_iface = Some(iface_name.to_string());
             }
+        }
+        if for_apply.wifi.is_some() {
+            for_save.wifi = for_apply.wifi.clone();
+            for_verify.wifi = for_apply.wifi.clone();
+            merged.wifi = for_apply.wifi.clone();
         }
         Ok(())
     }
 
-    fn hide_secrets_iface_specific(&mut self) {
+    fn hide_secrets(&mut self) {
         if let Some(wifi_cfg) = self.wifi.as_mut() {
             wifi_cfg.hide_secrets();
         }
     }
 
-    fn sanitize_before_verify_iface_specfic(&mut self, current: &mut Self) {
+    fn sanitize_before_verify(&mut self, current: &mut Self) {
+        let desired = self;
         // base_iface is an internal field set by sanitize() but not
         // available from kernel query, so strip it before verification.
-        if let Some(wifi_cfg) = self.wifi.as_mut() {
+        if let Some(wifi_cfg) = desired.wifi.as_mut() {
             wifi_cfg.base_iface = None;
             wifi_cfg.remove_secrets();
         }
-        current.hide_secrets_iface_specific()
+        current.hide_secrets()
     }
 
-    /// Do not strip secrets during diff generation — they are needed for
-    /// detecting password changes.
-    fn sanitize_for_diff_iface_specific(&mut self, _current: &mut Self) {}
-
     /// Always include SSID if changed
-    fn include_diff_context_iface_specific(
-        &mut self,
-        desired: &Self,
-        current: &Self,
-    ) {
+    fn include_diff_context(&mut self, desired: &Self, current: &Self) {
+        let diff = self;
         if let Some(desired_wifi) = desired.wifi.as_ref()
             && let Some(current_wifi) = current.wifi.as_ref()
             && !desired_wifi.ssid.is_empty()
             && desired_wifi != current_wifi
         {
-            if let Some(diff_wifi) = self.wifi.as_mut() {
+            if let Some(diff_wifi) = diff.wifi.as_mut() {
                 diff_wifi.ssid = desired_wifi.ssid.to_string();
             } else {
-                self.wifi = Some(desired_wifi.clone());
+                diff.wifi = Some(desired_wifi.clone());
             }
         }
     }
 
-    fn post_merge_iface_specific(
+    fn post_merge(
         &mut self,
         _new: &Self,
         old: &Self,
     ) -> Result<(), NipartError> {
-        if let Some(wifi) = self.wifi.as_mut()
+        let merged = self;
+        if let Some(wifi) = merged.wifi.as_mut()
             && let Some(old_wifi) = old.wifi.as_ref()
         {
             wifi.post_merge(old_wifi);
@@ -289,63 +294,67 @@ impl NipartInterface for WifiCfgInterface {
         true
     }
 
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         _current: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        merged: &mut Self,
     ) -> Result<(), NipartError> {
-        if let Some(wifi_cfg) = self.wifi.as_mut() {
+        if let Some(wifi_cfg) = for_apply.wifi.as_mut() {
             wifi_cfg.sanitize();
+        }
+        if for_apply.wifi.is_some() {
+            for_save.wifi = for_apply.wifi.clone();
+            for_verify.wifi = for_apply.wifi.clone();
+            merged.wifi = for_apply.wifi.clone();
         }
         Ok(())
     }
 
-    fn hide_secrets_iface_specific(&mut self) {
+    fn hide_secrets(&mut self) {
         if let Some(wifi_cfg) = self.wifi.as_mut() {
             wifi_cfg.hide_secrets();
         }
     }
 
-    fn sanitize_before_verify_iface_specfic(&mut self, current: &mut Self) {
+    fn sanitize_before_verify(&mut self, current: &mut Self) {
+        let desired = self;
         // The IP stack and WIFI password is for daemon storage only and cannot
         // be query during applying(only stored after apply succeeded), hence
         // we remove ipv4 and ipv6 for `wifi-cfg` interface.
-        self.base.ipv4 = None;
-        self.base.ipv6 = None;
-        if let Some(wifi_cfg) = self.wifi.as_mut() {
+        desired.base.ipv4 = None;
+        desired.base.ipv6 = None;
+        if let Some(wifi_cfg) = desired.wifi.as_mut() {
             wifi_cfg.remove_secrets();
         }
-        current.hide_secrets_iface_specific()
+        current.hide_secrets()
     }
 
-    /// Do not strip secrets during diff generation — wifi-cfg secrets are
-    /// preserved for storage in applied.secrets.yml.
-    fn sanitize_for_diff_iface_specific(&mut self, _current: &mut Self) {}
-
     /// Always include SSID if changed
-    fn include_diff_context_iface_specific(
-        &mut self,
-        desired: &Self,
-        current: &Self,
-    ) {
+    fn include_diff_context(&mut self, desired: &Self, current: &Self) {
+        let diff = self;
         if let Some(desired_wifi) = desired.wifi.as_ref()
             && let Some(current_wifi) = current.wifi.as_ref()
             && !desired_wifi.ssid.is_empty()
             && desired_wifi != current_wifi
         {
-            if let Some(diff_wifi) = self.wifi.as_mut() {
+            if let Some(diff_wifi) = diff.wifi.as_mut() {
                 diff_wifi.ssid = desired_wifi.ssid.to_string();
             } else {
-                self.wifi = Some(desired_wifi.clone());
+                diff.wifi = Some(desired_wifi.clone());
             }
         }
     }
 
-    fn post_merge_iface_specific(
+    fn post_merge(
         &mut self,
         _new: &Self,
         old: &Self,
     ) -> Result<(), NipartError> {
-        if let Some(wifi) = self.wifi.as_mut()
+        let merged = self;
+        if let Some(wifi) = merged.wifi.as_mut()
             && let Some(old_wifi) = old.wifi.as_ref()
         {
             wifi.post_merge(old_wifi);

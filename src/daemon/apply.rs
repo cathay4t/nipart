@@ -3,11 +3,10 @@
 use nipart::{
     Interface, MergedNetworkState, NetworkState, NipartApplyOption,
     NipartError, NipartInterface, NipartIpcConnection, NipartNoDaemon,
-    RouteEntry,
 };
 
 use super::commander::NipartCommander;
-use crate::{log_debug, log_error, log_info, log_trace, log_warn};
+use crate::{log_error, log_info, log_trace, log_warn};
 
 const RETRY_COUNT: usize = 10;
 const RETRY_INTERVAL_MS: u64 = 500;
@@ -16,7 +15,7 @@ impl NipartCommander {
     pub(crate) async fn apply_network_state(
         &mut self,
         mut conn: Option<&mut NipartIpcConnection>,
-        mut desired_state: NetworkState,
+        desired_state: NetworkState,
         opt: NipartApplyOption,
     ) -> Result<NetworkState, NipartError> {
         if desired_state.is_empty() {
@@ -32,50 +31,23 @@ impl NipartCommander {
         )
         .await;
 
-        desired_state.ifaces.unify_veth_and_ethernet();
-
-        let mut state_to_save = self.conf_manager.query_state().await?;
-
-        let mut state_to_apply = state_to_save.clone();
-        // TODO(Gris): There are many logs shows in this `merge()` process
-        // which is not redirected to requested user. We should
-        // find a way to redirect these logs.
-        state_to_apply.merge(&desired_state)?;
-        remove_undesired_states(&mut state_to_apply, &desired_state);
-
-        log_info(
-            conn.as_deref_mut(),
-            format!(
-                "Merged desired with previous saved state, state to apply \
-                 {state_to_apply}"
-            ),
-        )
-        .await;
-        let mut pre_apply_current_state = self
+        let pre_apply_current_state = self
             .query_network_state(conn.as_deref_mut(), Default::default())
             .await?;
 
-        pre_apply_current_state.ifaces.unify_veth_and_ethernet();
-
-        log_debug(
-            conn.as_deref_mut(),
-            format!("Pre-apply current state {pre_apply_current_state}"),
-        )
-        .await;
+        let saved_config = self.conf_manager.query_state().await?;
 
         let merged_state = MergedNetworkState::new(
-            state_to_apply,
-            pre_apply_current_state.clone(),
+            desired_state,
+            pre_apply_current_state,
+            Some(saved_config),
             opt.clone(),
         )?;
 
-        let state_to_apply = merged_state.gen_state_for_apply();
-
-        state_to_save.merge(&desired_state)?;
+        let state_to_save = merged_state.gen_state_for_save();
         log::debug!("State to save: {state_to_save}");
 
-        let revert_state =
-            state_to_apply.generate_revert(&pre_apply_current_state)?;
+        let revert_state = merged_state.generate_revert()?;
 
         // TODO(Gris Ge): discard auto IPs
 
@@ -117,15 +89,10 @@ impl NipartCommander {
             return Err(e);
         }
 
-        if let Err(e) =
-            self.conf_manager.save_state(state_to_save.clone()).await
-        {
+        if let Err(e) = self.conf_manager.save_state(state_to_save).await {
             log_warn(
                 conn.as_deref_mut(),
-                format!(
-                    "BUG: Failed to persistent desired state {state_to_save}: \
-                     {e}"
-                ),
+                format!("BUG: Failed to persistent desired state: {e}"),
             )
             .await;
         }
@@ -167,8 +134,12 @@ impl NipartCommander {
         let current_state = self
             .query_network_state(conn.as_deref_mut(), Default::default())
             .await?;
-        let mut merged_state =
-            MergedNetworkState::new(revert_state, current_state, opt.clone())?;
+        let mut merged_state = MergedNetworkState::new(
+            revert_state,
+            current_state,
+            None,
+            opt.clone(),
+        )?;
 
         let apply_state = merged_state.gen_state_for_apply();
 
@@ -215,11 +186,10 @@ impl NipartCommander {
         // pass the verification, we need to pretend the up/down trigger is
         // stored.
         for merged_iface in merged_state.ifaces.iter() {
-            if let Some(post_apply_iface) =
-                post_apply_current_state.ifaces.get_mut(
-                    merged_iface.merged.kernel_iface_name(),
-                    Some(merged_iface.merged.iface_type()),
-                )
+            if let Some(post_apply_iface) = post_apply_current_state
+                .ifaces
+                .kernel_ifaces
+                .get_mut(merged_iface.merged.kernel_iface_name())
             {
                 post_apply_iface.base_iface_mut().trigger = merged_iface
                     .for_apply
@@ -293,62 +263,4 @@ impl NipartCommander {
         }
         result
     }
-}
-
-/// When applying a desired state, we merge it with saved state.
-/// Hence should make sure unrelated state are included in state_to_apply.
-fn remove_undesired_states(
-    state_to_apply: &mut NetworkState,
-    api_desired_state: &NetworkState,
-) {
-    state_to_apply.ifaces.kernel_ifaces.retain(|iface_name, _| {
-        api_desired_state
-            .ifaces
-            .kernel_ifaces
-            .contains_key(&iface_name.to_string())
-    });
-    state_to_apply.ifaces.user_ifaces.retain(|key, _| {
-        api_desired_state
-            .ifaces
-            .user_ifaces
-            .contains_key(&(key.clone()))
-    });
-    if let Some(routes) = state_to_apply.routes.config.as_mut() {
-        routes.retain(|route| should_retain_route(route, api_desired_state))
-    };
-}
-
-// Only retain routes to apply when any conditions below matches:
-//  1. The route is explicitly presented in the api_desired_state
-//  2. The route is next-hop to any interface in api_desired_state. (the
-//     previous call of `state_to_apply.merge(&desired_state)` has already flat
-//     the impacted routes to hold next hop interface name)
-fn should_retain_route(
-    route: &RouteEntry,
-    api_desired_state: &NetworkState,
-) -> bool {
-    let Some(route_iface) = route.next_hop_iface.as_ref() else {
-        // The daemon start process already apply the route without next-hop
-        // interface, so we should not touch it in follow up apply action.
-        // If user ask to delete them, we should not include such route in
-        // desired state to apply anyway.
-        return false;
-    };
-
-    // The route is explicitly presented in the api_desired_state
-    if let Some(api_routes) = &api_desired_state.routes.config
-        && api_routes.as_slice().iter().any(|r| route.is_match(r))
-    {
-        return true;
-    }
-
-    for iface in api_desired_state.ifaces.iter() {
-        // The route is next-hop to any interface in api_desired_state
-        if !iface.kernel_iface_name().is_empty()
-            && iface.kernel_iface_name() == route_iface
-        {
-            return true;
-        }
-    }
-    false
 }

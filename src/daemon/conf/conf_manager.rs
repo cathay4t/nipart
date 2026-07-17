@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use nipart::{ErrorKind, NetworkState, NipartError, NipartInterface};
+use nipart::{ErrorKind, NetworkState, NipartError};
 
 use super::{NipartConfCmd, NipartConfReply, NipartConfWorker};
 use crate::TaskManager;
@@ -20,13 +20,8 @@ impl NipartConfManager {
     /// Override saved state
     pub(crate) async fn save_state(
         &mut self,
-        mut state: NetworkState,
+        state: NetworkState,
     ) -> Result<(), NipartError> {
-        // Should remove interface index
-        for iface in state.ifaces.kernel_ifaces.values_mut() {
-            iface.base_iface_mut().iface_index = None;
-        }
-
         self.mgr
             .exec(NipartConfCmd::SaveState(Box::new(state)))
             .await?;

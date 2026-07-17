@@ -9,7 +9,7 @@
 
 # Wait Online
 
-`npt wait-online` waits for `nipartd` to configure the network and reach an
+`npt wait-online` waits for `nipart` to configure the network and reach an
 `online` state. Used by `nipart-wait-online.service` for systemd
 `network-online.target`.
 
