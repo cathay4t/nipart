@@ -11,16 +11,17 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Default, JsonDisplay)]
 #[non_exhaustive]
 pub enum InterfaceTrigger {
-    /// Just use `interface.state` value to bring interface up and down,
-    /// No auto action will take afterwards.
-    /// This is default value.
-    #[default]
-    OneShot,
     // TODO: Support delay for up/down action to prevent flipping.
     /// Use link carrier to up and down the interface. In order
     /// to keep tracking future carrier changes of interface, only purge IP
     /// stack when carrier down.
+    /// This is default value.
+    #[default]
     Carrier,
+    /// Just use `interface.state` value to bring interface up and down upon
+    /// explicit apply action,
+    /// No auto action will take afterwards.
+    OneShot,
     /// Bring the interface up when connected to specified SSID.
     /// Bring the interface down when disconnected from specified SSID.
     /// String `*` means any SSID.

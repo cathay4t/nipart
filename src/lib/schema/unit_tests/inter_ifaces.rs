@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    BaseInterface, Interface, InterfaceIdentifier, InterfaceType, Interfaces,
-    MergedInterface, MergedInterfaces, MergedNetworkState, NetworkState,
-    NipartInterface,
+    BaseInterface, Interface, InterfaceIdentifier, InterfaceIpv4,
+    InterfaceType, Interfaces, MergedInterface, MergedInterfaces,
+    MergedNetworkState, NetworkState, NipartInterface,
 };
 
 /// Test basic MAC address matching with MAC provided.
@@ -786,4 +786,119 @@ fn test_route_next_hop_iface_unmatched_logical_name_adds_route() {
         merged.routes.changed_routes[0].next_hop_iface.as_deref(),
         Some("nonexistent")
     );
+}
+
+/// Test parsing `auto-gateway` in IPv4 DHCP config.
+#[test]
+fn test_ipv4_auto_gateway_false() {
+    let net_state: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+              auto-gateway: false
+        "#,
+    )
+    .unwrap();
+
+    let iface = net_state
+        .ifaces
+        .kernel_ifaces
+        .get("eth1")
+        .map(|i| i.base_iface().ipv4.as_ref().unwrap().clone())
+        .unwrap();
+
+    assert_eq!(iface.auto_gateway, Some(false));
+}
+
+/// Test that default value for `auto-gateway` is `None` when not specified.
+#[test]
+fn test_ipv4_auto_gateway_defaults() {
+    let net_state: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+        "#,
+    )
+    .unwrap();
+
+    let iface = net_state
+        .ifaces
+        .kernel_ifaces
+        .get("eth1")
+        .map(|i| i.base_iface().ipv4.as_ref().unwrap().clone())
+        .unwrap();
+
+    assert_eq!(iface.auto_gateway, None);
+}
+
+/// Test `auto-gateway: true`.
+#[test]
+fn test_ipv4_auto_gateway_true() {
+    let net_state: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+              auto-gateway: true
+        "#,
+    )
+    .unwrap();
+
+    let iface = net_state
+        .ifaces
+        .kernel_ifaces
+        .get("eth1")
+        .map(|i| i.base_iface().ipv4.as_ref().unwrap().clone())
+        .unwrap();
+
+    assert_eq!(iface.auto_gateway, Some(true));
+}
+
+/// Test that `InterfaceIpv4::new_disabled()` sets new fields to None.
+#[test]
+fn test_ipv4_new_disabled() {
+    let ipv4 = InterfaceIpv4::new_disabled();
+    assert_eq!(ipv4.auto_gateway, None);
+}
+
+/// Test that sanitize clears auto_gateway when DHCP is off.
+#[test]
+fn test_ipv4_sanitize_clears_when_dhcp_off() {
+    let mut ipv4 = InterfaceIpv4 {
+        enabled: Some(true),
+        dhcp: Some(false),
+        dhcp_state: None,
+        addresses: None,
+        auto_gateway: Some(false),
+    };
+    ipv4.sanitize(None).unwrap();
+    assert_eq!(ipv4.auto_gateway, None);
+}
+
+/// Test that sanitize clears auto_gateway when IP disabled.
+#[test]
+fn test_ipv4_sanitize_clears_when_ip_disabled() {
+    let mut ipv4 = InterfaceIpv4 {
+        enabled: Some(false),
+        dhcp: Some(true),
+        dhcp_state: None,
+        addresses: None,
+        auto_gateway: Some(false),
+    };
+    ipv4.sanitize(None).unwrap();
+    assert_eq!(ipv4.auto_gateway, None);
 }

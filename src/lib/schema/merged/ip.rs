@@ -22,6 +22,12 @@ impl InterfaceIpv4 {
                 a.preferred_life_time = None;
             });
         }
+        // DHCP options should not survive a merge which results in DHCP
+        // being off, otherwise old saved DHCP options will pollute future
+        // desired states.
+        if !self.is_auto() {
+            self.auto_gateway = None;
+        }
     }
 }
 
