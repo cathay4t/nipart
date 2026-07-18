@@ -156,6 +156,9 @@ async fn apply_lease(
                 next_hop_iface: Some(kernel_iface_name.to_string()),
                 next_hop_addr: Some(gateway.to_string()),
                 table_id: Some(DEFAULT_ROUTE_TABLE_ID),
+                // Lease is already applied, no need to bypass kernel
+                // gateway validation via onlink flag.
+                onlink: Some(false),
                 // TODO: Be consistent on metric?
                 // TODO: Priority ethernet over wifi/VPN/etc ?
                 metric: merged_iface

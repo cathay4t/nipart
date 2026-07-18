@@ -219,6 +219,11 @@ fn np_route_to_nipart(np_route: &nispor::Route) -> RouteEntry {
         mtu: np_route.mtu,
         quickack: np_route.quickack.map(|q| q > 0),
         advmss: np_route.advmss,
+        onlink: if np_route.flags.contains(&nispor::RouteFlag::Onlink) {
+            Some(true)
+        } else {
+            None
+        },
         ..Default::default()
     }
 }
@@ -258,6 +263,7 @@ fn nipart_to_nispor_route_conf(
     ret.oif.clone_from(&nipart_rt.next_hop_iface);
     ret.via.clone_from(&nipart_rt.next_hop_addr);
     ret.metric = nipart_rt.metric.and_then(|m| u32::try_from(m).ok());
+    ret.onlink = nipart_rt.onlink.unwrap_or_default();
     if let Some(table_id) = nipart_rt.table_id {
         if table_id > u8::MAX.into() {
             return Err(NipartError::new(

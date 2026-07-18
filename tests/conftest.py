@@ -20,6 +20,7 @@ from nipart import NipartClient  # noqa: E402
 DAEMON_LOG = "/tmp/nipart_test_daemon.log"
 CLI_PATH = f"{project_dir}/target/debug/npt"
 DAEMON_PID_FILE = "/var/run/nipart/nipartd.pid"
+DAEMON_BIN_PATH = f"{project_dir}/target/debug/nipart"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -41,9 +42,8 @@ def backup_config():
 
 @pytest.fixture(scope="session")
 def run_daemon():
-    bin_path = pathlib.Path(f"{project_dir}/target/debug/nipartd").resolve()
     subprocess.Popen(
-        bin_path, stdout=sys.stdout, stderr=open(DAEMON_LOG, "w")
+        DAEMON_BIN_PATH, stdout=sys.stdout, stderr=open(DAEMON_LOG, "w")
     )
     time.sleep(1)
     retry_till_true_or_timeout(30, check_daemon_connection)
@@ -88,7 +88,7 @@ def _wait_daemon_ready():
 def start_daemon():
     log_f = open(DAEMON_LOG, "a")
     subprocess.Popen(
-        [f"{project_dir}/target/debug/nipartd"],
+        [DAEMON_BIN_PATH],
         stdout=subprocess.DEVNULL,
         stderr=log_f,
     )

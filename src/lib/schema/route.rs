@@ -275,9 +275,19 @@ pub struct RouteEntry {
         deserialize_with = "crate::deserializer::option_u32_or_string"
     )]
     pub advmss: Option<u32>,
-    // TODO: Store the routes to the route table specified VRF bind to.
-    // #[serde(skip_serializing_if = "Option::is_none")]
-    // pub vrf_name: Option<String>,
+    /// Pretend the nexthop is directly attached to this link, even if it
+    /// does not match any interface prefix. It is useful when routes been
+    /// added before DHCP or IPv6-RA finishes.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "crate::deserializer::option_bool_or_string"
+    )]
+    pub onlink: Option<bool>, /* TODO: Store the routes to the route table
+                               * specified VRF bind to.
+                               * #[serde(skip_serializing_if =
+                               * "Option::is_none")]
+                               * pub vrf_name: Option<String>, */
 }
 
 #[derive(
@@ -372,6 +382,10 @@ impl RouteEntry {
         if self.advmss.is_some() && self.advmss != other.advmss {
             return false;
         }
+        if self.onlink.is_some() && self.onlink != other.onlink {
+            return false;
+        }
+
         // if self.vrf_name.is_some() && self.vrf_name != other.vrf_name {
         //    return false;
         // }
@@ -392,6 +406,7 @@ impl RouteEntry {
                     .map(|d| is_ipv6_addr(d.as_str()))
                     .unwrap_or_default(),
                 self.quickack.unwrap_or_default(),
+                self.onlink.unwrap_or_default(),
             ],
             vec![
                 self.next_hop_iface
