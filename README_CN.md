@@ -54,19 +54,19 @@ interfaces:
 
 ## 功能特性
 
-* [基础接口管理](features/base.md)
-* [IP 地址](features/ip.md)
-* [无守护进程模式](features/no_daemon_mode.md)
-* [WIFI](features/wifi.md)
-* [路由](features/route.md)
-* [条件化网络启停](features/trigger.md)
-* [网络就绪等待](features/wait-online.md)
-* [Vlan](features/vlan.md)
-* [VxLAN](features/vxlan.md)
-* [Bond](features/bond.md)
-* [Linux 网桥](features/bridge.md)
-* [OpenvSwitch 网桥](features/ovs.md)
-* [Wireguard](features/wireguard.md)
+* [基础接口管理](docs/chinese/features/base.md)
+* [IP 地址](docs/chinese/features/ip.md)
+* [无守护进程模式](docs/chinese/features/no_daemon_mode.md)
+* [WIFI](docs/chinese/features/wifi.md)
+* [路由](docs/chinese/features/route.md)
+* [条件化网络启停](docs/chinese/features/trigger.md)
+* [网络就绪等待](docs/chinese/features/wait-online.md)
+* [Vlan](docs/chinese/features/vlan.md)
+* [VxLAN](docs/chinese/features/vxlan.md)
+* [Bond](docs/chinese/features/bond.md)
+* [Linux 网桥](docs/chinese/features/bridge.md)
+* [OpenvSwitch 网桥](docs/chinese/features/ovs.md)
+* [Wireguard](docs/chinese/features/wireguard.md)
 
 ## 安装
 
@@ -74,7 +74,7 @@ interfaces:
 ```bash
 cargo build --release
 sudo systemctl stop nipart || true
-sudo cp -fv target/release/nipart /usr/bin/
+sudo cp -fv target/release/nipartd /usr/bin/
 sudo cp -fv target/release/npt /usr/bin/
 sudo cp -fv packaging/nipart.service /etc/systemd/system/
 sudo cp -fv packaging/nipart-wait-online.service /etc/systemd/system/
