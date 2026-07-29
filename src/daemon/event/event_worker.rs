@@ -187,6 +187,15 @@ impl NipartEventWorker {
     }
 }
 
+fn is_route_matching_iface(rt: &RouteEntry, iface: &Interface) -> bool {
+    match rt.next_hop_iface.as_deref() {
+        Some(name) if name == iface.kernel_iface_name() => true,
+        Some(name) if Some(name) == iface.base_iface().profile_name.as_deref() => true,
+        Some(name) if name == iface.name() => true,
+        _ => false,
+    }
+}
+
 fn gen_desired_iface_up(
     saved_iface: &Interface,
     saved_state: &NetworkState,
@@ -201,8 +210,7 @@ fn gen_desired_iface_up(
         && let Some(config_rts) = saved_state.routes.config.as_ref()
     {
         for rt in config_rts.iter().filter(|rt| {
-            rt.next_hop_iface.as_deref()
-                == Some(saved_iface.kernel_iface_name())
+            is_route_matching_iface(rt, saved_iface)
         }) {
             ret_routes.push(rt.clone());
         }
@@ -238,8 +246,7 @@ fn gen_desired_iface_down(
         && let Some(config_rts) = saved_state.routes.config.as_ref()
     {
         for rt in config_rts.iter().filter(|rt| {
-            rt.next_hop_iface.as_deref()
-                == Some(saved_iface.kernel_iface_name())
+            is_route_matching_iface(rt, saved_iface)
         }) {
             let mut new_route = rt.clone();
             new_route.state = Some(RouteState::Absent);

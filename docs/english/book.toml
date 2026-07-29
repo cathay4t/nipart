@@ -2,6 +2,7 @@
 title = "Nipart Document"
 authors = ["Gris Ge"]
 description = "Nipart Document"
+src = "./"
 
 [rust]
 edition = "2024"

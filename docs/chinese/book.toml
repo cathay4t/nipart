@@ -1,0 +1,8 @@
+[book]
+title = "Nipart 文档"
+authors = ["Gris Ge"]
+description = "Nipart 文档"
+src = "./"
+
+[rust]
+edition = "2024"
