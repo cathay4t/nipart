@@ -476,6 +476,65 @@ fn test_merge_flow_with_mac_identifier() {
     assert!(apply_iface.base_iface().ipv4.is_some());
 }
 
+/// Test that sanitize converts MAC addresses to uppercase.
+#[test]
+fn test_sanitize_mac_address_to_uppercase() {
+    let mut base = BaseInterface::new(
+        "eth0".to_string(),
+        InterfaceType::Ethernet,
+    );
+    base.identifier = Some(InterfaceIdentifier::MacAddress);
+    base.mac_address = Some("00:23:45:67:89:1b".to_string());
+    base.permanent_mac_address = Some("aa:bb:cc:dd:ee:ff".to_string());
+
+    let mut for_save = base.clone();
+    let mut for_apply = base.clone();
+    let mut for_verify = base.clone();
+    let mut merged = base.clone();
+
+    base.sanitize(
+        None,
+        &mut for_save,
+        &mut for_apply,
+        &mut for_verify,
+        &mut merged,
+    )
+    .unwrap();
+
+    assert_eq!(
+        for_apply.mac_address.as_deref(),
+        Some("00:23:45:67:89:1B")
+    );
+    assert_eq!(
+        for_verify.mac_address.as_deref(),
+        Some("00:23:45:67:89:1B")
+    );
+    assert_eq!(
+        for_save.mac_address.as_deref(),
+        Some("00:23:45:67:89:1B")
+    );
+    assert_eq!(
+        merged.mac_address.as_deref(),
+        Some("00:23:45:67:89:1B")
+    );
+    assert_eq!(
+        for_apply.permanent_mac_address.as_deref(),
+        Some("AA:BB:CC:DD:EE:FF")
+    );
+    assert_eq!(
+        for_verify.permanent_mac_address.as_deref(),
+        Some("AA:BB:CC:DD:EE:FF")
+    );
+    assert_eq!(
+        for_save.permanent_mac_address.as_deref(),
+        Some("AA:BB:CC:DD:EE:FF")
+    );
+    assert_eq!(
+        merged.permanent_mac_address.as_deref(),
+        Some("AA:BB:CC:DD:EE:FF")
+    );
+}
+
 /// Test that sanitize does NOT override kernel_iface_name for MacAddress
 /// identifier.
 #[test]
