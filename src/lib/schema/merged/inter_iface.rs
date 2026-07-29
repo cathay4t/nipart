@@ -575,7 +575,7 @@ impl Interfaces {
     pub fn merge(&mut self, new_ifaces: &Self) -> Result<(), NipartError> {
         for new_iface in new_ifaces.iter() {
             if let Some(old_iface) = self.get_mut(new_iface.base_iface()) {
-                old_iface.merge(new_iface)?;
+                *old_iface = old_iface.merge(new_iface)?;
             } else {
                 self.push(new_iface.clone())
             }

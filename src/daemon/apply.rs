@@ -6,7 +6,7 @@ use nipart::{
 };
 
 use super::commander::NipartCommander;
-use crate::{log_error, log_info, log_trace, log_warn};
+use crate::{log_debug, log_error, log_info, log_trace, log_warn};
 
 const RETRY_COUNT: usize = 10;
 const RETRY_INTERVAL_MS: u64 = 500;
@@ -62,7 +62,7 @@ impl NipartCommander {
                 format!("Failed to apply desired state: {e}"),
             )
             .await;
-            log_warn(
+            log_debug(
                 conn.as_deref_mut(),
                 format!("Failed to apply merged state: {merged_state}"),
             )

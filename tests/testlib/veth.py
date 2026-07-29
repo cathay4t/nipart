@@ -14,15 +14,13 @@ def veth_interface(ifname, peer):
           veth:
             peer: {peer}
         """)
-    try:
-        yield
-    finally:
-        nipart_apply(f"""---
-            interfaces:
-            - name: {ifname}
-              type: veth
-              state: absent
-            - name: {peer}
-              type: veth
-              state: absent
-            """)
+    yield
+    nipart_apply(f"""---
+        interfaces:
+        - name: {ifname}
+          type: veth
+          state: absent
+        - name: {peer}
+          type: veth
+          state: absent
+        """)

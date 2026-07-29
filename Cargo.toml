@@ -49,6 +49,7 @@ features = ["feature", "hostname"]
 
 [workspace.dependencies.nispor]
 git = "https://github.com/nispor/nispor"
+#path = "../nispor/src/lib"
 
 [workspace.dependencies.mozim]
 git = "https://github.com/nispor/mozim"

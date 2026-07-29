@@ -10,7 +10,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BaseInterface, InterfaceType, JsonDisplay, NipartError, NipartInterface,
+    BaseInterface, ErrorKind, InterfaceType, JsonDisplay, NipartError,
+    NipartInterface,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonDisplay)]
@@ -25,6 +26,31 @@ pub struct OvsBridgeInterface {
 }
 
 impl OvsBridgeInterface {
+    pub(crate) fn change_port_name(
+        &mut self,
+        org_port_name: &str,
+        new_port_name: String,
+    ) -> Result<(), NipartError> {
+        if let Some(br_conf) = self.bridge.as_mut()
+            && let Some(ports) = br_conf.ports.as_mut()
+        {
+            for port in ports {
+                if port.name == org_port_name {
+                    port.name = new_port_name;
+                    return Ok(());
+                }
+            }
+        }
+        Err(NipartError::new(
+            ErrorKind::InvalidArgument,
+            format!(
+                "Port {} not found in OVS bridge {}",
+                org_port_name,
+                self.base.name.as_str()
+            ),
+        ))
+    }
+
     pub fn new(base: BaseInterface, bridge: Option<OvsBridgeConfig>) -> Self {
         Self { base, bridge }
     }

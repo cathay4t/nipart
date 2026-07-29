@@ -81,6 +81,31 @@ pub struct LinuxBridgeInterface {
 }
 
 impl LinuxBridgeInterface {
+    pub(crate) fn change_port_name(
+        &mut self,
+        org_port_name: &str,
+        new_port_name: String,
+    ) -> Result<(), NipartError> {
+        if let Some(br_conf) = self.bridge.as_mut()
+            && let Some(ports) = br_conf.ports.as_mut()
+        {
+            for port in ports {
+                if port.name == org_port_name {
+                    port.name = new_port_name;
+                    return Ok(());
+                }
+            }
+        }
+        Err(NipartError::new(
+            ErrorKind::InvalidArgument,
+            format!(
+                "Port {} not found in linux bridge {}",
+                org_port_name,
+                self.base.name.as_str()
+            ),
+        ))
+    }
+
     pub fn new(name: String, bridge: LinuxBridgeConfig) -> Self {
         Self {
             base: BaseInterface {
