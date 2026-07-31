@@ -65,8 +65,11 @@ impl MergedInterface {
             && let Some(for_save) = for_save.as_ref()
         {
             for_save.gen_diff(current)?
-        } else {
+        } else if desired.is_some() {
             for_save.clone()
+        } else {
+            // not desired but have saved config, no touch
+            None
         };
         // We don't process merged and for_revert state yet, it need to be done
         // after interface sensitization finished.
