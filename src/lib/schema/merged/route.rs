@@ -19,6 +19,13 @@ use crate::{
 
 const LOOPBACK_IFACE_NAME: &str = "lo";
 
+struct IfaceLists<'a> {
+    absent: HashSet<&'a str>,
+    ipv4_disabled: HashSet<&'a str>,
+    ipv6_disabled: HashSet<&'a str>,
+    dhcpv4_enabled: HashSet<&'a str>,
+}
+
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonDisplay,
 )]
@@ -52,236 +59,36 @@ impl MergedRoutes {
         desired.remove_ignored_routes();
         desired.validate()?;
 
-        let ifaces_with_dhcpv4_enabled: Vec<&str> = merged_ifaces
-            .kernel_ifaces
-            .values()
-            .filter(|i| {
-                i.merged.base_iface().ipv4.as_ref().and_then(|ip| ip.dhcp)
-                    == Some(true)
-            })
-            .map(|i| i.merged.kernel_iface_name())
-            .collect();
+        let iface_lists = collect_iface_lists(merged_ifaces);
 
-        let mut desired_routes = Vec::new();
-        if let Some(rts) = desired.config.as_ref() {
-            for rt in rts {
-                let mut rt = rt.clone();
-                rt.sanitize()?;
-                if let Some(name) = rt.next_hop_iface.as_ref() {
-                    if let Some(kernel_iface_name) =
-                        merged_ifaces.resolve_route_next_hop_iface(name)
-                    {
-                        rt.next_hop_iface = Some(kernel_iface_name);
-                    } else {
-                        return Err(NipartError::new(
-                            ErrorKind::InvalidArgument,
-                            format!(
-                                "Failed to find kernel interface name
-                                for route {rt}"
-                            ),
-                        ));
-                    }
-                }
-                // Kernel rejects IPv4 route with gateway defined before
-                // DHCPv4 lease acquired on next hop interface, hence we
-                // set onlink flag to bypass kernel gateway validation.
-                if rt.onlink.is_none()
-                    && !rt.is_absent()
-                    && !rt.is_ipv6()
-                    && rt.next_hop_addr.is_some()
-                    && rt.next_hop_iface.as_deref().is_some_and(|i| {
-                        ifaces_with_dhcpv4_enabled.contains(&i)
-                    })
-                {
-                    log::debug!(
-                        "Setting onlink flag for route '{rt}' as its next hop \
-                         interface is DHCPv4 enabled"
-                    );
-                    rt.onlink = Some(true);
-                }
-                desired_routes.push(rt);
-            }
-        }
+        let desired_routes =
+            resolve_desired_routes(&desired, merged_ifaces, &iface_lists)?;
 
         let mut changed_ifaces: HashSet<&str> = HashSet::new();
+
+        validate_desired_routes(
+            &desired_routes,
+            &iface_lists,
+            &mut changed_ifaces,
+        )?;
+        collect_absent_route_changes(
+            &desired_routes,
+            &current,
+            &mut changed_ifaces,
+        );
+
         let mut changed_routes: HashSet<RouteEntry> = HashSet::new();
+        let merged_routes = build_merged_and_changed_routes(
+            &current,
+            &desired_routes,
+            &iface_lists,
+            &mut changed_routes,
+        );
 
-        let ifaces_marked_as_absent: Vec<&str> = merged_ifaces
-            .kernel_ifaces
-            .values()
-            .filter(|i| i.merged.is_absent())
-            .map(|i| i.merged.kernel_iface_name())
-            .collect();
-
-        let ifaces_with_ipv4_disabled: Vec<&str> = merged_ifaces
-            .kernel_ifaces
-            .values()
-            .filter(|i| !i.merged.base_iface().is_ipv4_enabled())
-            .map(|i| i.merged.kernel_iface_name())
-            .collect();
-
-        let ifaces_with_ipv6_disabled: Vec<&str> = merged_ifaces
-            .kernel_ifaces
-            .values()
-            .filter(|i| !i.merged.base_iface().is_ipv6_enabled())
-            .map(|i| i.merged.kernel_iface_name())
-            .collect();
-
-        // Interface has route added.
-        for rt in desired_routes
-            .as_slice()
-            .iter()
-            .filter(|rt| !rt.is_absent())
-        {
-            if let Some(via) = rt.next_hop_iface.as_ref() {
-                if ifaces_marked_as_absent.contains(&via.as_str()) {
-                    return Err(NipartError::new(
-                        ErrorKind::InvalidArgument,
-                        format!(
-                            "The next hop interface of desired Route '{rt}' \
-                             has been marked as absent"
-                        ),
-                    ));
-                }
-                if rt.is_ipv6()
-                    && ifaces_with_ipv6_disabled.contains(&via.as_str())
-                {
-                    return Err(NipartError::new(
-                        ErrorKind::InvalidArgument,
-                        format!(
-                            "The next hop interface of desired Route '{rt}' \
-                             has been marked as IPv6 disabled"
-                        ),
-                    ));
-                }
-                if (!rt.is_ipv6())
-                    && ifaces_with_ipv4_disabled.contains(&via.as_str())
-                {
-                    return Err(NipartError::new(
-                        ErrorKind::InvalidArgument,
-                        format!(
-                            "The next hop interface of desired Route '{rt}' \
-                             has been marked as IPv4 disabled"
-                        ),
-                    ));
-                }
-                changed_ifaces.insert(via.as_str());
-            } else if rt.route_type.is_some() {
-                changed_ifaces.insert(LOOPBACK_IFACE_NAME);
-            }
-        }
-
-        // Interface has route deleted.
-        for absent_rt in
-            desired_routes.as_slice().iter().filter(|rt| rt.is_absent())
-        {
-            if let Some(cur_rts) = current.config.as_ref() {
-                for rt in cur_rts {
-                    if absent_rt.is_match(rt) {
-                        if let Some(via) = rt.next_hop_iface.as_ref() {
-                            changed_ifaces.insert(via.as_str());
-                        } else {
-                            changed_ifaces.insert(LOOPBACK_IFACE_NAME);
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut merged_routes: Vec<RouteEntry> = Vec::new();
-
-        if let Some(cur_rts) = current.config.as_ref() {
-            for rt in cur_rts {
-                if let Some(via) = rt.next_hop_iface.as_ref() {
-                    // We include current route to merged_routes when it is
-                    // not marked as absent due to absent interface or disabled
-                    // ip stack or route state:absent.
-                    if ifaces_marked_as_absent.contains(&via.as_str())
-                        || (rt.is_ipv6()
-                            && ifaces_with_ipv6_disabled
-                                .contains(&via.as_str()))
-                        || (!rt.is_ipv6()
-                            && ifaces_with_ipv4_disabled
-                                .contains(&via.as_str()))
-                        || desired_routes
-                            .as_slice()
-                            .iter()
-                            .filter(|r| r.is_absent())
-                            .any(|absent_rt| absent_rt.is_match(rt))
-                    {
-                        let mut new_rt = rt.clone();
-                        new_rt.state = Some(RouteState::Absent);
-                        changed_routes.insert(new_rt);
-                    } else {
-                        merged_routes.push(rt.clone());
-                    }
-                }
-            }
-        }
-
-        // Append desired routes
-        for rt in desired_routes
-            .as_slice()
-            .iter()
-            .filter(|rt| !rt.is_absent())
-        {
-            if let Some(cur_rts) = current.config.as_ref() {
-                if !cur_rts.as_slice().iter().any(|cur_rt| rt.is_match(cur_rt))
-                {
-                    changed_routes.insert(rt.clone());
-                    merged_routes.push(rt.clone());
-                }
-            } else {
-                changed_routes.insert(rt.clone());
-                merged_routes.push(rt.clone());
-            }
-        }
-
-        merged_routes.sort_unstable();
-        merged_routes.dedup();
-
-        let mut merged: HashMap<String, Vec<RouteEntry>> = HashMap::new();
-
-        for rt in merged_routes {
-            if let Some(via) = rt.next_hop_iface.as_ref() {
-                let rts: &mut Vec<RouteEntry> =
-                    match merged.entry(via.to_string()) {
-                        Entry::Occupied(o) => o.into_mut(),
-                        Entry::Vacant(v) => v.insert(Vec::new()),
-                    };
-                rts.push(rt);
-            } else if rt.route_type.is_some() {
-                let rts: &mut Vec<RouteEntry> =
-                    match merged.entry(LOOPBACK_IFACE_NAME.to_string()) {
-                        Entry::Occupied(o) => o.into_mut(),
-                        Entry::Vacant(v) => v.insert(Vec::new()),
-                    };
-                rts.push(rt);
-            }
-        }
+        let merged = group_by_next_hop_iface(merged_routes);
 
         let route_changed_ifaces: Vec<String> =
             changed_ifaces.iter().map(|i| i.to_string()).collect();
-
-        if let Some(config_rts) = desired.config.as_mut() {
-            for rt in config_rts.iter_mut() {
-                if let Some(name) = rt.next_hop_iface.as_ref() {
-                    if let Some(kernel_iface_name) =
-                        merged_ifaces.resolve_route_next_hop_iface(name)
-                    {
-                        rt.next_hop_iface = Some(kernel_iface_name);
-                    } else {
-                        return Err(NipartError::new(
-                            ErrorKind::InvalidArgument,
-                            format!(
-                                "Failed to find kernel interface name
-                                for route {rt}"
-                            ),
-                        ));
-                    }
-                }
-            }
-        }
 
         let mut ret = Self {
             merged,
@@ -348,6 +155,232 @@ impl MergedRoutes {
             Routes::default()
         }
     }
+}
+
+fn collect_iface_lists(merged_ifaces: &MergedInterfaces) -> IfaceLists<'_> {
+    let absent: HashSet<&str> = merged_ifaces
+        .kernel_ifaces
+        .values()
+        .filter(|i| i.merged.is_absent())
+        .map(|i| i.merged.kernel_iface_name())
+        .collect();
+
+    let ipv4_disabled: HashSet<&str> = merged_ifaces
+        .kernel_ifaces
+        .values()
+        .filter(|i| !i.merged.base_iface().is_ipv4_enabled())
+        .map(|i| i.merged.kernel_iface_name())
+        .collect();
+
+    let ipv6_disabled: HashSet<&str> = merged_ifaces
+        .kernel_ifaces
+        .values()
+        .filter(|i| !i.merged.base_iface().is_ipv6_enabled())
+        .map(|i| i.merged.kernel_iface_name())
+        .collect();
+
+    let dhcpv4_enabled: HashSet<&str> = merged_ifaces
+        .kernel_ifaces
+        .values()
+        .filter(|i| {
+            i.merged.base_iface().ipv4.as_ref().and_then(|ip| ip.dhcp)
+                == Some(true)
+        })
+        .map(|i| i.merged.kernel_iface_name())
+        .collect();
+
+    IfaceLists {
+        absent,
+        ipv4_disabled,
+        ipv6_disabled,
+        dhcpv4_enabled,
+    }
+}
+
+fn resolve_desired_routes(
+    desired: &Routes,
+    merged_ifaces: &MergedInterfaces,
+    iface_lists: &IfaceLists,
+) -> Result<Vec<RouteEntry>, NipartError> {
+    let mut desired_routes = Vec::new();
+    if let Some(rts) = desired.config.as_ref() {
+        for rt in rts {
+            let mut rt = rt.clone();
+            rt.sanitize()?;
+            if let Some(name) = rt.next_hop_iface.as_ref() {
+                if let Some(kernel_iface_name) =
+                    merged_ifaces.resolve_route_next_hop_iface(name)
+                {
+                    rt.next_hop_iface = Some(kernel_iface_name);
+                } else {
+                    return Err(NipartError::new(
+                        ErrorKind::InvalidArgument,
+                        format!(
+                            "Failed to find kernel interface name for route \
+                             {rt}"
+                        ),
+                    ));
+                }
+            }
+            // Kernel rejects IPv4 route with gateway defined before
+            // DHCPv4 lease acquired on next hop interface, hence we
+            // set onlink flag to bypass kernel gateway validation.
+            if rt.onlink.is_none()
+                && !rt.is_absent()
+                && !rt.is_ipv6()
+                && rt.next_hop_addr.is_some()
+                && rt
+                    .next_hop_iface
+                    .as_deref()
+                    .is_some_and(|i| iface_lists.dhcpv4_enabled.contains(&i))
+            {
+                log::debug!(
+                    "Setting onlink flag for route '{rt}' as its next hop \
+                     interface is DHCPv4 enabled"
+                );
+                rt.onlink = Some(true);
+            }
+            desired_routes.push(rt);
+        }
+    }
+    Ok(desired_routes)
+}
+
+fn validate_desired_routes<'a>(
+    desired_routes: &'a [RouteEntry],
+    iface_lists: &IfaceLists<'_>,
+    changed_ifaces: &mut HashSet<&'a str>,
+) -> Result<(), NipartError> {
+    for rt in desired_routes.iter().filter(|rt| !rt.is_absent()) {
+        if let Some(via) = rt.next_hop_iface.as_ref() {
+            if iface_lists.absent.contains(&via.as_str()) {
+                return Err(NipartError::new(
+                    ErrorKind::InvalidArgument,
+                    format!(
+                        "The next hop interface of desired Route '{rt}' has \
+                         been marked as absent"
+                    ),
+                ));
+            }
+            if rt.is_ipv6() && iface_lists.ipv6_disabled.contains(&via.as_str())
+            {
+                return Err(NipartError::new(
+                    ErrorKind::InvalidArgument,
+                    format!(
+                        "The next hop interface of desired Route '{rt}' has \
+                         been marked as IPv6 disabled"
+                    ),
+                ));
+            }
+            if (!rt.is_ipv6())
+                && iface_lists.ipv4_disabled.contains(&via.as_str())
+            {
+                return Err(NipartError::new(
+                    ErrorKind::InvalidArgument,
+                    format!(
+                        "The next hop interface of desired Route '{rt}' has \
+                         been marked as IPv4 disabled"
+                    ),
+                ));
+            }
+            changed_ifaces.insert(via.as_str());
+        } else if rt.route_type.is_some() {
+            changed_ifaces.insert(LOOPBACK_IFACE_NAME);
+        }
+    }
+    Ok(())
+}
+
+fn collect_absent_route_changes<'a>(
+    desired_routes: &[RouteEntry],
+    current: &'a Routes,
+    changed_ifaces: &mut HashSet<&'a str>,
+) {
+    for absent_rt in desired_routes.iter().filter(|rt| rt.is_absent()) {
+        if let Some(cur_rts) = current.config.as_ref() {
+            for rt in cur_rts {
+                if absent_rt.is_match(rt) {
+                    if let Some(via) = rt.next_hop_iface.as_ref() {
+                        changed_ifaces.insert(via.as_str());
+                    } else {
+                        changed_ifaces.insert(LOOPBACK_IFACE_NAME);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn build_merged_and_changed_routes(
+    current: &Routes,
+    desired_routes: &[RouteEntry],
+    iface_lists: &IfaceLists,
+    changed_routes: &mut HashSet<RouteEntry>,
+) -> Vec<RouteEntry> {
+    let mut merged_routes: Vec<RouteEntry> = Vec::new();
+
+    if let Some(cur_rts) = current.config.as_ref() {
+        for rt in cur_rts {
+            if let Some(via) = rt.next_hop_iface.as_ref() {
+                if iface_lists.absent.contains(&via.as_str())
+                    || (rt.is_ipv6()
+                        && iface_lists.ipv6_disabled.contains(&via.as_str()))
+                    || (!rt.is_ipv6()
+                        && iface_lists.ipv4_disabled.contains(&via.as_str()))
+                    || desired_routes
+                        .iter()
+                        .filter(|r| r.is_absent())
+                        .any(|absent_rt| absent_rt.is_match(rt))
+                {
+                    let mut new_rt = rt.clone();
+                    new_rt.state = Some(RouteState::Absent);
+                    changed_routes.insert(new_rt);
+                } else {
+                    merged_routes.push(rt.clone());
+                }
+            }
+        }
+    }
+
+    for rt in desired_routes.iter().filter(|rt| !rt.is_absent()) {
+        if let Some(cur_rts) = current.config.as_ref() {
+            if !cur_rts.iter().any(|cur_rt| rt.is_match(cur_rt)) {
+                changed_routes.insert(rt.clone());
+                merged_routes.push(rt.clone());
+            }
+        } else {
+            changed_routes.insert(rt.clone());
+            merged_routes.push(rt.clone());
+        }
+    }
+
+    merged_routes.sort_unstable();
+    merged_routes.dedup();
+    merged_routes
+}
+
+fn group_by_next_hop_iface(
+    merged_routes: Vec<RouteEntry>,
+) -> HashMap<String, Vec<RouteEntry>> {
+    let mut merged: HashMap<String, Vec<RouteEntry>> = HashMap::new();
+    for rt in merged_routes {
+        if let Some(via) = rt.next_hop_iface.as_ref() {
+            let rts: &mut Vec<RouteEntry> = match merged.entry(via.to_string())
+            {
+                Entry::Occupied(o) => o.into_mut(),
+                Entry::Vacant(v) => v.insert(Vec::new()),
+            };
+            rts.push(rt);
+        } else if rt.route_type.is_some() {
+            let rts: &mut Vec<RouteEntry> =
+                match merged.entry(LOOPBACK_IFACE_NAME.to_string()) {
+                    Entry::Occupied(o) => o.into_mut(),
+                    Entry::Vacant(v) => v.insert(Vec::new()),
+                };
+            rts.push(rt);
+        }
+    }
+    merged
 }
 
 impl Routes {
