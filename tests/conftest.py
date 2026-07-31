@@ -44,17 +44,21 @@ def backup_config():
 
 @pytest.fixture(scope="session")
 def run_daemon():
-    subprocess.Popen(
-        DAEMON_BIN_PATH, stdout=sys.stdout, stderr=open(DAEMON_LOG, "w")
+    daemon_proc = subprocess.Popen(
+        DAEMON_BIN_PATH,
+        stdout=sys.stdout,
+        stderr=open(DAEMON_LOG, "w"),
+        start_new_session=True,
     )
     time.sleep(1)
     retry_till_true_or_timeout(30, check_daemon_connection)
     yield
-    if os.path.exists(DAEMON_PID_FILE):
-        with open(DAEMON_PID_FILE) as f:
-            pid = f.read().strip()
-        if pid:
-            exec_cmd(["kill", "-TERM", pid], check=False)
+    daemon_proc.terminate()
+    try:
+        daemon_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        daemon_proc.kill()
+        daemon_proc.wait()
 
 
 def check_daemon_connection():
