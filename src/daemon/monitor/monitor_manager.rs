@@ -2,8 +2,8 @@
 
 use futures_channel::mpsc::UnboundedSender;
 use nipart::{
-    Interface, InterfaceTrigger, MergedNetworkState, NetworkState, NipartError,
-    NipartInterface,
+    Interface, InterfaceIdentifier, InterfaceTrigger, MergedNetworkState,
+    NetworkState, NipartError, NipartInterface,
 };
 
 use super::{
@@ -72,6 +72,8 @@ impl NipartMonitorManager {
                     .await?;
             } else if iface.base_iface().trigger.as_ref()
                 == Some(&InterfaceTrigger::Carrier)
+                || iface.base_iface().identifier
+                    == Some(InterfaceIdentifier::MacAddress)
             {
                 self.add_iface_to_monitor(iface.kernel_iface_name()).await?;
             }

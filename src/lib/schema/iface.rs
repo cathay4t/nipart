@@ -14,7 +14,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::value::get_json_value_difference;
 use crate::{
     BaseInterface, BondInterface, DummyInterface, ErrorKind, EthernetInterface,
-    InterfaceState, InterfaceType, JsonDisplayHideSecrets,
+    InterfaceIdentifier, InterfaceState, InterfaceType, JsonDisplayHideSecrets,
     LinuxBridgeInterface, LoopbackInterface, NipartError, NipartInterface,
     OvsBridgeInterface, OvsInterface, UnknownInterface, VlanInterface,
     VxlanInterface, WifiCfgInterface, WifiPhyInterface, WireguardInterface,
@@ -592,6 +592,37 @@ impl From<BaseInterface> for Interface {
 }
 
 impl Interface {
+    pub fn is_match(&self, cur_iface: &Self) -> bool {
+        if !is_same_type(self.iface_type(), cur_iface.iface_type()) {
+            return false;
+        }
+        let base = self.base_iface();
+        match &base.identifier {
+            None | Some(InterfaceIdentifier::Name) => {
+                self.kernel_iface_name() == cur_iface.kernel_iface_name()
+                    || self.name() == cur_iface.kernel_iface_name()
+            }
+            Some(InterfaceIdentifier::MacAddress) => {
+                if let Some(saved_mac) = base.mac_address.as_deref() {
+                    let saved_mac = saved_mac.to_ascii_uppercase();
+                    let cur_base = cur_iface.base_iface();
+                    cur_base
+                        .permanent_mac_address
+                        .as_deref()
+                        .map(|m| m.to_ascii_uppercase() == saved_mac)
+                        .unwrap_or(false)
+                        || cur_base
+                            .mac_address
+                            .as_deref()
+                            .map(|m| m.to_ascii_uppercase() == saved_mac)
+                            .unwrap_or(false)
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
     pub fn clone_name_type_only(&self) -> Self {
         self.base_iface().clone_name_type_only().into()
     }
@@ -638,4 +669,14 @@ impl Interface {
             Ok(())
         }
     }
+}
+
+const VETH_AND_ETHERNET_TYPES: [&InterfaceType; 2] =
+    [&InterfaceType::Veth, &InterfaceType::Ethernet];
+
+fn is_same_type(a: &InterfaceType, b: &InterfaceType) -> bool {
+    if a == b {
+        return true;
+    }
+    VETH_AND_ETHERNET_TYPES.contains(&a) && VETH_AND_ETHERNET_TYPES.contains(&b)
 }
