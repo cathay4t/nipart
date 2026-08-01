@@ -126,9 +126,10 @@ impl BaseInterface {
         if let Some(mac) = for_apply.mac_address.as_ref() {
             for_apply.mac_address = Some(mac.to_uppercase());
         }
-        if let Some(mac) = for_apply.permanent_mac_address.as_ref() {
-            for_apply.permanent_mac_address = Some(mac.to_uppercase());
-        }
+        // permanent_mac_address is query-only, should not be in for_apply
+        for_apply.permanent_mac_address = None;
+        for_save.permanent_mac_address = None;
+        for_verify.permanent_mac_address = None;
 
         if let Some(ipv4) = for_apply.ipv4.as_mut() {
             ipv4.sanitize(current.and_then(|c| c.ipv4.as_ref()))?;
