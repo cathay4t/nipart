@@ -132,14 +132,14 @@ impl BaseInterface {
 
         if let Some(ipv4) = for_apply.ipv4.as_mut() {
             ipv4.sanitize(current.and_then(|c| c.ipv4.as_ref()))?;
+            for_save.ipv4 = Some(ipv4.clone());
+            for_verify.ipv4 = Some(ipv4.clone());
         }
         if let Some(ipv6) = for_apply.ipv6.as_mut() {
             ipv6.sanitize(current.and_then(|c| c.ipv6.as_ref()))?;
+            for_save.ipv6 = Some(ipv6.clone());
+            for_verify.ipv6 = Some(ipv6.clone());
         }
-        for_save.ipv4 = for_apply.ipv4.clone();
-        for_save.ipv6 = for_apply.ipv6.clone();
-        for_verify.ipv4 = for_apply.ipv4.clone();
-        for_verify.ipv6 = for_apply.ipv6.clone();
         if let Some(mac) = for_apply.mac_address.as_ref() {
             for_save.mac_address = Some(mac.to_string());
             for_verify.mac_address = Some(mac.to_string());
