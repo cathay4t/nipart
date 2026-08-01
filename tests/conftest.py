@@ -105,12 +105,19 @@ def stop_daemon():
             pid = f.read().strip()
         if pid:
             exec_cmd(["kill", "-TERM", pid], check=False)
+            _wait_daemon_exited(pid)
+            return
     _wait_daemon_stopped()
-    if os.path.exists(DAEMON_PID_FILE):
-        with open(DAEMON_PID_FILE) as f:
-            pid = f.read().strip()
-        if pid:
-            exec_cmd(["kill", "-KILL", pid], check=False)
+
+
+def _wait_daemon_exited(pid):
+    for _ in range(40):
+        try:
+            os.kill(int(pid), 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.5)
+    exec_cmd(["kill", "-KILL", pid], check=False)
     _wait_daemon_stopped()
 
 

@@ -38,6 +38,10 @@ impl NipartMonitorManager {
         Ok(ret)
     }
 
+    pub(crate) async fn shutdown(&self) {
+        self.mgr.shutdown().await
+    }
+
     pub(crate) async fn pause(&mut self) -> Result<(), NipartError> {
         self.mgr.exec(NipartMonitorCmd::Pause).await?;
         Ok(())

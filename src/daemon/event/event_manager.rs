@@ -23,6 +23,10 @@ impl NipartEventManager {
         })
     }
 
+    pub(crate) async fn shutdown(&self) {
+        self.mgr.shutdown().await
+    }
+
     pub(crate) async fn set_commander(
         &mut self,
         commander: NipartCommander,
