@@ -136,13 +136,15 @@ async fn get_initialized_nics(
 
     let mut ret = Vec::new();
 
-    for iface in saved_state
+    // The `kernel_ifaces` HashMap is keyed by the interface profile name for
+    // MAC-address-matching interfaces whose kernel name is not resolved yet.
+    // Use this key so `remove_ready_state()` can locate the interface.
+    for (iface_key, iface) in saved_state
         .ifaces
         .kernel_ifaces
-        .values()
-        .filter(|i| !i.is_virtual())
+        .iter()
+        .filter(|(_, i)| !i.is_virtual())
     {
-        let kernel_iface_name = iface.kernel_iface_name();
         let cur_iface = cur_state
             .ifaces
             .kernel_ifaces
@@ -158,7 +160,7 @@ async fn get_initialized_nics(
                 cur_iface.name(),
                 cur_iface.iface_type()
             );
-            ret.push(kernel_iface_name.to_string());
+            ret.push(iface_key.to_string());
         }
     }
     Ok(ret)
@@ -179,7 +181,9 @@ fn remove_ready_state(
             state.ifaces.kernel_ifaces.get(kernel_iface_name.as_str())
             && iface.base_iface().controller.is_none()
         {
-            pending_ifaces.insert(iface.kernel_iface_name().to_string(), None);
+            // Use the HashMap key instead of `iface.kernel_iface_name()`
+            // which is empty for unresolved MAC-address-matching interfaces.
+            pending_ifaces.insert(kernel_iface_name.to_string(), None);
         }
     }
 
@@ -219,6 +223,16 @@ fn remove_ready_state(
             false
         }
     });
+    // Remove the ready routes from the original state so the retry loop can
+    // terminate once all saved state has been extracted for apply.
+    if let Some(state_rts) = state.routes.config.as_mut() {
+        state_rts.retain(|r| {
+            r.next_hop_iface
+                .as_ref()
+                .map(|n| !pending_ifaces.contains_key(n))
+                .unwrap_or(true)
+        });
+    }
 
     for (kernel_iface_name, _iface_type) in pending_ifaces.drain() {
         if let Some(iface) = state
