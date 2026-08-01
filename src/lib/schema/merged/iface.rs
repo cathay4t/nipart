@@ -121,7 +121,11 @@ impl MergedInterface {
                 for_verify.base_iface_mut(),
                 self.merged.base_iface_mut(),
             )?;
-            if for_apply.is_absent() && !desired.is_virtual() {
+            // Use `for_apply` (cloned from current via gen_diff) for
+            // the virtual check: the desired absent state may lack
+            // type-specific sections (e.g. veth), but `for_apply`
+            // retains them from the current kernel state.
+            if for_apply.is_absent() && !for_apply.is_virtual() {
                 for_apply.base_iface_mut().state = InterfaceState::Down;
             }
             desired.sanitize(
