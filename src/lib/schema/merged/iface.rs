@@ -38,6 +38,11 @@ pub struct MergedInterface {
     /// order yet.
     /// This should be set by MergedInterfaces::new().
     pub up_priority: Option<u32>,
+    /// Whether this up interface will be deleted and recreated during
+    /// apply (e.g. VLAN ID change). Routes on this interface will be
+    /// purged by the kernel when the interface is deleted.
+    #[serde(default)]
+    pub will_delete: bool,
 }
 
 impl MergedInterface {
@@ -89,6 +94,7 @@ impl MergedInterface {
             for_save,
             for_revert: None,
             up_priority: None,
+            will_delete: false,
         };
 
         ret.sanitize()?;

@@ -24,6 +24,7 @@ struct IfaceLists<'a> {
     ipv4_disabled: HashSet<&'a str>,
     ipv6_disabled: HashSet<&'a str>,
     dhcpv4_enabled: HashSet<&'a str>,
+    will_delete: HashSet<&'a str>,
 }
 
 #[derive(
@@ -78,12 +79,33 @@ impl MergedRoutes {
         );
 
         let mut changed_routes: HashSet<RouteEntry> = HashSet::new();
-        let merged_routes = build_merged_and_changed_routes(
+        let mut merged_routes = build_merged_and_changed_routes(
             &current,
             &desired_routes,
             &iface_lists,
             &mut changed_routes,
         );
+
+        // For interfaces that will be deleted and recreated, current
+        // routes are purged by kernel. Include saved routes so they
+        // are re-applied along with desired routes.
+        if let Some(saved) = saved.as_ref()
+            && let Some(saved_rts) = saved.config.as_ref()
+        {
+            for rt in saved_rts {
+                if rt.is_absent() {
+                    continue;
+                }
+                if let Some(via) = rt.next_hop_iface.as_ref()
+                    && iface_lists.will_delete.contains(&via.as_str())
+                    && !changed_routes.iter().any(|r| rt.is_match(r))
+                {
+                    changed_routes.insert(rt.clone());
+                    merged_routes.push(rt.clone());
+                    changed_ifaces.insert(via.as_str());
+                }
+            }
+        }
 
         let merged = group_by_next_hop_iface(merged_routes);
 
@@ -189,11 +211,19 @@ fn collect_iface_lists(merged_ifaces: &MergedInterfaces) -> IfaceLists<'_> {
         .map(|i| i.merged.kernel_iface_name())
         .collect();
 
+    let will_delete: HashSet<&str> = merged_ifaces
+        .kernel_ifaces
+        .values()
+        .filter(|i| i.will_delete)
+        .map(|i| i.merged.kernel_iface_name())
+        .collect();
+
     IfaceLists {
         absent,
         ipv4_disabled,
         ipv6_disabled,
         dhcpv4_enabled,
+        will_delete,
     }
 }
 
@@ -322,6 +352,12 @@ fn build_merged_and_changed_routes(
     if let Some(cur_rts) = current.config.as_ref() {
         for rt in cur_rts {
             if let Some(via) = rt.next_hop_iface.as_ref() {
+                if iface_lists.will_delete.contains(&via.as_str()) {
+                    // Routes on will_delete interfaces will be purged
+                    // by kernel when the interface is deleted, skip
+                    // them from current so they get re-applied.
+                    continue;
+                }
                 if iface_lists.absent.contains(&via.as_str())
                     || (rt.is_ipv6()
                         && iface_lists.ipv6_disabled.contains(&via.as_str()))
@@ -343,7 +379,16 @@ fn build_merged_and_changed_routes(
     }
 
     for rt in desired_routes.iter().filter(|rt| !rt.is_absent()) {
-        if let Some(cur_rts) = current.config.as_ref() {
+        let is_will_delete_iface = rt
+            .next_hop_iface
+            .as_deref()
+            .is_some_and(|via| iface_lists.will_delete.contains(via));
+        if is_will_delete_iface {
+            // Current routes on this interface are purged, so always
+            // treat desired routes as new.
+            changed_routes.insert(rt.clone());
+            merged_routes.push(rt.clone());
+        } else if let Some(cur_rts) = current.config.as_ref() {
             if !cur_rts.iter().any(|cur_rt| rt.is_match(cur_rt)) {
                 changed_routes.insert(rt.clone());
                 merged_routes.push(rt.clone());
