@@ -62,6 +62,14 @@ impl NipartClient {
     pub const DEFAULT_SOCKET_PATH: &'static str =
         "/var/run/nipart/sockets/daemon";
 
+    // The daemon is authoritative on how long `wait-online` should wait
+    // (configurable via the saved state `wait-online.timeout-sec`, default
+    // 30 seconds). Use a generous IPC timeout so the client doesn't race
+    // the daemon's wait with our shorter 30s default IPC timeout. This is a
+    // ceiling: a saved `timeout-sec` larger than this (10 minutes) is still
+    // capped by this IPC timeout.
+    const WAIT_ONLINE_IPC_TIMEOUT_MS: u32 = 10 * 60 * 1000;
+
     /// Create IPC connect to nipart daemon
     pub async fn new() -> Result<Self, NipartError> {
         Self::new_with_name("client").await
@@ -109,7 +117,11 @@ impl NipartClient {
 
     pub async fn wait_online(&mut self) -> Result<(), NipartError> {
         self.ipc.send(Ok(NipartClientCmd::WaitOnline)).await?;
-        self.ipc.recv::<()>().await
+        let original_timeout = self.ipc.timeout_ms;
+        self.ipc.set_timeout(Self::WAIT_ONLINE_IPC_TIMEOUT_MS);
+        let ret = self.ipc.recv::<()>().await;
+        self.ipc.set_timeout(original_timeout);
+        ret
     }
 
     pub async fn wifi_scan(

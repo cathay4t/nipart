@@ -24,7 +24,9 @@ pub struct NipartWaitOnline {
     #[serde(default = "default_tmo")]
     pub timeout_sec: u32,
     /// The network is considered as online when all of these conditions met.
-    /// If undefined, daemon wait all saved configuration been applied.
+    /// If undefined, defaults to [NipartWaitOnlineCondition::Gateway], i.e.
+    /// wait for the IPv4 or IPv6 default gateway to appear in the running
+    /// network state.
     /// If set to empty list explicitly, daemon will mark online once started.
     #[serde(default = "default_conditions")]
     pub conditions: Vec<NipartWaitOnlineCondition>,
