@@ -68,6 +68,15 @@ impl NipartCommander {
     //  3. Keep retry with timeout and interval for missing interfaces.
     pub(crate) async fn load_saved_state(&mut self) -> Result<(), NipartError> {
         self.monitor_manager.pause().await?;
+        let result = self.load_saved_state_inner().await;
+        // Always resume the monitor even when loading failed, otherwise the
+        // daemon would stop reacting to interface link events (e.g. wifi
+        // reconnect) for the rest of its life.
+        self.monitor_manager.resume().await?;
+        result
+    }
+
+    async fn load_saved_state_inner(&mut self) -> Result<(), NipartError> {
         let mut saved_state = self.conf_manager.query_state().await?;
         if saved_state.is_empty() {
             log::info!("Saved state is empty");
@@ -89,13 +98,29 @@ impl NipartCommander {
                         );
                     }
                     log::debug!("Applying saved state: {nic_ready_state}");
-                    self.apply_network_state(
-                        None,
-                        nic_ready_state,
-                        NipartApplyOption::new().no_verify().memory_only(),
-                    )
-                    .await?;
-                    log::debug!("Remaining saved state: {saved_state}");
+                    if let Err(e) = self
+                        .apply_network_state(
+                            None,
+                            nic_ready_state.clone(),
+                            NipartApplyOption::new().no_verify().memory_only(),
+                        )
+                        .await
+                    {
+                        // Do not abort the whole boot apply on failure (e.g.
+                        // wifi plugin not ready for wpa_supplicant yet).
+                        // Put the state back so the retry loop can try again.
+                        log::warn!(
+                            "Failed to apply saved state, will retry: {e}"
+                        );
+                        if let Err(e) = saved_state.merge(&nic_ready_state) {
+                            log::error!(
+                                "BUG: Failed to merge back unapplied saved \
+                                 state: {e}"
+                            );
+                        }
+                    } else {
+                        log::debug!("Remaining saved state: {saved_state}");
+                    }
                 }
                 if saved_state.is_empty() {
                     log::info!("All saved state applied successfully");
@@ -114,8 +139,14 @@ impl NipartCommander {
                     .await;
                 }
             }
+            if !saved_state.is_empty() {
+                log::error!(
+                    "Failed to apply all saved state within {} retries, \
+                     remaining: {saved_state}",
+                    BOOTUP_NIC_CHECK_MAX_COUNT
+                );
+            }
         }
-        self.monitor_manager.resume().await?;
         Ok(())
     }
 
@@ -234,12 +265,20 @@ fn remove_ready_state(
         });
     }
 
-    for (kernel_iface_name, _iface_type) in pending_ifaces.drain() {
-        if let Some(iface) = state
-            .ifaces
-            .kernel_ifaces
-            .remove(kernel_iface_name.as_str())
+    for (iface_name, iface_type) in pending_ifaces.drain() {
+        if let Some(iface) =
+            state.ifaces.kernel_ifaces.remove(iface_name.as_str())
         {
+            ret.ifaces.push(iface);
+        } else if let Some(iface_type) = iface_type
+            && let Some(iface) = state
+                .ifaces
+                .user_ifaces
+                .remove(&(iface_name.clone(), iface_type))
+        {
+            // Userspace interfaces (e.g. `wifi-cfg`, OVS bridge) are moved
+            // here so the boot retry loop can terminate after applying them
+            // instead of keeping them as "remaining saved state" forever.
             ret.ifaces.push(iface);
         }
     }
@@ -265,4 +304,75 @@ fn is_all_virtual_or_ready(
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use nipart::{InterfaceType, NetworkState, NipartInterface};
+
+    use super::remove_ready_state;
+
+    #[test]
+    fn test_remove_ready_state_moves_userspace_wifi_cfg() {
+        // A `wifi-cfg` profile is a userspace interface: it must be moved
+        // into the ready state so the boot retry loop can terminate, even
+        // when no kernel NIC is ready yet.
+        let mut state: NetworkState = serde_yaml::from_str(
+            r#"---
+            interfaces:
+              - name: HUAZHU-Hanting
+                type: wifi-cfg
+                state: up
+                wifi:
+                  ssid: HUAZHU-Hanting
+            "#,
+        )
+        .unwrap();
+
+        let ready = remove_ready_state(&mut state, &[]);
+
+        let wifi_cfgs: Vec<_> = ready
+            .ifaces
+            .iter()
+            .filter(|i| i.iface_type() == &InterfaceType::WifiCfg)
+            .collect();
+        assert_eq!(wifi_cfgs.len(), 1);
+        assert_eq!(wifi_cfgs[0].name(), "HUAZHU-Hanting");
+        assert!(state.ifaces.is_empty());
+    }
+
+    #[test]
+    fn test_remove_ready_state_keeps_unready_kernel_iface() {
+        // The non-virtual kernel interface without udev initialization must
+        // stay in the saved state for later retry, while the userspace
+        // `wifi-cfg` is moved out immediately.
+        let mut state: NetworkState = serde_yaml::from_str(
+            r#"---
+            interfaces:
+              - name: eth0
+                type: ethernet
+                state: up
+              - name: HUAZHU-Hanting
+                type: wifi-cfg
+                state: up
+                wifi:
+                  ssid: HUAZHU-Hanting
+            "#,
+        )
+        .unwrap();
+
+        let ready = remove_ready_state(&mut state, &[]);
+
+        assert_eq!(
+            ready
+                .ifaces
+                .iter()
+                .filter(|i| i.iface_type() == &InterfaceType::WifiCfg)
+                .count(),
+            1
+        );
+        // eth0 is not ready yet, it should still be pending in saved state.
+        assert!(state.ifaces.kernel_ifaces.contains_key("eth0"));
+        assert!(state.ifaces.user_ifaces.is_empty());
+    }
 }
