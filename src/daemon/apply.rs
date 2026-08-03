@@ -151,6 +151,9 @@ impl NipartCommander {
             .await?;
 
         self.dhcpv4_manager
+            .apply_dhcp_config(conn.as_deref_mut(), &merged_state)
+            .await?;
+        self.dhcpv6_manager
             .apply_dhcp_config(conn, &merged_state)
             .await?;
 
@@ -236,6 +239,9 @@ impl NipartCommander {
             .await?;
 
         self.dhcpv4_manager
+            .apply_dhcp_config(conn.as_deref_mut(), merged_state)
+            .await?;
+        self.dhcpv6_manager
             .apply_dhcp_config(conn.as_deref_mut(), merged_state)
             .await?;
 

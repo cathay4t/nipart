@@ -54,6 +54,7 @@ impl Default for LoopbackInterface {
                     enabled: Some(true),
                     autoconf: Some(false),
                     dhcp: Some(false),
+                    dhcp_state: None,
                     addresses: Some(vec![InterfaceIpAddr {
                         ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
                         prefix_length: 128,

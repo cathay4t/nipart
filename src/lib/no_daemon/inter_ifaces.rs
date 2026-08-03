@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{
     ErrorKind, Interface, MergedInterface, MergedInterfaces, NipartError,
-    NipartInterface,
+    NipartInterface, NipartNoDaemon,
 };
 
 pub(crate) async fn apply_ifaces(
@@ -214,18 +214,33 @@ async fn apply_ifaces_ip_changes(
 ) -> Result<(), NipartError> {
     let mut np_ifaces: Vec<nispor::IfaceConf> = Vec::new();
 
-    for merged_iface in merged_ifaces
-        .kernel_ifaces
-        .values()
-        .filter(|i| i.for_apply.is_some())
-    {
-        // It is safe to unwrap here as it is checked by filter()
-        let apply_iface = merged_iface.for_apply.as_ref().unwrap();
+    for merged_iface in merged_ifaces.kernel_ifaces.values() {
+        // Force allow IPv6 router advertisements when autoconf is enabled,
+        // so that SLAAC works even when IPv6 forwarding is enabled. IPv6
+        // must be enabled first, otherwise the accept_ra setting has no
+        // effect. Key off the desired state so the sysctls are applied even
+        // when the interface diff is empty. Use the resolved kernel name
+        // (`merged_iface.name()`) because `des_iface.name()` might hold a
+        // profile name.
+        if let Some(des_iface) = merged_iface.desired.as_ref()
+            && let Some(ipv6_conf) = des_iface.base_iface().ipv6.as_ref()
+            && ipv6_conf.autoconf == Some(true)
+        {
+            let iface_name = merged_iface.name();
+            log::debug!(
+                "Forcing IPv6 autoconf (accept_ra=2) on interface \
+                 {iface_name}"
+            );
+            NipartNoDaemon::enable_ipv6(iface_name).await?;
+            NipartNoDaemon::enable_autoconf(iface_name).await?;
+        }
 
-        if let Some(np_iface) = apply_iface_ip_changes(
-            apply_iface.base_iface(),
-            merged_iface.current.as_ref().map(|c| c.base_iface()),
-        )? {
+        if let Some(apply_iface) = merged_iface.for_apply.as_ref()
+            && let Some(np_iface) = apply_iface_ip_changes(
+                apply_iface.base_iface(),
+                merged_iface.current.as_ref().map(|c| c.base_iface()),
+            )?
+        {
             np_ifaces.push(np_iface);
         }
     }

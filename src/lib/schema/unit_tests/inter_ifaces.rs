@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    BaseInterface, InterfaceIdentifier, InterfaceIpv4, InterfaceIpv6,
-    InterfaceState, InterfaceType, Interfaces, MergedInterfaces,
+    BaseInterface, DhcpState, InterfaceIdentifier, InterfaceIpv4,
+    InterfaceIpv6, InterfaceState, InterfaceType, Interfaces, MergedInterfaces,
     MergedNetworkState, NetworkState, NipartInterface,
 };
 
@@ -882,6 +882,21 @@ fn test_ipv4_sanitize_clears_when_ip_disabled() {
     };
     ipv4.sanitize(None).unwrap();
     assert_eq!(ipv4.auto_gateway, None);
+}
+
+/// Test that ipv6 sanitize clears dhcp_state (query only field).
+#[test]
+fn test_ipv6_sanitize_clears_dhcp_state() {
+    let mut ipv6 = InterfaceIpv6 {
+        enabled: Some(true),
+        dhcp: Some(true),
+        dhcp_state: Some(DhcpState::Done),
+        autoconf: Some(false),
+        addresses: None,
+    };
+    ipv6.sanitize(None).unwrap();
+    assert_eq!(ipv6.dhcp_state, None);
+    assert_eq!(ipv6.dhcp, Some(true));
 }
 
 /// Test that bond port names are resolved from profile names to kernel

@@ -10,9 +10,12 @@ use nipart::{
 };
 
 use super::{
-    conf::NipartConfManager, daemon::NipartManagerCmd,
-    dhcp::NipartDhcpV4Manager, event::NipartEventManager,
-    monitor::NipartMonitorManager, plugin::NipartPluginManager,
+    conf::NipartConfManager,
+    daemon::NipartManagerCmd,
+    dhcp::{NipartDhcpV4Manager, NipartDhcpV6Manager},
+    event::NipartEventManager,
+    monitor::NipartMonitorManager,
+    plugin::NipartPluginManager,
     udev::udev_net_device_is_initialized,
 };
 
@@ -28,6 +31,7 @@ const BOOTUP_NIC_CHECK_INTERVAL_SEC_SLOW: u64 = 10;
 #[derive(Debug, Clone)]
 pub(crate) struct NipartCommander {
     pub(crate) dhcpv4_manager: NipartDhcpV4Manager,
+    pub(crate) dhcpv6_manager: NipartDhcpV6Manager,
     pub(crate) monitor_manager: NipartMonitorManager,
     pub(crate) conf_manager: NipartConfManager,
     pub(crate) plugin_manager: NipartPluginManager,
@@ -40,6 +44,7 @@ impl NipartCommander {
     ) -> Result<Self, NipartError> {
         let mut ret = Self {
             dhcpv4_manager: NipartDhcpV4Manager::new().await?,
+            dhcpv6_manager: NipartDhcpV6Manager::new().await?,
             monitor_manager: NipartMonitorManager::new(sender.clone()).await?,
             conf_manager: NipartConfManager::new().await?,
             plugin_manager: NipartPluginManager::new().await?,
@@ -57,6 +62,7 @@ impl NipartCommander {
         self.plugin_manager.shutdown().await;
         self.monitor_manager.shutdown().await;
         self.dhcpv4_manager.shutdown().await;
+        self.dhcpv6_manager.shutdown().await;
         self.conf_manager.shutdown().await;
         self.event_manager.shutdown().await;
     }

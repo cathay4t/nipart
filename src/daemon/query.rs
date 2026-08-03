@@ -54,6 +54,7 @@ impl NipartCommander {
                 }
 
                 self.dhcpv4_manager.fill_dhcp_states(&mut net_state).await?;
+                self.dhcpv6_manager.fill_dhcp_states(&mut net_state).await?;
 
                 if !opt.include_secrets {
                     net_state.hide_secrets();
