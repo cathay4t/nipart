@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer, ser::SerializeSeq,
@@ -124,10 +124,31 @@ impl Interfaces {
         }
     }
 
+    /// Iterate interfaces in the order they got inserted.
     pub fn iter(&self) -> impl Iterator<Item = &Interface> {
-        self.kernel_ifaces.values().chain(self.user_ifaces.values())
+        let mut seen_kernel: HashSet<&str> = HashSet::new();
+        let mut seen_user: HashSet<&(String, InterfaceType)> = HashSet::new();
+        self.insert_order.iter().filter_map(move |key| {
+            let (name, iface_type) = key;
+            if iface_type.is_userspace() {
+                if seen_user.insert(key) {
+                    self.user_ifaces.get(&(name.clone(), iface_type.clone()))
+                } else {
+                    None
+                }
+            } else if seen_kernel.insert(name.as_str()) {
+                self.kernel_ifaces.get(name)
+            } else {
+                None
+            }
+        })
     }
 
+    /// Iterate mutable interfaces.
+    ///
+    /// Unlike `iter()`, the order is not guaranteed since ordered mutable
+    /// access into the interface hash maps is not possible in safe Rust.
+    /// The only consumer, `hide_secrets()`, does not rely on ordering.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Interface> {
         self.kernel_ifaces
             .values_mut()

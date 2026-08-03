@@ -33,3 +33,24 @@ fn test_yaml_round_trip_ethernet_with_ip() {
     assert_eq!(state, reparsed);
 }
 
+#[test]
+fn test_yaml_round_trip_bond_with_ports() {
+    let (state, reparsed) = round_trip(
+        r#"---
+        interfaces:
+          - name: bond0
+            type: bond
+            bond:
+              mode: active-backup
+              options:
+                miimon: 100
+          - name: eth1
+            type: ethernet
+            controller: bond0
+          - name: eth2
+            type: ethernet
+            controller: bond0
+        "#,
+    );
+    assert_eq!(state, reparsed);
+}
