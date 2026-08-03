@@ -181,3 +181,16 @@ fn test_iface_de_wireguard() {
     assert!(matches!(iface, Interface::Wireguard(_)));
 }
 
+#[test]
+fn test_iface_de_unsupported_type_falls_to_unknown() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: hsr0
+        type: hsr
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::Unknown(_)));
+    assert_eq!(iface.iface_type(), &InterfaceType::Hsr);
+}
+
