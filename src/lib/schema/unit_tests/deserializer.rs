@@ -420,3 +420,10 @@ fn test_de_number_as_string_valid() {
     assert_eq!(t.v, "abc");
 }
 
+#[test]
+fn test_de_number_as_string_missing_field() {
+    let result: Result<TestRequiredNumberAsString, _> =
+        serde_yaml::from_str("{}");
+    assert!(result.is_err());
+}
+
