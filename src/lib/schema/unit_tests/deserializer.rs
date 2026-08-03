@@ -360,3 +360,12 @@ fn test_de_u32_or_string_missing_field() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_bool_or_string_valid() {
+    let t: TestRequiredBool = serde_yaml::from_str("v: true").unwrap();
+    assert!(t.v);
+
+    let t: TestRequiredBool = serde_yaml::from_str("v: \"yes\"").unwrap();
+    assert!(t.v);
+}
+
