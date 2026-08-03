@@ -72,3 +72,23 @@ fn test_yaml_round_trip_linux_bridge() {
     );
     assert_eq!(state, reparsed);
 }
+
+#[test]
+fn test_yaml_round_trip_vlan_and_vxlan() {
+    let (state, reparsed) = round_trip(
+        r#"---
+        interfaces:
+          - name: eth1.100
+            type: vlan
+            vlan:
+              base-iface: eth1
+              id: 100
+          - name: vxlan0
+            type: vxlan
+            vxlan:
+              base-iface: eth1.100
+              id: 100
+        "#,
+    );
+    assert_eq!(state, reparsed);
+}
