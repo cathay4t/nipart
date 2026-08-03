@@ -345,3 +345,12 @@ fn test_de_u16_or_string_missing_field() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_u32_or_string_valid() {
+    let t: TestRequiredU32 = serde_yaml::from_str("v: 4294967295").unwrap();
+    assert_eq!(t.v, u32::MAX);
+
+    let t: TestRequiredU32 = serde_yaml::from_str("v: \"4096\"").unwrap();
+    assert_eq!(t.v, 4096);
+}
+
