@@ -131,3 +131,12 @@ fn test_de_option_bool_string_case_insensitive() {
     assert_eq!(t.v, Some(false));
 }
 
+#[test]
+fn test_de_option_bool_integer() {
+    let t: TestOptionBool = serde_yaml::from_str("v: 1").unwrap();
+    assert_eq!(t.v, Some(true));
+
+    let t: TestOptionBool = serde_yaml::from_str("v: 0").unwrap();
+    assert_eq!(t.v, Some(false));
+}
+
