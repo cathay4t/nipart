@@ -130,3 +130,18 @@ fn test_iface_de_vlan() {
     assert!(matches!(iface, Interface::Vlan(_)));
 }
 
+#[test]
+fn test_iface_de_vxlan() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: vxlan0
+        type: vxlan
+        vxlan:
+          base-iface: eth1
+          id: 100
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::Vxlan(_)));
+}
+
