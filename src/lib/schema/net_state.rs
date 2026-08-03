@@ -22,7 +22,11 @@ pub struct NetworkState {
     /// Daemon wait-online configuration, if undefined, wait IPv4 or IPv6
     /// gateway been set or previous saved configuration. If defined, override
     /// previous saved configuration.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "wait-online"
+    )]
     pub wait_online: Option<NipartWaitOnline>,
     /// Routes
     #[serde(default)]

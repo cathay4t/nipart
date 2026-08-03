@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::{ErrorKind, NetworkState, NipartWaitOnlineCondition};
+
+#[test]
+fn test_new_from_yaml_valid_full_state() {
+    let state = NetworkState::new_from_yaml(
+        r#"---
+        version: 1
+        description: full state
+        wait-online:
+          timeout-sec: 60
+          conditions:
+            - gateway4
+        routes:
+          config:
+            - destination: 0.0.0.0/0
+              next-hop-address: 192.0.2.1
+              next-hop-interface: eth1
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(state.version, Some(1));
+    assert_eq!(state.description, Some("full state".to_string()));
+
+    let wait_online = state.wait_online.as_ref().unwrap();
+    assert_eq!(wait_online.timeout_sec, 60);
+    assert_eq!(
+        wait_online.conditions,
+        vec![NipartWaitOnlineCondition::Gateway4]
+    );
+
+    let routes = state.routes.config.as_ref().unwrap();
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].destination.as_deref(), Some("0.0.0.0/0"));
+
+    assert!(!state.ifaces.is_empty());
+    assert!(state.ifaces.kernel_ifaces.contains_key("eth1"));
+}
+
