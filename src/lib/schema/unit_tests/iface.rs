@@ -38,3 +38,15 @@ fn test_iface_de_veth_maps_to_ethernet() {
     }
 }
 
+#[test]
+fn test_iface_de_ovs_bridge() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: ovsbr0
+        type: ovs-bridge
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::OvsBridge(_)));
+}
+
