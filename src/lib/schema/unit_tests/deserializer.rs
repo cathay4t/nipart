@@ -199,3 +199,9 @@ fn test_de_option_u8_valid() {
     assert_eq!(t.v, Some(200));
 }
 
+#[test]
+fn test_de_option_u8_overflow() {
+    let result: Result<TestOptionU8, _> = serde_yaml::from_str("v: 256");
+    assert!(result.is_err());
+}
+
