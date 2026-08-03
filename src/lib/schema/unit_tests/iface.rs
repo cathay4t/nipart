@@ -18,3 +18,23 @@ fn test_iface_de_ethernet() {
     assert_eq!(iface.name(), "eth1");
 }
 
+#[test]
+fn test_iface_de_veth_maps_to_ethernet() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: veth0
+        type: veth
+        veth:
+          peer: veth1
+        "#,
+    )
+    .unwrap();
+
+    match &iface {
+        Interface::Ethernet(e) => {
+            assert_eq!(e.veth.as_ref().map(|v| v.peer.as_str()), Some("veth1"));
+        }
+        _ => panic!("veth should deserialize into Ethernet variant"),
+    }
+}
+
