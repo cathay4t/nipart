@@ -1215,3 +1215,85 @@ fn test_sanitize_copies_ip_when_for_apply_has_ip_changes() {
     // auto_gateway should be None because dhcp != Some(true)
     assert_eq!(ipv4.auto_gateway, None);
 }
+
+/// Saved MAC-identifier ifaces must all be retained in for_save when
+/// they are not part of the desired state.
+#[test]
+fn test_saved_mac_identifier_ifaces_kept_when_not_desired() {
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: vpn0
+          type: wireguard
+          state: up
+          wireguard:
+            private-key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            peers:
+            - endpoint: 192.0.2.1:51820
+              public-key: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+              allowed-ips:
+              - ip: 0.0.0.0
+                prefix-length: 0
+              protocol-version: 1
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:11:22:33:44:55
+        - name: eth1
+          type: ethernet
+          mac-address: 00:11:22:33:44:66
+        - name: eth2
+          type: ethernet
+          mac-address: 00:11:22:33:44:77
+        "#,
+    )
+    .unwrap();
+
+    let saved: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: nic1
+          profile-name: nic1
+          type: ethernet
+          identifier: mac-address
+          state: up
+          mac-address: 00:11:22:33:44:55
+        - name: nic2
+          profile-name: nic2
+          type: ethernet
+          identifier: mac-address
+          state: up
+          mac-address: 00:11:22:33:44:66
+        - name: nic3
+          profile-name: nic3
+          type: ethernet
+          identifier: mac-address
+          state: up
+          mac-address: 00:11:22:33:44:77
+        - name: TEST-WIFI
+          type: wifi-cfg
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+          wifi:
+            ssid: TEST-WIFI
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, Some(saved)).unwrap();
+    let for_save = merged.gen_state_for_save();
+
+    let names: Vec<String> =
+        for_save.iter().map(|i| i.name().to_string()).collect();
+    for expected in ["vpn0", "nic1", "nic2", "nic3", "TEST-WIFI"] {
+        assert!(
+            names.contains(&expected.to_string()),
+            "for_save {names:?} is missing {expected}"
+        );
+    }
+}
