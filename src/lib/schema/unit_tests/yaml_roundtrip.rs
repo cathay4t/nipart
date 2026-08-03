@@ -54,3 +54,21 @@ fn test_yaml_round_trip_bond_with_ports() {
     );
     assert_eq!(state, reparsed);
 }
+
+#[test]
+fn test_yaml_round_trip_linux_bridge() {
+    let (state, reparsed) = round_trip(
+        r#"---
+        interfaces:
+          - name: br0
+            type: linux-bridge
+            bridge:
+              options:
+                stp:
+                  enabled: true
+              port:
+                - name: eth1
+        "#,
+    );
+    assert_eq!(state, reparsed);
+}
