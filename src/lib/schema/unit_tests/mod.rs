@@ -11,3 +11,4 @@ mod net_state;
 mod serializer;
 mod vxlan;
 mod wifi;
+mod yaml_roundtrip;
