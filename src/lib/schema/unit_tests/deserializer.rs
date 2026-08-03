@@ -177,3 +177,10 @@ fn test_de_option_u64_hex_string() {
     assert_eq!(t.v, Some(255));
 }
 
+#[test]
+fn test_de_option_u64_invalid_string() {
+    let result: Result<TestOptionU64, _> =
+        serde_yaml::from_str("v: \"not-a-number\"");
+    assert!(result.is_err());
+}
+
