@@ -241,3 +241,10 @@ fn test_de_option_u32_valid() {
     assert_eq!(t.v, Some(4096));
 }
 
+#[test]
+fn test_de_option_u32_overflow() {
+    let result: Result<TestOptionU32, _> =
+        serde_yaml::from_str("v: 4294967296");
+    assert!(result.is_err());
+}
+
