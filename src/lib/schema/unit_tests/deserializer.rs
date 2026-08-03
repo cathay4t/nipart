@@ -427,3 +427,10 @@ fn test_de_number_as_string_missing_field() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_option_enum_string_or_integer_string() {
+    let t: TestOptionBondMode =
+        serde_yaml::from_str("v: active-backup").unwrap();
+    assert_eq!(t.v, Some(BondMode::ActiveBackup));
+}
+
