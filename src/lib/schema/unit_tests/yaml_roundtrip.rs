@@ -92,3 +92,26 @@ fn test_yaml_round_trip_vlan_and_vxlan() {
     );
     assert_eq!(state, reparsed);
 }
+
+#[test]
+fn test_yaml_round_trip_wireguard() {
+    let (state, reparsed) = round_trip(
+        r#"---
+        interfaces:
+          - name: wg0
+            type: wireguard
+            wireguard:
+              listen-port: 51820
+              private-key: aGFuZCBvdmVyIHRoZSBrZXk=
+              peers:
+                - public-key: cGVlciBwdWJsaWMga2V5
+                  preshared-key: cHJlLXNoYXJlZA==
+                  endpoint: 192.0.2.2:51820
+                  persistent-keepalive: 25
+                  allowed-ips:
+                    - ip: 192.0.2.0
+                      prefix-length: 24
+        "#,
+    );
+    assert_eq!(state, reparsed);
+}
