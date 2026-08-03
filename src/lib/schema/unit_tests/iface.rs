@@ -145,3 +145,15 @@ fn test_iface_de_vxlan() {
     assert!(matches!(iface, Interface::Vxlan(_)));
 }
 
+#[test]
+fn test_iface_de_bond() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: bond0
+        type: bond
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::Bond(_)));
+}
+
