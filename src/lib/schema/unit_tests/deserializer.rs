@@ -271,3 +271,12 @@ fn test_de_option_i64_unsigned_overflow() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_option_i64_string() {
+    let t: TestOptionI64 = serde_yaml::from_str("v: \"-5\"").unwrap();
+    assert_eq!(t.v, Some(-5));
+
+    let t: TestOptionI64 = serde_yaml::from_str("v: \"5\"").unwrap();
+    assert_eq!(t.v, Some(5));
+}
+
