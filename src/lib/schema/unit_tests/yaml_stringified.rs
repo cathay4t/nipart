@@ -70,3 +70,26 @@ fn test_yaml_stringified_bond_mode_and_option() {
     }
 }
 
+#[test]
+fn test_yaml_stringified_vlan_id() {
+    let state = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: eth1.100
+            type: vlan
+            vlan:
+              base-iface: eth1
+              id: "100"
+        "#,
+    )
+    .unwrap();
+
+    let iface = state.ifaces.kernel_ifaces.get("eth1.100").unwrap();
+    match iface {
+        Interface::Vlan(v) => {
+            assert_eq!(v.vlan.as_ref().unwrap().id, Some(100));
+        }
+        _ => panic!("expected vlan interface"),
+    }
+}
+
