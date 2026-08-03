@@ -447,3 +447,8 @@ fn test_de_option_enum_string_or_integer_invalid() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_option_enum_string_or_integer_absent_is_none() {
+    let t: TestOptionBondMode = serde_yaml::from_str("{}").unwrap();
+    assert_eq!(t.v, None);
+}
