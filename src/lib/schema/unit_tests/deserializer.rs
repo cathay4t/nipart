@@ -315,3 +315,12 @@ fn test_de_option_i32_absent_is_none() {
     assert_eq!(t.v, None);
 }
 
+#[test]
+fn test_de_u8_or_string_valid() {
+    let t: TestRequiredU8 = serde_yaml::from_str("v: 255").unwrap();
+    assert_eq!(t.v, 255);
+
+    let t: TestRequiredU8 = serde_yaml::from_str("v: \"200\"").unwrap();
+    assert_eq!(t.v, 200);
+}
+
