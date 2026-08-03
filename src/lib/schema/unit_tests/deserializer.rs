@@ -369,3 +369,9 @@ fn test_de_bool_or_string_valid() {
     assert!(t.v);
 }
 
+#[test]
+fn test_de_bool_or_string_missing_field() {
+    let result: Result<TestRequiredBool, _> = serde_yaml::from_str("{}");
+    assert!(result.is_err());
+}
+
