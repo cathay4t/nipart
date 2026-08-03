@@ -35,3 +35,9 @@ fn test_serialize_option_u32_as_hex_some() {
     );
 }
 
+#[test]
+fn test_serialize_option_u32_as_hex_none() {
+    let t = TestHexU32 { v: None };
+    let value: serde_yaml::Value = serde_yaml::to_value(&t).unwrap();
+    assert_eq!(value.get("v"), Some(&serde_yaml::Value::Null));
+}
