@@ -354,3 +354,9 @@ fn test_de_u32_or_string_valid() {
     assert_eq!(t.v, 4096);
 }
 
+#[test]
+fn test_de_u32_or_string_missing_field() {
+    let result: Result<TestRequiredU32, _> = serde_yaml::from_str("{}");
+    assert!(result.is_err());
+}
+
