@@ -159,3 +159,9 @@ fn test_de_option_bool_invalid_integer() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_option_u64_native_integer() {
+    let t: TestOptionU64 = serde_yaml::from_str("v: 42").unwrap();
+    assert_eq!(t.v, Some(42));
+}
+
