@@ -205,3 +205,9 @@ fn test_de_option_u8_overflow() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_option_u8_absent_is_none() {
+    let t: TestOptionU8 = serde_yaml::from_str("{}").unwrap();
+    assert_eq!(t.v, None);
+}
+
