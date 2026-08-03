@@ -89,7 +89,9 @@ impl NipartCommander {
             return Err(e);
         }
 
-        if let Err(e) = self.conf_manager.save_state(state_to_save).await {
+        if !merged_state.option.memory_only
+            && let Err(e) = self.conf_manager.save_state(state_to_save).await
+        {
             log_warn(
                 conn.as_deref_mut(),
                 format!("BUG: Failed to persistent desired state: {e}"),
