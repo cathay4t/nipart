@@ -44,3 +44,29 @@ fn test_yaml_stringified_bool_values() {
     assert_eq!(ipv4.dhcp, Some(true));
 }
 
+#[test]
+fn test_yaml_stringified_bond_mode_and_option() {
+    let state = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: bond0
+            type: bond
+            bond:
+              mode: 4
+              options:
+                miimon: "140"
+        "#,
+    )
+    .unwrap();
+
+    let iface = state.ifaces.kernel_ifaces.get("bond0").unwrap();
+    match iface {
+        Interface::Bond(b) => {
+            let bond = b.bond.as_ref().unwrap();
+            assert_eq!(bond.mode, Some(BondMode::LACP));
+            assert_eq!(bond.options.as_ref().unwrap().miimon, Some(140));
+        }
+        _ => panic!("expected bond interface"),
+    }
+}
+
