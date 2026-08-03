@@ -375,3 +375,14 @@ fn test_de_bool_or_string_missing_field() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_option_number_as_string_string() {
+    let t: TestOptionNumberAsString =
+        serde_yaml::from_str("v: \"hello\"").unwrap();
+    assert_eq!(t.v, Some("hello".to_string()));
+
+    let t: TestOptionNumberAsString =
+        serde_yaml::from_str("v: \"123\"").unwrap();
+    assert_eq!(t.v, Some("123".to_string()));
+}
+
