@@ -190,3 +190,12 @@ fn test_de_option_u64_absent_is_none() {
     assert_eq!(t.v, None);
 }
 
+#[test]
+fn test_de_option_u8_valid() {
+    let t: TestOptionU8 = serde_yaml::from_str("v: 255").unwrap();
+    assert_eq!(t.v, Some(255));
+
+    let t: TestOptionU8 = serde_yaml::from_str("v: \"200\"").unwrap();
+    assert_eq!(t.v, Some(200));
+}
+
