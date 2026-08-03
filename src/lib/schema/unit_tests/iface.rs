@@ -194,3 +194,9 @@ fn test_iface_de_unsupported_type_falls_to_unknown() {
     assert_eq!(iface.iface_type(), &InterfaceType::Hsr);
 }
 
+#[test]
+fn test_iface_de_missing_type_fails() {
+    let result: Result<Interface, _> = serde_yaml::from_str("name: eth1");
+    assert!(result.is_err());
+}
+
