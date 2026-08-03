@@ -132,6 +132,74 @@ fn test_auto_connect_yaml_round_trip() {
 }
 
 #[test]
+fn test_auto_connect_serialized_form() {
+    // The round-trip test cannot catch a wrong serialized form since the
+    // deserializer also accepts stringified booleans. Assert the exact
+    // YAML value types here.
+    let state = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            auto-connect: true
+          - name: eth2
+            type: ethernet
+            state: up
+            auto-connect: false
+          - name: wg0
+            type: wireguard
+            state: up
+            auto-connect:
+              wifi: HomeWifi
+          - name: wg1
+            type: wireguard
+            state: up
+            auto-connect:
+              wifi-not: OfficeWifi
+        "#,
+    )
+    .unwrap();
+
+    let value = serde_yaml::to_value(&state).unwrap();
+    let ifaces = value
+        .get("interfaces")
+        .and_then(serde_yaml::Value::as_sequence)
+        .unwrap();
+    assert_eq!(ifaces.len(), 4);
+    for iface in ifaces {
+        let name = iface
+            .get("name")
+            .and_then(serde_yaml::Value::as_str)
+            .unwrap();
+        let auto_connect = iface.get("auto-connect").unwrap();
+        match name {
+            "eth1" => {
+                assert_eq!(auto_connect, &serde_yaml::Value::Bool(true));
+            }
+            "eth2" => {
+                assert_eq!(auto_connect, &serde_yaml::Value::Bool(false));
+            }
+            "wg0" => {
+                assert_eq!(auto_connect.as_mapping().unwrap().len(), 1);
+                assert_eq!(
+                    auto_connect.get("wifi"),
+                    Some(&serde_yaml::Value::String("HomeWifi".to_string()))
+                );
+            }
+            "wg1" => {
+                assert_eq!(auto_connect.as_mapping().unwrap().len(), 1);
+                assert_eq!(
+                    auto_connect.get("wifi-not"),
+                    Some(&serde_yaml::Value::String("OfficeWifi".to_string()))
+                );
+            }
+            _ => panic!("Unexpected interface {name}"),
+        }
+    }
+}
+
+#[test]
 fn test_auto_connect_invalid_string() {
     // The old `trigger` values are not valid for `auto-connect`.
     let result = NetworkState::new_from_yaml(
