@@ -11,6 +11,6 @@ Limitations:
    after lease expired. Hence you need to run
    `np apply <YAML_FILE> --no-daemon` on a regular basis to renew DHCP lease.
 
- * Does not support [conditional interface up down](./trigger.md) because
-   we don't have daemon to monitor link carrier state and trigger interface
-   up/down conditionally. Use daemon mode instead.
+ * Does not support [conditional interface up down](./auto_connect.md)
+   because we don't have daemon to monitor link carrier state and trigger
+   interface up/down conditionally. Use daemon mode instead.

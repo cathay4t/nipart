@@ -2,7 +2,7 @@
 
 use futures_channel::mpsc::UnboundedSender;
 use nipart::{
-    Interface, InterfaceIdentifier, InterfaceTrigger, MergedNetworkState,
+    Interface, InterfaceAutoConnect, InterfaceIdentifier, MergedNetworkState,
     NetworkState, NipartError, NipartInterface,
 };
 
@@ -74,8 +74,8 @@ impl NipartMonitorManager {
             if iface.is_absent() {
                 self.del_iface_from_monitor(iface.kernel_iface_name())
                     .await?;
-            } else if iface.base_iface().trigger.as_ref()
-                == Some(&InterfaceTrigger::Carrier)
+            } else if iface.base_iface().auto_connect.as_ref()
+                == Some(&InterfaceAutoConnect::AutoConnect)
                 || iface.base_iface().identifier
                     == Some(InterfaceIdentifier::MacAddress)
             {
@@ -126,8 +126,9 @@ fn wifi_monitor_is_needed(full_saved_state: &NetworkState) -> bool {
             && wifi_iface.ssid().is_some()
         {
             return true;
-        } else if let Some(trigger) = iface.base_iface().trigger.as_ref()
-            && trigger.is_wifi()
+        } else if let Some(auto_connect) =
+            iface.base_iface().auto_connect.as_ref()
+            && auto_connect.is_wifi()
         {
             return true;
         }

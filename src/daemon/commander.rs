@@ -84,6 +84,9 @@ impl NipartCommander {
 
     async fn load_saved_state_inner(&mut self) -> Result<(), NipartError> {
         let mut saved_state = self.conf_manager.query_state().await?;
+        // Interfaces with `auto-connect: false` are only activated upon
+        // explicit apply action, not at boot.
+        remove_manual_activation(&mut saved_state);
         if saved_state.is_empty() {
             log::info!("Saved state is empty");
         } else {
@@ -312,11 +315,77 @@ fn is_all_virtual_or_ready(
     true
 }
 
+/// Remove interfaces with `auto-connect: false` from the state applied at
+/// boot: those interfaces are only activated upon explicit apply action.
+/// Interfaces depending on an excluded interface(ports of excluded
+/// controller or children of excluded parent) and routes pointing to them
+/// are also removed, otherwise the boot retry loop would never terminate.
+fn remove_manual_activation(state: &mut NetworkState) {
+    let mut excluded: Vec<String> = state
+        .ifaces
+        .iter()
+        .filter(|i| {
+            i.base_iface()
+                .auto_connect
+                .as_ref()
+                .is_some_and(|a| a.is_manual())
+        })
+        .map(|i| i.name().to_string())
+        .collect();
+
+    // Interfaces depending on an excluded interface cannot be activated at
+    // boot either.
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for iface in state.ifaces.iter() {
+            if excluded.iter().any(|n| n == iface.name()) {
+                continue;
+            }
+            if let Some(dependency) = iface
+                .base_iface()
+                .controller
+                .as_deref()
+                .or_else(|| iface.parent())
+                && excluded.iter().any(|n| n == dependency)
+            {
+                excluded.push(iface.name().to_string());
+                changed = true;
+            }
+        }
+    }
+
+    if excluded.is_empty() {
+        return;
+    }
+
+    for iface_name in excluded.as_slice() {
+        if state.ifaces.kernel_ifaces.remove(iface_name).is_some() {
+            log::info!(
+                "Skipping interface {iface_name} at boot due to \
+                 `auto-connect: false`"
+            );
+        }
+    }
+    state
+        .ifaces
+        .user_ifaces
+        .retain(|(iface_name, _), _| !excluded.iter().any(|n| n == iface_name));
+
+    if let Some(rts) = state.routes.config.as_mut() {
+        rts.retain(|rt| {
+            rt.next_hop_iface
+                .as_ref()
+                .is_none_or(|n| !excluded.iter().any(|e| e == n))
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use nipart::{InterfaceType, NetworkState, NipartInterface};
 
-    use super::remove_ready_state;
+    use super::{remove_manual_activation, remove_ready_state};
 
     #[test]
     fn test_remove_ready_state_moves_userspace_wifi_cfg() {
@@ -380,5 +449,66 @@ mod tests {
         // eth0 is not ready yet, it should still be pending in saved state.
         assert!(state.ifaces.kernel_ifaces.contains_key("eth0"));
         assert!(state.ifaces.user_ifaces.is_empty());
+    }
+
+    #[test]
+    fn test_remove_manual_activation() {
+        // Interfaces with `auto-connect: false`, their dependents, and
+        // routes pointing to them are removed from the boot state.
+        let mut state: NetworkState = serde_yaml::from_str(
+            r#"---
+            interfaces:
+              - name: eth0
+                type: ethernet
+                state: up
+                auto-connect: false
+              - name: eth0.100
+                type: vlan
+                state: up
+                vlan:
+                  base-iface: eth0
+                  id: 100
+              - name: eth1
+                type: ethernet
+                state: up
+                auto-connect: true
+              - name: eth2
+                type: ethernet
+                state: up
+              - name: bond0
+                type: bond
+                state: up
+                auto-connect: false
+                bond:
+                  mode: balance-rr
+              - name: eth3
+                type: ethernet
+                state: up
+                controller: bond0
+            routes:
+              config:
+                - destination: 192.0.2.0/24
+                  next-hop-interface: eth0
+                - destination: 198.51.100.0/24
+                  next-hop-interface: eth1
+            "#,
+        )
+        .unwrap();
+
+        remove_manual_activation(&mut state);
+
+        assert!(!state.ifaces.kernel_ifaces.contains_key("eth0"));
+        // VLAN on top of an excluded interface is also excluded.
+        assert!(!state.ifaces.kernel_ifaces.contains_key("eth0.100"));
+        assert!(!state.ifaces.kernel_ifaces.contains_key("bond0"));
+        // Port of an excluded controller is also excluded.
+        assert!(!state.ifaces.kernel_ifaces.contains_key("eth3"));
+        assert!(state.ifaces.kernel_ifaces.contains_key("eth1"));
+        // Interface without `auto-connect` keeps the default auto behavior.
+        assert!(state.ifaces.kernel_ifaces.contains_key("eth2"));
+
+        let rts = state.routes.config.unwrap();
+        assert_eq!(rts.len(), 1);
+        assert_eq!(rts[0].next_hop_iface.as_deref(), Some("eth1"));
     }
 }

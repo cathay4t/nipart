@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+mod auto_connect;
 mod gen_diff;
 mod iface;
 mod iface_identifier;
@@ -16,7 +17,6 @@ mod net_state;
 mod revert;
 mod route;
 mod state_options;
-mod trigger;
 mod value;
 mod version;
 mod wait_online;
@@ -29,6 +29,7 @@ pub(crate) mod serializer;
 pub(crate) use iface_search::IfaceSearch;
 
 pub use self::{
+    auto_connect::InterfaceAutoConnect,
     iface::Interface,
     iface_identifier::InterfaceIdentifier,
     iface_state::InterfaceState,
@@ -63,7 +64,6 @@ pub use self::{
         NipartApplyOption, NipartQueryOption, NipartStateKind,
         NipartWifiScanOption,
     },
-    trigger::InterfaceTrigger,
     version::CUR_SCHEMA_VERSION,
     wait_online::{NipartWaitOnline, NipartWaitOnlineCondition},
 };

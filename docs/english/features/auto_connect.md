@@ -8,19 +8,22 @@
 
 # Conditional Network Up/Down
 
-For conditionally bringing an interface up/down, the `trigger` section is
-used for daemon mode only.
+For conditionally bringing an interface up/down, the `auto-connect` section
+is used, daemon mode only.
 
-The `trigger` takes these values:
+The `auto-connect` takes these values:
 
-* `never`: Never do auto action to bring interface up/down.
-* `always`: Always bring interface up/down regardless of carrier.
-* `carrier`: Bring interface up if carrier is up, otherwise bring
-  interface down.
+* `true`: Activate the interface automatically:
+   * For physical interface, apply the config upon carrier up.
+   * For virtual interface(e.g. bond, VLAN, linux bridge), apply the config
+     upon boot or apply action.
+* `false`: Only apply the config upon apply action, ignored in boot action.
 * `wifi: <SSID>`: Bring interface up if specified SSID is connected,
   otherwise disconnect.
 * `wifi-not: <SSID>`: Bring interface down if specified SSID is connected,
   otherwise connect.
+
+When not defined, it defaults to `true`.
 
 ## Example: Carrier-based up/down
 
@@ -29,7 +32,7 @@ interfaces:
 - name: enp7s0
   type: ethernet
   state: up
-  trigger: carrier
+  auto-connect: true
   ipv4:
     enabled: true
     dhcp: false
@@ -60,7 +63,7 @@ interfaces:
     address:
     - ip: 198.51.100.9
       prefix-length: 24
-  trigger:
+  auto-connect:
     wifi-not: HomeWifi
   wireguard:
     public-key: JKossUAjywXuJ2YVcaeD6PaHs+afPmIthDuqEVlspwA=

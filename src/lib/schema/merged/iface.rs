@@ -313,9 +313,10 @@ impl MergedInterface {
     ) -> bool {
         if let Some(iface) = self.for_apply.as_ref() {
             if let Some(cur_iface) = self.current.as_ref() {
-                match iface
-                    .process_trigger(&cur_iface.into(), &merged_ifaces.current)
-                {
+                match iface.process_auto_connect(
+                    &cur_iface.into(),
+                    &merged_ifaces.current,
+                ) {
                     None => iface.base_iface().state == InterfaceState::Up,
                     Some(false) => false,
                     Some(true) => true,

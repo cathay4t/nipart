@@ -8,15 +8,18 @@
 
 # 条件化网络启停
 
-要条件化地启用/禁用接口，使用 `trigger` 部分，仅在守护进程模式下可用。
+要条件化地启用/禁用接口，使用 `auto-connect` 部分，仅在守护进程模式下可用。
 
-`trigger` 接受以下值：
+`auto-connect` 接受以下值：
 
-* `never`：从不自动启停接口。
-* `always`：始终启停接口，无论载体状态如何。
-* `carrier`：如果载体正常，启用接口；否则禁用接口。
+* `true`：自动激活接口：
+   * 对于物理接口，在载体启用时应用配置。
+   * 对于虚拟接口（如 bond、VLAN、linux bridge），在启动或应用操作时应用配置。
+* `false`：仅在应用操作时应用配置，启动操作时被忽略。
 * `wifi: <SSID>`：如果指定的 SSID 已连接，启用接口；否则断开连接。
 * `wifi-not: <SSID>`：如果指定的 SSID 已连接，禁用接口；否则连接。
+
+未定义时，默认为 `true`。
 
 ## 示例：基于载体的启停
 
@@ -25,7 +28,7 @@ interfaces:
 - name: enp7s0
   type: ethernet
   state: up
-  trigger: carrier
+  auto-connect: true
   ipv4:
     enabled: true
     dhcp: false
@@ -56,7 +59,7 @@ interfaces:
     address:
     - ip: 198.51.100.9
       prefix-length: 24
-  trigger:
+  auto-connect:
     wifi-not: HomeWifi
   wireguard:
     public-key: JKossUAjywXuJ2YVcaeD6PaHs+afPmIthDuqEVlspwA=

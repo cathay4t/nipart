@@ -59,7 +59,7 @@ interfaces:
 * [无守护进程模式](docs/chinese/features/no_daemon_mode.md)
 * [WIFI](docs/chinese/features/wifi.md)
 * [路由](docs/chinese/features/route.md)
-* [条件化网络启停](docs/chinese/features/trigger.md)
+* [条件化网络启停](docs/chinese/features/auto_connect.md)
 * [网络就绪等待](docs/chinese/features/wait-online.md)
 * [Vlan](docs/chinese/features/vlan.md)
 * [VxLAN](docs/chinese/features/vxlan.md)
