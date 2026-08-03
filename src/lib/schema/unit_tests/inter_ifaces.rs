@@ -492,6 +492,7 @@ fn test_sanitize_mac_address_to_uppercase() {
 
     base.sanitize(
         None,
+        None,
         &mut for_save,
         &mut for_apply,
         &mut for_verify,
@@ -525,6 +526,7 @@ fn test_sanitize_does_not_override_mac_kernel_iface_name() {
     for_apply.identifier = Some(InterfaceIdentifier::MacAddress);
     for_apply.kernel_iface_name = "eth0".to_string();
     base.sanitize(
+        None,
         None,
         &mut for_save,
         &mut for_apply,
@@ -1155,6 +1157,7 @@ fn test_sanitize_preserves_ip_when_for_apply_has_no_ip() {
 
     base.sanitize(
         None,
+        None,
         &mut for_save,
         &mut for_apply,
         &mut for_verify,
@@ -1174,10 +1177,12 @@ fn test_sanitize_preserves_ip_when_for_apply_has_no_ip() {
     assert_eq!(ipv6.autoconf, Some(false));
 }
 
-/// Test that BaseInterface::sanitize still copies sanitized IP from for_apply
-/// to for_save when for_apply has IP changes.
+/// Test that BaseInterface::sanitize fills `for_apply` with the full merged
+/// IP config (derived from `for_save`) instead of the partial diff, then
+/// propagates the sanitized config to `for_verify`, while `for_save` keeps
+/// its full config.
 #[test]
-fn test_sanitize_copies_ip_when_for_apply_has_ip_changes() {
+fn test_sanitize_fills_for_apply_ip_with_full_config() {
     let mut base =
         BaseInterface::new("eth0".to_string(), InterfaceType::Ethernet);
     base.ipv4 = Some(InterfaceIpv4 {
@@ -1187,18 +1192,18 @@ fn test_sanitize_copies_ip_when_for_apply_has_ip_changes() {
         ..Default::default()
     });
 
-    // for_apply has ipv4 with a different config (e.g. dhcp changed to false)
     let mut for_save = base.clone();
     let mut for_verify = base.clone();
     let mut merged = base.clone();
+    // for_apply holds only a partial IPv4 diff (e.g. dhcp toggled)
     let mut for_apply = base.clone();
     for_apply.ipv4 = Some(InterfaceIpv4 {
-        enabled: Some(true),
         dhcp: Some(false),
         ..Default::default()
     });
 
     base.sanitize(
+        None,
         None,
         &mut for_save,
         &mut for_apply,
@@ -1207,13 +1212,506 @@ fn test_sanitize_copies_ip_when_for_apply_has_ip_changes() {
     )
     .unwrap();
 
-    // for_save should have the sanitized ipv4 from for_apply
-    // dhcp: false → after sanitize, auto_gateway is set to None
-    let ipv4 = for_save.ipv4.as_ref().expect("ipv4 should be present");
-    assert_eq!(ipv4.enabled, Some(true));
-    assert_eq!(ipv4.dhcp, Some(false));
-    // auto_gateway should be None because dhcp != Some(true)
-    assert_eq!(ipv4.auto_gateway, None);
+    // for_apply must carry the full merged config from for_save, sanitized.
+    let apply_ipv4 = for_apply.ipv4.as_ref().expect("ipv4 should be present");
+    assert_eq!(apply_ipv4.enabled, Some(true));
+    assert_eq!(apply_ipv4.dhcp, Some(true));
+    assert_eq!(apply_ipv4.auto_gateway, Some(false));
+
+    // for_verify receives the same sanitized full config.
+    let verify_ipv4 = for_verify.ipv4.as_ref().expect("ipv4 should be present");
+    assert_eq!(verify_ipv4.enabled, Some(true));
+    assert_eq!(verify_ipv4.dhcp, Some(true));
+    assert_eq!(verify_ipv4.auto_gateway, Some(false));
+
+    // for_save keeps its full config.
+    let save_ipv4 = for_save.ipv4.as_ref().expect("ipv4 should be present");
+    assert_eq!(save_ipv4.enabled, Some(true));
+    assert_eq!(save_ipv4.dhcp, Some(true));
+    assert_eq!(save_ipv4.auto_gateway, Some(false));
+}
+
+/// Test that `for_apply` carries the full merged IPv4 config (desired +
+/// saved), not just the diff against the current kernel state, so `for_save`
+/// never loses the untouched properties.
+///
+/// Previously `for_apply` only held the *changed* IPv4 properties (e.g. a
+/// new address without `enabled`/`dhcp`), and sanitize() copied that partial
+/// diff onto `for_save`, purging the rest of the saved IP config.
+#[test]
+fn test_for_apply_ipv4_uses_full_merged_config_not_diff() {
+    let saved: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: false
+            address:
+            - ip: 192.0.2.1
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    // Kernel state matches the saved config, so the diff would only contain
+    // the newly added address, omitting `enabled` and `dhcp`.
+    let current: Interfaces = saved.clone();
+
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            dhcp: false
+            address:
+            - ip: 192.0.2.1
+              prefix-length: 24
+            - ip: 192.0.2.2
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, Some(saved)).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+
+    // for_apply must hold the full merged IPv4 config, including the
+    // untouched `enabled` and `dhcp` properties.
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv4 = for_apply.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(apply_ipv4.enabled, Some(true));
+    assert_eq!(apply_ipv4.dhcp, Some(false));
+    let apply_addrs = apply_ipv4.addresses.as_ref().unwrap();
+    assert_eq!(apply_addrs.len(), 2);
+    assert_eq!(apply_addrs[0].ip.to_string(), "192.0.2.1");
+    assert_eq!(apply_addrs[1].ip.to_string(), "192.0.2.2");
+
+    // for_save keeps the same full config.
+    let for_save = merged_iface.for_save.as_ref().unwrap();
+    let save_ipv4 = for_save.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(save_ipv4.enabled, Some(true));
+    assert_eq!(save_ipv4.dhcp, Some(false));
+    assert_eq!(save_ipv4.addresses.as_ref().unwrap().len(), 2);
+
+    // gen_state_for_save() must persist the full IPv4 config.
+    let save_state = merged.gen_state_for_save();
+    let saved_iface = save_state.kernel_ifaces.get("eth0").unwrap();
+    let saved_ipv4 = saved_iface.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(saved_ipv4.enabled, Some(true));
+    assert_eq!(saved_ipv4.dhcp, Some(false));
+    let saved_addrs = saved_ipv4.addresses.as_ref().unwrap();
+    assert_eq!(saved_addrs.len(), 2);
+    assert_eq!(saved_addrs[0].ip.to_string(), "192.0.2.1");
+    assert_eq!(saved_addrs[1].ip.to_string(), "192.0.2.2");
+}
+
+/// When the previous state is static IPv4 and the desired state enables
+/// DHCP, the stale static addresses must be discarded from both `for_apply`
+/// and `for_save`.
+#[test]
+fn test_for_apply_ipv4_discards_static_addr_when_switch_to_dhcp() {
+    let saved: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: false
+            address:
+            - ip: 192.0.2.1
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = saved.clone();
+
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            dhcp: true
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, Some(saved)).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv4 = for_apply.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(apply_ipv4.enabled, Some(true));
+    assert_eq!(apply_ipv4.dhcp, Some(true));
+    assert!(
+        apply_ipv4.addresses.is_none(),
+        "static addresses must be discarded when switching to DHCP"
+    );
+
+    let for_save = merged_iface.for_save.as_ref().unwrap();
+    let save_ipv4 = for_save.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(save_ipv4.dhcp, Some(true));
+    assert!(
+        save_ipv4.addresses.is_none(),
+        "saved state must not keep stale static addresses"
+    );
+}
+
+/// When the previous state is auto IPv4 (DHCP) and the desired state
+/// disables DHCP, the dynamic addresses must be replaced with the desired
+/// ones; when the desired state does not specify addresses, IPv4 gets no IP.
+#[test]
+fn test_for_apply_ipv4_discards_dynamic_addr_when_disable_auto() {
+    let saved: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+            address:
+            - ip: 192.0.2.55
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    // Desired disables DHCP without specifying addresses: no IP at all.
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            dhcp: false
+        "#,
+    )
+    .unwrap();
+
+    let merged =
+        MergedInterfaces::new(desired, current.clone(), Some(saved)).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv4 = for_apply.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(apply_ipv4.enabled, Some(true));
+    assert_eq!(apply_ipv4.dhcp, Some(false));
+    assert!(
+        apply_ipv4.addresses.is_none(),
+        "dynamic addresses must be discarded when DHCP is disabled"
+    );
+
+    // Desired disables DHCP with static addresses specified: use them.
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            dhcp: false
+            address:
+            - ip: 10.0.0.1
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv4 = for_apply.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(apply_ipv4.dhcp, Some(false));
+    let apply_addrs = apply_ipv4.addresses.as_ref().unwrap();
+    assert_eq!(apply_addrs.len(), 1);
+    assert_eq!(apply_addrs[0].ip.to_string(), "10.0.0.1");
+    assert_eq!(apply_addrs[0].prefix_length, 24);
+}
+
+/// When the previous state is static IPv6 and the desired state enables
+/// autoconf, the stale static addresses must be discarded.
+#[test]
+fn test_for_apply_ipv6_discards_static_addr_when_switch_to_autoconf() {
+    let saved: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv6:
+            enabled: true
+            address:
+            - ip: 2001:db8::1
+              prefix-length: 64
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = saved.clone();
+
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv6:
+            autoconf: true
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, Some(saved)).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv6 = for_apply.base_iface().ipv6.as_ref().unwrap();
+    assert_eq!(apply_ipv6.enabled, Some(true));
+    assert_eq!(apply_ipv6.autoconf, Some(true));
+    assert!(
+        apply_ipv6.addresses.is_none(),
+        "static addresses must be discarded when switching to autoconf"
+    );
+
+    let for_save = merged_iface.for_save.as_ref().unwrap();
+    let save_ipv6 = for_save.base_iface().ipv6.as_ref().unwrap();
+    assert_eq!(save_ipv6.autoconf, Some(true));
+    assert!(
+        save_ipv6.addresses.is_none(),
+        "saved state must not keep stale static addresses"
+    );
+}
+
+/// When the previous state is auto IPv6 (DHCPv6) and the desired state
+/// disables both DHCP and autoconf, the dynamic addresses must be replaced
+/// with the desired ones; when the desired state does not specify addresses,
+/// IPv6 keeps only the kernel-generated link-local address.
+#[test]
+fn test_for_apply_ipv6_discards_dynamic_addr_when_disable_auto() {
+    let saved: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv6:
+            enabled: true
+            dhcp: true
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv6:
+            enabled: true
+            dhcp: true
+            address:
+            - ip: 2001:db8::55
+              prefix-length: 64
+        "#,
+    )
+    .unwrap();
+
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv6:
+            dhcp: false
+            autoconf: false
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, Some(saved)).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv6 = for_apply.base_iface().ipv6.as_ref().unwrap();
+    assert_eq!(apply_ipv6.enabled, Some(true));
+    assert_eq!(apply_ipv6.dhcp, Some(false));
+    assert_eq!(apply_ipv6.autoconf, Some(false));
+    assert!(
+        apply_ipv6.addresses.is_none(),
+        "dynamic addresses must be discarded, only link-local remains"
+    );
+
+    let for_save = merged_iface.for_save.as_ref().unwrap();
+    let save_ipv6 = for_save.base_iface().ipv6.as_ref().unwrap();
+    assert_eq!(save_ipv6.dhcp, Some(false));
+    assert_eq!(save_ipv6.autoconf, Some(false));
+    assert!(save_ipv6.addresses.is_none());
+}
+
+/// When there is no saved config, the current kernel state must not leak
+/// `enabled`/`dhcp`/`autoconf` into `for_apply` — the kernel reports
+/// `enabled: false` when no IP is assigned, which would otherwise strip the
+/// desired addresses (via sanitize) or spuriously start DHCP.
+#[test]
+fn test_for_apply_ipv4_no_saved_does_not_inherit_kernel_state() {
+    // Current IPv4 is disabled (kernel query format when no IP assigned).
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: false
+        "#,
+    )
+    .unwrap();
+
+    // First-time static IPv4 without explicit `enabled` must be applied.
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            address:
+            - ip: 192.0.2.1
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv4 = for_apply.base_iface().ipv4.as_ref().unwrap();
+    assert_ne!(apply_ipv4.enabled, Some(false));
+    let apply_addrs = apply_ipv4.addresses.as_ref().unwrap();
+    assert_eq!(apply_addrs.len(), 1);
+    assert_eq!(apply_addrs[0].ip.to_string(), "192.0.2.1");
+    assert_eq!(apply_addrs[0].prefix_length, 24);
+
+    // First-time DHCP on a disabled interface must keep `dhcp: true`.
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: false
+        "#,
+    )
+    .unwrap();
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            dhcp: true
+        "#,
+    )
+    .unwrap();
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv4 = for_apply.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(apply_ipv4.dhcp, Some(true));
+    assert_ne!(apply_ipv4.enabled, Some(false));
+
+    // Switching an interface currently on DHCP to static must not inherit
+    // `dhcp: true` from the current state (which would restart DHCP on top
+    // of the static config).
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+            address:
+            - ip: 192.0.2.55
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            address:
+            - ip: 10.0.0.1
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv4 = for_apply.base_iface().ipv4.as_ref().unwrap();
+    assert_ne!(apply_ipv4.dhcp, Some(true));
+    let apply_addrs = apply_ipv4.addresses.as_ref().unwrap();
+    assert_eq!(apply_addrs.len(), 1);
+    assert_eq!(apply_addrs[0].ip.to_string(), "10.0.0.1");
+    assert_eq!(apply_addrs[0].prefix_length, 24);
+}
+
+/// The DHCP worker applies a lease as the desired state (`dhcp: true` plus
+/// the lease address) against a current state with IPv4 disabled. The
+/// previous state holds no static addresses, so the static→auto transition
+/// rule must NOT discard the lease address.
+#[test]
+fn test_for_apply_ipv4_keeps_lease_addr_when_prev_ipv4_disabled() {
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: false
+        "#,
+    )
+    .unwrap();
+
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+            address:
+            - ip: 192.0.2.225
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv4 = for_apply.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(apply_ipv4.dhcp, Some(true));
+    let apply_addrs = apply_ipv4.addresses.as_ref().unwrap();
+    assert_eq!(apply_addrs.len(), 1);
+    assert_eq!(apply_addrs[0].ip.to_string(), "192.0.2.225");
+    assert_eq!(apply_addrs[0].prefix_length, 24);
 }
 
 /// Saved MAC-identifier ifaces must all be retained in for_save when

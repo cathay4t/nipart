@@ -102,12 +102,14 @@ impl BaseInterface {
     pub fn sanitize(
         &self,
         current: Option<&Self>,
+        saved: Option<&Self>,
         for_save: &mut Self,
         for_apply: &mut Self,
         for_verify: &mut Self,
         merged: &mut Self,
     ) -> Result<(), NipartError> {
         let desired = self;
+        self.fill_for_apply_ip_config(current, saved, for_save, for_apply);
         // Ignore MAC address if not InterfaceIdentifier::MacAddress
         if for_apply.identifier != Some(InterfaceIdentifier::MacAddress)
             && for_apply.mac_address.is_some()
@@ -133,13 +135,32 @@ impl BaseInterface {
 
         if let Some(ipv4) = for_apply.ipv4.as_mut() {
             ipv4.sanitize(current.and_then(|c| c.ipv4.as_ref()))?;
-            for_save.ipv4 = Some(ipv4.clone());
-            for_verify.ipv4 = Some(ipv4.clone());
         }
         if let Some(ipv6) = for_apply.ipv6.as_mut() {
             ipv6.sanitize(current.and_then(|c| c.ipv6.as_ref()))?;
-            for_save.ipv6 = Some(ipv6.clone());
-            for_verify.ipv6 = Some(ipv6.clone());
+        }
+        // `for_verify` is a clone of the desired state: sanitize it in place
+        // so verification only checks what the user requested. Copying the
+        // full merged config from `for_apply` here would verify properties
+        // inherited from `saved` (e.g. `enabled: true` while the kernel
+        // reports `enabled: false` because no address is assigned), failing
+        // apply of otherwise valid configs (e.g. switching DHCP off without
+        // specifying addresses).
+        if let Some(ipv4) = for_verify.ipv4.as_mut() {
+            ipv4.sanitize(current.and_then(|c| c.ipv4.as_ref()))?;
+        }
+        if let Some(ipv6) = for_verify.ipv6.as_mut() {
+            ipv6.sanitize(current.and_then(|c| c.ipv6.as_ref()))?;
+        }
+        // `for_apply` only holds the diff between the merged and current
+        // states, so its ipv4/ipv6 must not be copied onto `for_save` — that
+        // would purge the untouched parts of the saved IP config (e.g. static
+        // addresses). Sanitize the full `for_save` IP config in place instead.
+        if let Some(ipv4) = for_save.ipv4.as_mut() {
+            ipv4.sanitize(current.and_then(|c| c.ipv4.as_ref()))?;
+        }
+        if let Some(ipv6) = for_save.ipv6.as_mut() {
+            ipv6.sanitize(current.and_then(|c| c.ipv6.as_ref()))?;
         }
         if let Some(mac) = for_apply.mac_address.as_ref() {
             for_save.mac_address = Some(mac.to_string());
@@ -185,6 +206,151 @@ impl BaseInterface {
             ));
         }
         Ok(())
+    }
+
+    /// `for_apply` is generated as a diff against the current kernel state
+    /// (see [Interface::gen_diff]), so its `ipv4`/`ipv6` only carry the
+    /// *changed* properties. The apply action needs the full desired IP
+    /// config instead: `self` (the unchanged desired state) merged with the
+    /// previous state (`saved`, or `current` when there is no saved config),
+    /// so the backend can transition the interface correctly:
+    ///  * previous static → desired auto (`dhcp: true`/`autoconf: true`):
+    ///    discard the previous static addresses;
+    ///  * previous auto → desired `dhcp: false` + `autoconf: false`: replace
+    ///    the dynamic addresses with the desired ones; when the desired state
+    ///    does not specify addresses, IPv4 gets no IP and IPv6 keeps only the
+    ///    kernel-generated link-local address.
+    ///
+    /// When the saved config exists, the same adjusted full config is also
+    /// stored into `for_save` so the persisted state never keeps stale
+    /// addresses from a mode switch.
+    fn fill_for_apply_ip_config(
+        &self,
+        current: Option<&Self>,
+        saved: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+    ) {
+        let desired = self;
+        let prev_iface = saved.or(current);
+
+        // Whether the diff state carries an IPv4/IPv6 change at all.
+        let ipv4_changed = for_apply.ipv4.is_some();
+        let ipv6_changed = for_apply.ipv6.is_some();
+
+        // The full merged IP config: `desired` merged with the previous
+        // state. With a saved config, `for_save` (= saved ∪ desired) already
+        // holds the full config. Without a saved config, only the `addresses`
+        // of the current kernel state are inherited when the desired state
+        // leaves them undefined; `enabled`/`dhcp`/`autoconf` are never
+        // inherited from the kernel state — undefined `enabled` means
+        // enabled, and the kernel reports `enabled: false` simply because no
+        // IP is currently assigned, which must not strip the desired config.
+        let mut full_ipv4 = for_save.ipv4.clone();
+        if saved.is_none()
+            && let Some(ipv4) = full_ipv4.as_mut()
+            && ipv4.addresses.is_none()
+            && let Some(cur_ipv4) = current.and_then(|c| c.ipv4.as_ref())
+        {
+            ipv4.addresses = cur_ipv4.addresses.clone();
+        }
+        let mut full_ipv6 = for_save.ipv6.clone();
+        if saved.is_none()
+            && let Some(ipv6) = full_ipv6.as_mut()
+            && ipv6.addresses.is_none()
+            && let Some(cur_ipv6) = current.and_then(|c| c.ipv6.as_ref())
+        {
+            ipv6.addresses = cur_ipv6.addresses.clone();
+        }
+
+        let new_ipv4 = if let Some(des_ipv4) = desired.ipv4.as_ref() {
+            let mut full_ipv4 = full_ipv4;
+            let mut transition = false;
+            if let Some(prev_ipv4) = prev_iface.and_then(|i| i.ipv4.as_ref()) {
+                // Previous static → desired auto: discard the previous
+                // static addresses. Only fire when the previous state really
+                // holds static addresses — a disabled IPv4 stack
+                // (`enabled: false`) must not trigger this, otherwise the
+                // DHCP lease address would be discarded when the DHCP worker
+                // applies a lease to an interface with no IPv4 yet.
+                if des_ipv4.dhcp == Some(true) && prev_ipv4.is_static() {
+                    if let Some(ipv4) = full_ipv4.as_mut() {
+                        ipv4.addresses = None;
+                    }
+                    transition = true;
+                }
+                // Previous auto → desired static with no addresses
+                // specified: IPv4 gets no IP.
+                if prev_ipv4.is_auto()
+                    && des_ipv4.dhcp == Some(false)
+                    && des_ipv4.addresses.is_none()
+                {
+                    if let Some(ipv4) = full_ipv4.as_mut() {
+                        ipv4.addresses = None;
+                    }
+                    transition = true;
+                }
+            }
+            if ipv4_changed || transition {
+                full_ipv4
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let new_ipv6 = if let Some(des_ipv6) = desired.ipv6.as_ref() {
+            let mut full_ipv6 = full_ipv6;
+            let mut transition = false;
+            if let Some(prev_ipv6) = prev_iface.and_then(|i| i.ipv6.as_ref()) {
+                // Previous static → desired auto: discard the previous
+                // static addresses. Only fire when the previous state really
+                // holds static addresses — see the IPv4 case above.
+                if (des_ipv6.dhcp == Some(true)
+                    || des_ipv6.autoconf == Some(true))
+                    && prev_ipv6.is_static()
+                {
+                    if let Some(ipv6) = full_ipv6.as_mut() {
+                        ipv6.addresses = None;
+                    }
+                    transition = true;
+                }
+                // Previous auto → desired static (`dhcp: false` +
+                // `autoconf: false`) with no addresses specified: IPv6
+                // keeps only the kernel-generated link-local address.
+                if prev_ipv6.is_auto()
+                    && des_ipv6.dhcp == Some(false)
+                    && des_ipv6.autoconf == Some(false)
+                    && des_ipv6.addresses.is_none()
+                {
+                    if let Some(ipv6) = full_ipv6.as_mut() {
+                        ipv6.addresses = None;
+                    }
+                    transition = true;
+                }
+            }
+            if ipv6_changed || transition {
+                full_ipv6
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(ipv4) = new_ipv4 {
+            for_apply.ipv4 = Some(ipv4.clone());
+            if saved.is_some() {
+                for_save.ipv4 = Some(ipv4);
+            }
+        }
+        if let Some(ipv6) = new_ipv6 {
+            for_apply.ipv6 = Some(ipv6.clone());
+            if saved.is_some() {
+                for_save.ipv6 = Some(ipv6);
+            }
+        }
     }
 
     fn validate_mtu(&self, current: Option<&Self>) -> Result<(), NipartError> {

@@ -51,14 +51,15 @@ impl MergedInterface {
         current: Option<Interface>,
         saved: Option<Interface>,
     ) -> Result<Self, NipartError> {
+        let saved = saved.as_ref();
         let for_save = if let Some(desired) = desired.as_ref() {
-            if let Some(saved) = saved.as_ref() {
+            if let Some(saved) = saved {
                 Some(saved.merge(desired)?)
             } else {
                 Some(desired.clone())
             }
         } else {
-            saved
+            saved.cloned()
         };
 
         // We cannot use for_save as for_verify, because the kernel_iface_name
@@ -97,7 +98,7 @@ impl MergedInterface {
             will_delete: false,
         };
 
-        ret.sanitize()?;
+        ret.sanitize(saved)?;
 
         Ok(ret)
     }
@@ -108,7 +109,10 @@ impl MergedInterface {
     /// * Fill for_apply with real kernel interface name
     /// * Generate `merged` state
     /// * Generate `for_revert` state
-    fn sanitize(&mut self) -> Result<(), NipartError> {
+    fn sanitize(
+        &mut self,
+        saved: Option<&Interface>,
+    ) -> Result<(), NipartError> {
         if let Some(desired) = self.desired.as_mut()
             && let Some(for_apply) = self.for_apply.as_mut()
             && let Some(for_save) = self.for_save.as_mut()
@@ -116,6 +120,7 @@ impl MergedInterface {
         {
             desired.base_iface_mut().sanitize(
                 self.current.as_ref().map(|i| i.base_iface()),
+                saved.map(|i| i.base_iface()),
                 for_save.base_iface_mut(),
                 for_apply.base_iface_mut(),
                 for_verify.base_iface_mut(),
