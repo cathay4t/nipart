@@ -25,3 +25,13 @@ fn test_serialize_is_option_string_empty_non_empty() {
     assert!(!is_option_string_empty(&Some("hello".to_string())));
 }
 
+#[test]
+fn test_serialize_option_u32_as_hex_some() {
+    let t = TestHexU32 { v: Some(255) };
+    let value: serde_yaml::Value = serde_yaml::to_value(&t).unwrap();
+    assert_eq!(
+        value.get("v"),
+        Some(&serde_yaml::Value::String("0xff".to_string()))
+    );
+}
+
