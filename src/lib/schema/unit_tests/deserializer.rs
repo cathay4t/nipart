@@ -113,3 +113,12 @@ fn test_de_option_bool_string_truthy() {
     }
 }
 
+#[test]
+fn test_de_option_bool_string_falsy() {
+    for s in ["0", "false", "no", "off", "n"] {
+        let t: TestOptionBool =
+            serde_yaml::from_str(&format!("v: \"{s}\"")).unwrap();
+        assert_eq!(t.v, Some(false), "string {s}");
+    }
+}
+
