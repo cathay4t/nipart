@@ -434,3 +434,9 @@ fn test_de_option_enum_string_or_integer_string() {
     assert_eq!(t.v, Some(BondMode::ActiveBackup));
 }
 
+#[test]
+fn test_de_option_enum_string_or_integer_integer() {
+    let t: TestOptionBondMode = serde_yaml::from_str("v: 1").unwrap();
+    assert_eq!(t.v, Some(BondMode::ActiveBackup));
+}
+
