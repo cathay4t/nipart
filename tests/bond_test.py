@@ -79,3 +79,36 @@ def test_bond_change_mode(bond_over_dummy):
     )
 
 
+def test_bond_change_port_config(bond_over_dummy):
+    state = load_yaml(f"""---
+        interfaces:
+          - name: {TEST_BOND_NIC}
+            type: bond
+            state: up
+            bond:
+              ports:
+              - name: {TEST_PORT1}
+                queue-id: 0
+                priority: 10
+              - name: {TEST_PORT2}
+                queue-id: 0
+                priority: 20
+        """)
+    nipart.apply(state)
+    bond_iface = show_only(TEST_BOND_NIC)
+    assert bond_iface["state"] == "up"
+    assert state_match(
+        [
+            {
+                "name": TEST_PORT1,
+                "queue-id": 0,
+                "priority": 10,
+            },
+            {
+                "name": TEST_PORT2,
+                "queue-id": 0,
+                "priority": 20,
+            },
+        ],
+        bond_iface["bond"]["ports"],
+    )
