@@ -146,3 +146,10 @@ fn test_de_option_bool_absent_is_none() {
     assert_eq!(t.v, None);
 }
 
+#[test]
+fn test_de_option_bool_invalid_string() {
+    let result: Result<TestOptionBool, _> =
+        serde_yaml::from_str("v: \"maybe\"");
+    assert!(result.is_err());
+}
+
