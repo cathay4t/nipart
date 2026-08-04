@@ -137,3 +137,26 @@ fn test_yaml_round_trip_routes() {
     );
     assert_eq!(state, reparsed);
 }
+
+#[test]
+fn test_yaml_round_trip_top_level_properties() {
+    let (state, reparsed) = round_trip(
+        r#"---
+        version: 1
+        description: round trip test
+        wait-online:
+          timeout-sec: 10
+          conditions:
+            - gateway4
+            - gateway6
+        "#,
+    );
+    assert_eq!(state, reparsed);
+    assert_eq!(
+        state.wait_online.as_ref().unwrap().conditions,
+        vec![
+            NipartWaitOnlineCondition::Gateway4,
+            NipartWaitOnlineCondition::Gateway6,
+        ]
+    );
+}
