@@ -6,7 +6,12 @@ import pytest
 
 import nipart
 from .testlib.cmdlib import exec_cmd
-from .testlib.statelib import load_yaml, show_only, state_match
+from .testlib.statelib import (
+    load_yaml,
+    show_only,
+    show_saved_only,
+    state_match,
+)
 from .testlib.veth import veth_interface
 
 MAC_TEST_VETH = "veth-mac0"
@@ -94,3 +99,32 @@ def test_route_next_hop_interface_with_mac_identifier(veth_env):
     assert (
         ROUTE_MAC_NEXTHOP in route_output
     ), f"Next hop {ROUTE_MAC_NEXTHOP} not found in route: {route_output}"
+
+    saved_iface = show_saved_only(ROUTE_LOGICAL_NAME)
+    assert (
+        saved_iface is not None
+    ), f"Saved config should be keyed by logical name {ROUTE_LOGICAL_NAME}"
+    assert saved_iface["name"] == ROUTE_LOGICAL_NAME, (
+        f"Saved config name should be {ROUTE_LOGICAL_NAME}, "
+        f"not resolved kernel name"
+    )
+
+    saved_state = nipart.NipartClient().query_network_state(
+        nipart.NipartQueryOption.saved()
+    )
+    saved_routes = saved_state.get("routes", {}).get("config", [])
+    saved_route = next(
+        (
+            r
+            for r in saved_routes
+            if r.get("next-hop-interface") == ROUTE_LOGICAL_NAME
+        ),
+        None,
+    )
+    assert saved_route is not None, (
+        f"Saved route should reference logical name {ROUTE_LOGICAL_NAME}, "
+        f"not kernel name"
+    )
+    assert (
+        saved_route["next-hop-interface"] == ROUTE_LOGICAL_NAME
+    ), "Saved route next-hop-interface should be profile name"
