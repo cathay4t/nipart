@@ -43,3 +43,13 @@ fn test_new_from_yaml_valid_full_state() {
     assert!(state.ifaces.kernel_ifaces.contains_key("eth1"));
 }
 
+#[test]
+fn test_new_from_yaml_invalid_syntax() {
+    let result = NetworkState::new_from_yaml("interfaces: [unclosed");
+    assert!(result.is_err());
+
+    let e = result.unwrap_err();
+    assert_eq!(e.kind(), ErrorKind::InvalidArgument);
+    assert!(e.msg.contains("Invalid YAML string"));
+}
+
