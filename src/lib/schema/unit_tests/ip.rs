@@ -54,3 +54,11 @@ fn test_sanitize_ip_network_ipv4_host_only() {
     assert_eq!(sanitize_ip_network("192.0.2.1").unwrap(), "192.0.2.1/32");
 }
 
+#[test]
+fn test_sanitize_ip_network_ipv6_host_only() {
+    assert_eq!(
+        sanitize_ip_network("2001:db8:1::0").unwrap(),
+        "2001:db8:1::/128"
+    );
+}
+
