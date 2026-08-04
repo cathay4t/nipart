@@ -153,3 +153,9 @@ fn test_de_option_bool_invalid_string() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_option_bool_invalid_integer() {
+    let result: Result<TestOptionBool, _> = serde_yaml::from_str("v: 2");
+    assert!(result.is_err());
+}
+
