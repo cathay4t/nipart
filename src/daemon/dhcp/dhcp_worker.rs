@@ -357,21 +357,23 @@ async fn apply_lease(
 }
 
 // TODO:
-//  * Handle `auto-routes: false`
-//  * Handle `auto-gateways: false`
-//  * Handle `classless_routes`
+//  * Handle `classless_routes` (DHCP option 121 and 249)
 fn gen_routes(lease: &DhcpV4Lease, base_iface: &BaseInterface) -> Routes {
     let mut conf_routes: Vec<RouteEntry> = Vec::new();
-    // TODO: Handle multiple addresses of router
-    if let Some(gateways) = lease.gateways.as_ref() {
+
+    if let Some(gateways) = lease.gateways.as_ref()
+        && base_iface
+            .ipv4
+            .as_ref()
+            .map(|i| i.auto_gateway.unwrap_or(true))
+            != Some(false)
+    {
         for (index, gateway) in gateways.iter().enumerate() {
             let mut route = RouteEntry::default();
             route.destination = Some("0.0.0.0/0".to_string());
             route.next_hop_iface = Some(base_iface.name.to_string());
             route.next_hop_addr = Some(gateway.to_string());
             route.table_id = Some(DEFAULT_ROUTE_TABLE_ID);
-            // TODO: Be consistent on metric?
-            // TODO: Priority ethernet over wifi/VPN/etc ?
             route.metric = base_iface
                 .iface_index
                 .map(|iface_index| 100i64 * iface_index as i64 + index as i64);

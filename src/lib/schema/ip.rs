@@ -119,6 +119,13 @@ pub struct InterfaceIpv4 {
     /// flag.
     #[serde(skip_serializing_if = "Option::is_none", rename = "address")]
     pub addresses: Option<Vec<InterfaceIpAddr>>,
+    /// Whether to add routes from DHCP gateway option. Default to true.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "crate::deserializer::option_bool_or_string"
+    )]
+    pub auto_gateway: Option<bool>,
 }
 
 impl Default for InterfaceIpv4 {
@@ -136,6 +143,7 @@ impl InterfaceIpv4 {
             dhcp: None,
             dhcp_state: None,
             addresses: None,
+            auto_gateway: None,
         }
     }
 
@@ -204,6 +212,10 @@ impl InterfaceIpv4 {
         if !self.is_enabled() {
             self.dhcp = None;
             self.addresses = None;
+            self.auto_gateway = None;
+        }
+        if self.dhcp != Some(true) {
+            self.auto_gateway = None;
         }
         Ok(())
     }
@@ -212,7 +224,10 @@ impl InterfaceIpv4 {
     ///   be latency after applied and query back.
     /// * Set current DHCP none to false.
     /// * Set current address none to empty array.
+    /// * Remove `auto_gateway` as it is configuration only property, not
+    ///   reflected in running state.
     pub(crate) fn sanitize_before_verify(&mut self, current: &mut Self) {
+        self.auto_gateway = None;
         if let Some(addrs) = self.addresses.as_mut() {
             for addr in addrs {
                 if let Some(cur_addr) =
