@@ -171,3 +171,9 @@ fn test_de_option_u64_decimal_string() {
     assert_eq!(t.v, Some(42));
 }
 
+#[test]
+fn test_de_option_u64_hex_string() {
+    let t: TestOptionU64 = serde_yaml::from_str("v: \"0xff\"").unwrap();
+    assert_eq!(t.v, Some(255));
+}
+
