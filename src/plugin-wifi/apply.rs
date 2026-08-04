@@ -226,10 +226,16 @@ async fn add_wifi_cfg(
         bss.and_then(|b| b.bssid.as_ref().map(|v| mac_to_string(v.as_slice())))
     });
 
+    let is_open = wifi_cfg.password.is_none();
     let mut wpa_network = WpaSupNetwork {
         ssid: ssid.to_string(),
         psk: wifi_cfg.password.clone(),
         bssid: selected_bssid,
+        key_mgmt: if is_open {
+            Some("NONE".to_string())
+        } else {
+            None
+        },
         ..Default::default()
     };
     if let Some(bss) = bss
