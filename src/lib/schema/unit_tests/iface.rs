@@ -62,3 +62,15 @@ fn test_iface_de_ovs_interface() {
     assert!(matches!(iface, Interface::OvsInterface(_)));
 }
 
+#[test]
+fn test_iface_de_loopback() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: lo
+        type: loopback
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::Loopback(_)));
+}
+
