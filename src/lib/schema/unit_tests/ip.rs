@@ -30,3 +30,12 @@ fn test_sanitize_ip_network_invalid_ipv4_prefix_length() {
     }
 }
 
+#[test]
+fn test_sanitize_ip_network_invalid_ipv6_prefix_length() {
+    let result = sanitize_ip_network("::1/129");
+    assert!(result.is_err());
+    if let Err(e) = result {
+        assert_eq!(e.kind(), ErrorKind::InvalidArgument);
+    }
+}
+
