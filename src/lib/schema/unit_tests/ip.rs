@@ -80,3 +80,10 @@ fn test_sanitize_ip_network_ipv4_net() {
     assert_eq!(sanitize_ip_network("192.0.3.1/23").unwrap(), "192.0.2.0/23");
 }
 
+#[test]
+fn test_sanitize_ip_network_ipv6_net() {
+    assert_eq!(
+        sanitize_ip_network("2001:db8:1::f/64").unwrap(),
+        "2001:db8:1::/64"
+    );
+}
