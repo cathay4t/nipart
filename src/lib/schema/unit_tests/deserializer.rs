@@ -410,3 +410,13 @@ fn test_de_option_number_as_string_absent_is_none() {
     assert_eq!(t.v, None);
 }
 
+#[test]
+fn test_de_number_as_string_valid() {
+    let t: TestRequiredNumberAsString = serde_yaml::from_str("v: 42").unwrap();
+    assert_eq!(t.v, "42");
+
+    let t: TestRequiredNumberAsString =
+        serde_yaml::from_str("v: \"abc\"").unwrap();
+    assert_eq!(t.v, "abc");
+}
+
