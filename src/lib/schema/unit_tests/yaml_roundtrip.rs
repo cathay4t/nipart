@@ -160,3 +160,24 @@ fn test_yaml_round_trip_top_level_properties() {
         ]
     );
 }
+
+#[test]
+fn test_yaml_serialize_hide_secrets() {
+    let mut state = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: wlan0
+            type: wifi-phy
+            wifi:
+              ssid: Test-WIFI
+              password: 12345678
+        "#,
+    )
+    .unwrap();
+
+    state.hide_secrets();
+    let serialized = serde_yaml::to_string(&state).unwrap();
+
+    assert!(serialized.contains(NetworkState::HIDE_SECRET_STR));
+    assert!(!serialized.contains("12345678"));
+}
