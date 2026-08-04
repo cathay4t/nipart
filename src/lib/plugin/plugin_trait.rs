@@ -113,6 +113,11 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
     /// the daemon via nispor. Plugins can use it instead of querying nispor
     /// themselves.
     /// Default implementation is return no support error.
+    ///
+    /// This function must never block: it should only read the live
+    /// configuration of the managed service (e.g. wpa_supplicant over
+    /// D-Bus) and return quickly. It must not trigger slow actions such
+    /// as wifi scan.
     fn query_network_state(
         _plugin: &Arc<Self>,
         _opt: NipartQueryOption,
@@ -132,6 +137,14 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
 
     /// Apply network state managed by this plugin only.
     /// Optionally, you may send log via `conn::log_debug()` and etc.
+    ///
+    /// This function must never block: slow work (e.g. wifi active scan)
+    /// must be off-loaded to a dedicated worker thread taking requests via
+    /// an `UnboundedReceiver`, and this function only enqueues the request
+    /// and returns immediately. Errors detected in the worker thread should
+    /// be logged instead of returned, since the reply may already have been
+    /// sent. The daemon verification stage will wait and retry until the
+    /// applied state matches the desired state.
     fn apply_network_state(
         _plugin: &Arc<Self>,
         _desired_state: NetworkState,

@@ -3,21 +3,39 @@
 use std::sync::Arc;
 
 use nipart::{
-    Interface, InterfaceType, NetworkState, NipartApplyOption, NipartError,
-    NipartIpcConnection, NipartPlugin, NipartPluginInfo, NipartQueryOption,
-    NipartWifiScanOption, WifiConfig,
+    ErrorKind, Interface, InterfaceType, NetworkState, NipartApplyOption,
+    NipartError, NipartIpcConnection, NipartPlugin, NipartPluginInfo,
+    NipartQueryOption, NipartWifiScanOption, WifiConfig,
 };
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use crate::NipartWpaConn;
 
 #[derive(Debug)]
-pub(crate) struct NipartPluginWifi;
+pub(crate) struct NipartPluginWifi {
+    apply_tx: tokio::sync::mpsc::UnboundedSender<Vec<Interface>>,
+}
+
+/// Dedicated worker processing wifi apply requests serially in arrival
+/// order. Slow operations (wpa_supplicant config change, active scan) are
+/// performed here so that `apply_network_state()` never blocks the daemon
+/// connection handling, and `query_network_state()` is never stalled by an
+/// on-going apply.
+async fn apply_worker(mut rx: UnboundedReceiver<Vec<Interface>>) {
+    while let Some(ifaces) = rx.recv().await {
+        if let Err(e) = NipartWpaConn::apply(ifaces.as_slice()).await {
+            log::error!("WIFI plugin failed to apply state: {e}");
+        }
+    }
+}
 
 impl NipartPlugin for NipartPluginWifi {
     const PLUGIN_NAME: &'static str = "wifi";
 
     async fn init() -> Result<Self, NipartError> {
-        Ok(Self {})
+        let (apply_tx, apply_rx) = unbounded_channel();
+        tokio::spawn(apply_worker(apply_rx));
+        Ok(Self { apply_tx })
     }
 
     async fn plugin_info(
@@ -38,12 +56,14 @@ impl NipartPlugin for NipartPluginWifi {
     ) -> Result<NetworkState, NipartError> {
         conn.log_trace("WIFI plugin query_network_state".to_string())
             .await;
+        // Query only reads the live wpa_supplicant configuration and its
+        // saved scan results, it never triggers a scan.
         NipartWpaConn::query_network_state().await
     }
 
     async fn apply_network_state(
-        _plugin: &Arc<Self>,
-        desired_state: NetworkState,
+        plugin: &Arc<Self>,
+        mut desired_state: NetworkState,
         _opt: NipartApplyOption,
         conn: &mut NipartIpcConnection,
     ) -> Result<(), NipartError> {
@@ -51,9 +71,16 @@ impl NipartPlugin for NipartPluginWifi {
             "WIFI plugin apply_network_state with state {desired_state}"
         ))
         .await;
-        let ifaces: Vec<&Interface> = desired_state.ifaces.iter().collect();
-        NipartWpaConn::apply(ifaces.as_slice()).await?;
-        Ok(())
+        let ifaces: Vec<Interface> = desired_state.ifaces.drain().collect();
+        // Never block: enqueue the request to the dedicated apply worker
+        // and return immediately. The daemon verification stage waits and
+        // retries until the applied state matches the desired state.
+        plugin.apply_tx.send(ifaces).map_err(|e| {
+            NipartError::new(
+                ErrorKind::Bug,
+                format!("Failed to enqueue wifi apply request: {e}"),
+            )
+        })
     }
 
     async fn wifi_scan(
