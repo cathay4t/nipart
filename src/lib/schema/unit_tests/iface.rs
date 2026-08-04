@@ -200,3 +200,25 @@ fn test_iface_de_missing_type_fails() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_iface_de_absent_strips_extra_properties() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: eth1
+        type: ethernet
+        state: absent
+        mtu: 9000
+        controller: br0
+        ipv4:
+          enabled: true
+        "#,
+    )
+    .unwrap();
+
+    let base = iface.base_iface();
+    assert_eq!(base.state, InterfaceState::Absent);
+    assert_eq!(base.mtu, None);
+    assert_eq!(base.controller, None);
+    assert_eq!(base.ipv4, None);
+}
+
