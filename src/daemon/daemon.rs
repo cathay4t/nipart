@@ -13,7 +13,7 @@ use tokio::sync::SetOnce;
 use super::{api::process_api_connection, commander::NipartCommander};
 
 pub(crate) static DAEMON_IS_ONLINE: SetOnce<()> = SetOnce::const_new();
-const DAEMON_PID_FILE: &str = "/var/run/nipart/nipartd.pid";
+const DAEMON_PID_FILE: &str = "/var/run/nipart/nipart.pid";
 
 #[derive(Debug, Clone)]
 pub(crate) enum NipartManagerCmd {

@@ -89,7 +89,7 @@ fn filter_net_state(
     iface_name: &str,
 ) -> NetworkState {
     let mut ret = NetworkState::new();
-    for iface in net_state.ifaces.to_vec() {
+    for iface in net_state.ifaces.iter() {
         if iface.kernel_iface_name() == iface_name {
             ret.ifaces.push(iface.clone())
         }

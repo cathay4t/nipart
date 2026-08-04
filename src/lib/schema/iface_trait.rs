@@ -2,22 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::value::copy_undefined_value;
 use crate::{BaseInterface, InterfaceState, InterfaceType, NipartError};
 
 /// Trait implemented by all type of interfaces.
 pub trait NipartInterface:
     std::fmt::Debug + for<'a> Deserialize<'a> + Serialize + Default + Clone
 {
-    /// List of type-specific property names that can be changed on a live
-    /// interface without requiring delete-and-recreate. Properties not in
-    /// this list will trigger delete+recreate when changed.
-    ///
-    /// Entries must use kebab-case names matching the YAML/JSON serialized
-    /// form, not the Rust struct field names. For example, for a struct
-    /// field `reorder_headers` that serializes to `reorder-headers`, the
-    /// entry should be `"reorder-headers"`.
-    const LIVE_CHANGE_PROP_LIST: &'static [&'static str] = &[];
     fn base_iface(&self) -> &BaseInterface;
 
     fn base_iface_mut(&mut self) -> &mut BaseInterface;
@@ -37,15 +27,47 @@ pub trait NipartInterface:
         self.iface_type().is_controller()
     }
 
+    /// Whether attached to controller
+    fn has_controller(&self) -> bool {
+        if let Some(ctrl) = self.base_iface().controller.as_ref()
+            && !ctrl.is_empty()
+        {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn has_parent(&self) -> bool {
+        if let Some(parent) = self.parent()
+            && !parent.is_empty()
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     fn name(&self) -> &str {
         self.base_iface().name.as_str()
     }
 
+    fn is_name_matching(&self) -> bool {
+        self.base_iface().is_name_matching()
+    }
+
     /// The actual kernel interface name.
-    /// When [InterfaceIdentifier::MacAddress] is used, this holds the resolved
-    /// kernel interface name. Otherwise, it is the same as [name()].
+    /// When not resolved to real kernel interface for
+    /// [InterfaceIdentifier::MacAddress], this is empty string.
+    /// For user space interface, also return empty string.
     fn kernel_iface_name(&self) -> &str {
-        self.base_iface().kernel_iface_name.as_str()
+        if self.base_iface().kernel_iface_name.is_empty()
+            && self.is_name_matching()
+        {
+            self.base_iface().name.as_str()
+        } else {
+            self.base_iface().kernel_iface_name.as_str()
+        }
     }
 
     fn iface_type(&self) -> &InterfaceType {
@@ -56,17 +78,8 @@ pub trait NipartInterface:
         self.base_iface().state
     }
 
-    /// Invoke [BaseInterface::hide_secrets()] and interface specifics
-    /// `hide_secrets_iface_specific()`.
-    /// Will invoke `hide_secrets_iface_specific()` at the end.
-    /// Please do not override this but implement
-    /// `hide_secrets_iface_specific()` instead.
-    fn hide_secrets(&mut self) {
-        self.base_iface_mut().hide_secrets();
-        self.hide_secrets_iface_specific();
-    }
-
-    fn hide_secrets_iface_specific(&mut self) {}
+    /// Replace the secrets with `NetworkState::HIDE_SECRET_STR`
+    fn hide_secrets(&mut self) {}
 
     fn is_ignore(&self) -> bool {
         self.base_iface().state.is_ignore()
@@ -84,40 +97,12 @@ pub trait NipartInterface:
         self.base_iface().state.is_absent()
     }
 
-    /// Return the type-specific configuration as serde_json::Value.
-    /// Only properties explicitly set (Some) are included.
-    /// Used by `need_delete_before_change()` default implementation.
-    /// Returns Null for interface types without type-specific config.
-    fn config_value(&self) -> serde_json::Value {
-        serde_json::Value::Null
-    }
-
-    /// Use properties defined in new_state to override Self without
-    /// understanding the property meaning and limitation.
-    /// Will invoke `merge_iface_specific()` at the end.
-    /// Please do not override this function but implement
-    /// `merge_iface_specific()` instead.
-    fn merge(&self, new_state: &Self) -> Result<Self, NipartError>
-    where
-        for<'de> Self: Deserialize<'de>,
-    {
-        let mut new_value = serde_json::to_value(new_state)?;
-        let old_value = serde_json::to_value(self)?;
-        copy_undefined_value(&mut new_value, &old_value);
-
-        let old_state = self.clone();
-
-        let mut ret: Self = serde_json::from_value(new_value)?;
-        ret.base_iface_mut().post_merge(old_state.base_iface())?;
-        ret.post_merge_iface_specific(new_state, &old_state)?;
-
-        Ok(ret)
-    }
-
     /// Please implemented this function if special merge action required
-    /// for certain interface type. Do not need to worry about the merge of
-    /// [BaseInterface].
-    fn post_merge_iface_specific(
+    /// for certain interface type.
+    /// The self is the merged state.
+    /// This function will not invoke BaseInterface.post_merge(), callers should
+    /// invoke it by themselves.
+    fn post_merge(
         &mut self,
         _new_state: &Self,
         _old_state: &Self,
@@ -125,76 +110,37 @@ pub trait NipartInterface:
         Ok(())
     }
 
-    /// Invoke sanitize on the [BaseInterface] and `sanitize_iface_specfic()`.
-    /// Sanitation process is performed for apply action when merging desired
-    /// state with current state:
+    /// Sanitation process is performed for apply action:
     ///  * Validate user inputs.
     ///  * Clean up properties which is for query only.
-    ///  * Change desired state smartly. (e.g. Remove IP for disabled IP stack)
-    fn sanitize(&mut self, current: Option<&Self>) -> Result<(), NipartError> {
-        self.base_iface_mut()
-            .sanitize(current.as_ref().map(|c| c.base_iface()))?;
-        self.sanitize_iface_specfic(current)
-    }
+    ///  * Change desired state smartly. (e.g. Change MAC address to upper case)
+    ///
+    /// The self is the desired state.
+    /// This function will not invoke BaseInterface.sanitize(), callers should
+    /// invoke it by themselves.
+    fn sanitize(
+        &self,
+        current: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        merged: &mut Self,
+    ) -> Result<(), NipartError>;
 
-    /// Invoke sanitize current for verify on the [BaseInterface] and
-    /// `sanitize_before_verify_iface_specfic()`
-    fn sanitize_before_verify(&mut self, current: &mut Self) {
-        self.base_iface_mut()
-            .sanitize_before_verify(current.base_iface_mut());
-        self.sanitize_before_verify_iface_specfic(current);
-    }
-
-    /// Please implement this function if special sanitize action required
-    /// for certain interface type.
-    /// Do not include action for [BaseInterface].
-    fn sanitize_iface_specfic(
-        &mut self,
-        _current: Option<&Self>,
-    ) -> Result<(), NipartError> {
-        Ok(())
-    }
-
-    /// Please implement this function if special sanitize action required
-    /// for certain interface type before verification.
-    /// Do not include action for [BaseInterface].
-    fn sanitize_before_verify_iface_specfic(&mut self, _current: &mut Self) {}
-
-    /// Sanitize for generating diff between desired and current.
-    /// Default implementation delegates to `sanitize_before_verify`.
-    /// For interface-specific logic, override
-    /// `sanitize_for_diff_iface_specific` instead.
-    fn sanitize_for_diff(&mut self, current: &mut Self) {
-        self.base_iface_mut()
-            .sanitize_for_diff(current.base_iface_mut());
-        self.sanitize_for_diff_iface_specific(current);
-    }
-
-    /// Interface-specific hook for `sanitize_for_diff`.
-    /// Default delegates to `sanitize_before_verify_iface_specfic`.
-    fn sanitize_for_diff_iface_specific(&mut self, current: &mut Self) {
-        self.sanitize_before_verify_iface_specfic(current);
-    }
+    /// Invoke sanitize current for verify desired state.
+    /// The self is the desired state.
+    /// This function will not invoke BaseInterface.sanitize_before_verify(),
+    /// callers should invoke it by themselves.
+    fn sanitize_before_verify(&mut self, _current: &mut Self) {}
 
     /// When generating difference between desired and current, certain value
     /// should be included as context in the output. For example, when
     /// VLAN ID changed, including base-iface as context seems reasonable.
     /// Default implementation does nothing.
-    /// This function will invoke `include_diff_context()` against
-    /// `BaseInterface`. For any interface specific task, please implement
-    /// `include_diff_context_iface_specific()` instead.
-    fn include_diff_context(&mut self, desired: &Self, current: &Self) {
-        self.base_iface_mut()
-            .include_diff_context(desired.base_iface(), current.base_iface());
-        self.include_diff_context_iface_specific(desired, current)
-    }
-
-    fn include_diff_context_iface_specific(
-        &mut self,
-        _desired: &Self,
-        _current: &Self,
-    ) {
-    }
+    /// The self is the generated diff state.
+    /// This function will not invoke BaseInterface.include_diff_context(),
+    /// callers should invoke it by themselves.
+    fn include_diff_context(&mut self, _desired: &Self, _current: &Self) {}
 
     fn from_base(base_iface: BaseInterface) -> Self {
         let mut new = Self::default();
@@ -206,23 +152,10 @@ pub trait NipartInterface:
     /// should be included as context in the output. For example, when
     /// reverting a IP disable action, we should include its original static
     /// IP addresses.
-    /// This function will invoke `include_revert_context()` against
-    /// `BaseInterface`. For any interface specific task, please implement
-    /// `include_revert_context_iface_specific()` instead.
-    fn include_revert_context(&mut self, desired: &Self, pre_apply: &Self) {
-        self.base_iface_mut().include_revert_context(
-            desired.base_iface(),
-            pre_apply.base_iface(),
-        );
-        self.include_revert_context_iface_specific(desired, pre_apply);
-    }
-
-    fn include_revert_context_iface_specific(
-        &mut self,
-        _desired: &Self,
-        _pre_apply: &Self,
-    ) {
-    }
+    /// The self is the revert state.
+    /// This function will not invoke BaseInterface.include_revert_context(),
+    /// callers should invoke it by themselves.
+    fn include_revert_context(&mut self, _desired: &Self, _pre_apply: &Self) {}
 
     /// Return a list of port names. None means not desired or cannot hold
     /// ports
@@ -236,34 +169,7 @@ pub trait NipartInterface:
     }
 
     /// Whether desired changes need to delete the interface first.
-    /// Uses `config_value()` and `LIVE_CHANGE_PROP_LIST` to determine if
-    /// any changed property requires delete-and-recreate.
-    /// When `LIVE_CHANGE_PROP_LIST` is empty, all changes are allowed
-    /// in-place and this always returns false.
-    /// Always returns false when desired state is absent.
-    fn need_delete_before_change(&self, current: &Self) -> bool {
-        if self.is_absent() || Self::LIVE_CHANGE_PROP_LIST.is_empty() {
-            return false;
-        }
-        let des_config = self.config_value();
-        let cur_config = current.config_value();
-
-        let Some(des_map) = des_config.as_object() else {
-            return false;
-        };
-        let Some(cur_map) = cur_config.as_object() else {
-            return !des_map.is_empty();
-        };
-
-        for (key, des_val) in des_map {
-            match cur_map.get(key) {
-                Some(cur_val) if cur_val == des_val => continue,
-                _ => {}
-            }
-            if !Self::LIVE_CHANGE_PROP_LIST.contains(&key.as_str()) {
-                return true;
-            }
-        }
+    fn need_delete_before_change(&self, _current: &Self) -> bool {
         false
     }
 }

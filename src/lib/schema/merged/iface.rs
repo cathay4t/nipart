@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// This file is based on the work of nmstate project(https://nmstate.io/) which
-// is under license of Apache 2.0, authors of original file are:
-//  * Gris Ge <fge@redhat.com>
-//  * Fernando Fernandez Mancera <ffmancera@riseup.net>
-//  * Wen Liang <liangwen12year@gmail.com>
-//  * Íñigo Huguet <ihuguet@redhat.com>
-//  * Quique Llorente <ellorent@redhat.com>
-
 use serde::{Deserialize, Serialize};
 
+use super::super::value::copy_undefined_value;
 use crate::{
     ErrorKind, Interface, InterfaceState, InterfaceType, JsonDisplay,
     MergedInterfaces, NipartError, NipartInterface,
@@ -22,58 +15,143 @@ use crate::{
 pub struct MergedInterface {
     pub desired: Option<Interface>,
     pub current: Option<Interface>,
+    /// Merged interface configuration with desired and current.
     pub merged: Interface,
-    /// Hold interface configuration for apply, combines changed properties and
-    /// properties needed to apply the change.
+    /// Interface configuration for apply action. It contains:
+    ///  * impacted changes
+    ///  * desired changes
     pub for_apply: Option<Interface>,
+    /// Interface configuration for verification action.
     pub for_verify: Option<Interface>,
-    /// If desired, diff holds the diff between desired and current, otherwise
-    /// None
-    pub diff: Option<Interface>,
+    /// Interface configuration for saving to disk. It contains:
+    ///  * impacted changes
+    ///  * desired changes
+    ///  * previous saved changes
+    pub for_save: Option<Interface>,
+    /// If desired is defined, for_revert holds the state to revert the changes
+    /// made by for_apply.
+    pub for_revert: Option<Interface>,
+    /// In which order should this interface been activated. The smallest
+    /// number will be activated first.
+    /// For undesired interface up_priority is None
+    /// For desired interface, up_priority None means don't know activation
+    /// order yet.
+    /// This should be set by MergedInterfaces::new().
+    pub up_priority: Option<u32>,
 }
 
 impl MergedInterface {
     pub fn new(
         desired: Option<Interface>,
         current: Option<Interface>,
+        saved: Option<Interface>,
     ) -> Result<Self, NipartError> {
-        let merged = match (&desired, &current) {
-            (Some(desired), Some(current)) => current.merge(desired)?,
-            (Some(state), None) | (None, Some(state)) => state.clone(),
-            _ => {
-                log::warn!(
-                    "BUG: MergedInterface:new() got both desired and current \
-                     set to None"
-                );
-                Interface::default()
-            }
-        };
-        let (diff, for_apply) = if let Some(current) = current.as_ref() {
-            if let Some(desired) = desired.as_ref() {
-                let diff = desired.gen_diff(current)?;
-                let for_apply = if let Some(mut d) = diff.clone() {
-                    d.base_iface_mut()
-                        .include_extra_for_apply(Some(current.base_iface()));
-                    Some(d)
-                } else {
-                    Some(desired.clone())
-                };
-                (diff, for_apply)
+        let for_save = if let Some(desired) = desired.as_ref() {
+            if let Some(saved) = saved.as_ref() {
+                Some(saved.merge(desired)?)
             } else {
-                (None, None)
+                Some(desired.clone())
             }
         } else {
-            (desired.clone(), desired.clone())
+            saved
         };
 
-        Ok(Self {
+        // We cannot use for_save as for_verify, because the kernel_iface_name
+        // been resolved. We use original desired state.
+        let for_verify = desired.clone();
+
+        // We only apply changed properties
+        let for_apply = if let Some(current) = current.as_ref()
+            && let Some(for_save) = for_save.as_ref()
+        {
+            for_save.gen_diff(current)?
+        } else {
+            for_save.clone()
+        };
+        // We don't process merged and for_revert state yet, it need to be done
+        // after interface sensitization finished.
+        let merged = match (desired.as_ref(), current.as_ref()) {
+            (Some(desired), Some(current)) => current.merge(desired)?,
+            (None, Some(current)) => current.clone(),
+            (Some(desired), None) => desired.clone(),
+            (None, None) => Interface::default(),
+        };
+
+        let mut ret = Self {
             for_apply,
-            for_verify: desired.clone(),
+            for_verify,
             desired,
             current,
             merged,
-            diff,
-        })
+            for_save,
+            for_revert: None,
+            up_priority: None,
+        };
+
+        ret.sanitize()?;
+
+        Ok(ret)
+    }
+
+    /// Only sanitize desired interfaces:
+    /// * Validate user's input
+    /// * Unify the IP address or MAC address format, and etc
+    /// * Fill for_apply with real kernel interface name
+    /// * Generate `merged` state
+    /// * Generate `for_revert` state
+    fn sanitize(&mut self) -> Result<(), NipartError> {
+        if let Some(desired) = self.desired.as_mut()
+            && let Some(for_apply) = self.for_apply.as_mut()
+            && let Some(for_save) = self.for_save.as_mut()
+            && let Some(for_verify) = self.for_verify.as_mut()
+        {
+            desired.base_iface_mut().sanitize(
+                self.current.as_ref().map(|i| i.base_iface()),
+                for_save.base_iface_mut(),
+                for_apply.base_iface_mut(),
+                for_verify.base_iface_mut(),
+                self.merged.base_iface_mut(),
+            )?;
+            if for_apply.is_absent() && !desired.is_virtual() {
+                for_apply.base_iface_mut().state = InterfaceState::Down;
+            }
+            desired.sanitize(
+                self.current.as_ref(),
+                for_save,
+                for_apply,
+                for_verify,
+                &mut self.merged,
+            )?;
+            // The `mark_as_changed()` will handle `for_apply`, `for_revert`
+            // for undesired but impacted interface.
+            if let Some(for_apply) = self.for_apply.as_mut() {
+                self.for_revert =
+                    for_apply.generate_revert(self.current.as_ref())?;
+            } else {
+                return Err(NipartError::new(
+                    ErrorKind::Bug,
+                    format!("for_apply is None but desired: {self}"),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn is_userspace(&self) -> bool {
+        self.merged.is_userspace()
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        self.merged.name()
+    }
+
+    pub(crate) fn iface_type(&self) -> &InterfaceType {
+        self.merged.iface_type()
+    }
+
+    pub(crate) fn kernel_iface_name(&self) -> &str {
+        self.merged.kernel_iface_name()
     }
 
     pub(crate) fn is_desired(&self) -> bool {
@@ -84,6 +162,10 @@ impl MergedInterface {
         self.for_apply.is_some()
     }
 
+    pub fn is_absent(&self) -> bool {
+        self.for_apply.as_ref().map(|i| i.is_absent()) == Some(true)
+    }
+
     pub fn hide_secrets(&mut self) {
         for s in [
             self.desired.as_mut(),
@@ -91,11 +173,13 @@ impl MergedInterface {
             Some(&mut self.merged),
             self.for_apply.as_mut(),
             self.for_verify.as_mut(),
+            self.for_save.as_mut(),
+            self.for_revert.as_mut(),
         ]
         .iter_mut()
         .flatten()
         {
-            s.hide_secrets()
+            s.hide_secrets();
         }
     }
 
@@ -214,5 +298,34 @@ impl MergedInterface {
         } else {
             false
         }
+    }
+
+    pub(crate) fn is_up_priority_valid(&self) -> bool {
+        if let Some(for_apply) = self.for_apply.as_ref()
+            && for_apply.is_up()
+            && (for_apply.has_controller() || for_apply.has_parent())
+        {
+            self.up_priority.is_some()
+        } else {
+            true
+        }
+    }
+}
+
+impl Interface {
+    /// Use properties defined in new_state to override properties defined in
+    /// self. Return the newly created [Interface].
+    pub fn merge(&self, new_state: &Self) -> Result<Self, NipartError> {
+        let mut new_value = serde_json::to_value(new_state)?;
+        let old_value = serde_json::to_value(self)?;
+        copy_undefined_value(&mut new_value, &old_value);
+
+        let old_state = self.clone();
+
+        let mut ret: Self = serde_json::from_value(new_value)?;
+        ret.base_iface_mut().post_merge(old_state.base_iface())?;
+        ret.post_merge(new_state, &old_state)?;
+
+        Ok(ret)
     }
 }

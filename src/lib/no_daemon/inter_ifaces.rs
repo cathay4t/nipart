@@ -13,7 +13,7 @@ pub(crate) async fn apply_ifaces(
     merged_ifaces: &mut MergedInterfaces,
 ) -> Result<(), NipartError> {
     let to_apply_ifaces = merged_ifaces.gen_state_for_apply();
-    for apply_iface in to_apply_ifaces.to_vec() {
+    for apply_iface in to_apply_ifaces.iter() {
         log::info!("Applying: {apply_iface}");
     }
     delete_ifaces_before_apply(merged_ifaces).await?;
@@ -34,12 +34,15 @@ async fn delete_ifaces_before_apply(
     merged_ifaces: &mut MergedInterfaces,
 ) -> Result<(), NipartError> {
     let mut np_ifaces: Vec<nispor::IfaceConf> = Vec::new();
+
+    // Some changed interfaces might need delete first
     for merged_iface in merged_ifaces.kernel_ifaces.values_mut().filter(|m| {
         m.merged.is_up() && m.for_apply.is_some() && m.current.is_some()
     }) {
         if let Some(for_apply) = merged_iface.for_apply.as_ref()
+            && let Some(for_save) = merged_iface.for_save.as_ref()
             && let Some(current) = merged_iface.current.as_ref()
-            && for_apply.need_delete_before_change(current)
+            && Interface::need_delete_before_change(for_apply, current)
         {
             log::debug!(
                 "Need to delete interface {}/{} before making changes",
@@ -53,8 +56,32 @@ async fn delete_ifaces_before_apply(
             np_iface.state = nispor::IfaceState::Absent;
             np_ifaces.push(np_iface);
             merged_iface.current = None;
-            merged_iface.for_apply = merged_iface.desired.clone();
+            merged_iface.merged = for_save.clone();
+            merged_iface.for_apply = Some(for_save.clone());
+            merged_iface.for_verify = Some(for_save.clone());
         }
+    }
+    for for_apply in merged_ifaces
+        .kernel_ifaces
+        .values()
+        .filter_map(|m| m.for_apply.as_ref())
+        .filter(|i| i.is_absent())
+    {
+        if for_apply.kernel_iface_name().is_empty() {
+            return Err(NipartError::new(
+                ErrorKind::Bug,
+                format!(
+                    "Got kernel for_apply iface with state: absent but \
+                     holding empty kernel_iface_name: {for_apply}"
+                ),
+            ));
+        }
+        let mut np_iface = nispor::IfaceConf::default();
+        np_iface.name = for_apply.kernel_iface_name().to_string();
+        np_iface.iface_type =
+            Some(nipart_iface_type_to_nispor(for_apply.iface_type()));
+        np_iface.state = nispor::IfaceState::Absent;
+        np_ifaces.push(np_iface);
     }
     if !np_ifaces.is_empty() {
         let mut net_conf = nispor::NetConf::default();
@@ -81,17 +108,19 @@ async fn apply_ifaces_link_changes(
 ) -> Result<(), NipartError> {
     let mut np_ifaces: Vec<nispor::IfaceConf> = Vec::new();
 
-    let mut sorted_changed_mergd_ifaces: Vec<&MergedInterface> = merged_ifaces
-        .kernel_ifaces
-        .values()
-        .chain(merged_ifaces.user_ifaces.values())
-        .filter(|i| i.for_apply.is_some())
+    let mut sorted_changed_mergd_ifaces: Vec<MergedInterface> = merged_ifaces
+        .iter()
+        .filter_map(|m| {
+            if m.is_changed() && !m.is_absent() {
+                Some(m.clone())
+            } else {
+                None
+            }
+        })
         .collect();
-    sorted_changed_mergd_ifaces.sort_unstable_by_key(|i| {
-        i.for_apply
-            .as_ref()
-            .map(|i| i.base_iface().up_priority)
-            .unwrap_or(u32::MAX)
+
+    sorted_changed_mergd_ifaces.sort_unstable_by_key(|m| {
+        (!m.is_absent(), m.up_priority.unwrap_or_default())
     });
 
     for merged_iface in sorted_changed_mergd_ifaces.as_slice() {

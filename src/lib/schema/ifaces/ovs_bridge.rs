@@ -55,28 +55,24 @@ impl NipartInterface for OvsBridgeInterface {
         true
     }
 
-    fn hide_secrets_iface_specific(&mut self) {}
+    fn hide_secrets(&mut self) {}
 
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         _current: Option<&Self>,
+        _for_save: &mut Self,
+        _for_apply: &mut Self,
+        _for_verify: &mut Self,
+        _merged: &mut Self,
     ) -> Result<(), NipartError> {
         Ok(())
     }
 
-    fn include_diff_context_iface_specific(
-        &mut self,
-        _desired: &Self,
-        _current: &Self,
-    ) {
+    fn include_diff_context(&mut self, _desired: &Self, _current: &Self) {
         // TODO(Gris Ge): Include full port config if any changed
     }
 
-    fn include_revert_context_iface_specific(
-        &mut self,
-        _desired: &Self,
-        _pre_apply: &Self,
-    ) {
+    fn include_revert_context(&mut self, _desired: &Self, _pre_apply: &Self) {
         // TODO(Gris Ge): Include full port config if any changed
     }
 

@@ -13,13 +13,8 @@ impl MergedInterface {
             Some(i) => i,
             None => return Ok(None),
         };
-        if let Some(cur_iface) = self.current.as_ref() {
-            let revert_iface = apply_iface.generate_revert(cur_iface)?;
-            if !is_no_op(&revert_iface, apply_iface) {
-                Ok(Some(revert_iface))
-            } else {
-                Ok(None)
-            }
+        if self.current.is_some() {
+            apply_iface.generate_revert(self.current.as_ref())
         } else {
             let mut revert_iface = apply_iface.clone_name_type_only();
             revert_iface.base_iface_mut().state = InterfaceState::Absent;
@@ -29,26 +24,38 @@ impl MergedInterface {
 }
 
 impl Interface {
+    /// Return revert state applied by self with pre-apply current.
+    /// Return None if nothing changed.
     pub(crate) fn generate_revert(
         &self,
-        current: &Self,
-    ) -> Result<Self, NipartError> {
-        if self.is_absent() {
-            return Ok(current.clone());
+        current: Option<&Self>,
+    ) -> Result<Option<Self>, NipartError> {
+        let for_apply = self;
+        if for_apply.is_absent() {
+            return Ok(current.cloned());
         }
+        let Some(current) = current.as_ref() else {
+            let mut ret = for_apply.clone();
+            ret.base_iface_mut().state = InterfaceState::Absent;
+            return Ok(Some(ret));
+        };
 
         let mut revert_value =
             serde_json::to_value(current.clone_name_type_only())?;
-        let desired_value = serde_json::to_value(self)?;
+        let desired_value = serde_json::to_value(for_apply)?;
         let current_value = serde_json::to_value(current)?;
 
         gen_revert_state(&desired_value, &current_value, &mut revert_value);
 
         let mut revert_iface: Interface = serde_json::from_value(revert_value)?;
 
-        revert_iface.include_revert_context(self, current);
+        revert_iface.include_revert_context(for_apply, current);
 
-        Ok(revert_iface)
+        if is_no_op(&revert_iface, for_apply) {
+            Ok(Some(revert_iface))
+        } else {
+            Ok(None)
+        }
     }
 }
 

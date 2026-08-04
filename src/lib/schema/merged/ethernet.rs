@@ -2,10 +2,12 @@
 
 use crate::{
     BaseInterface, EthernetInterface, Interface, InterfaceState, InterfaceType,
-    Interfaces, MergedInterface, MergedInterfaces, NipartInterface,
+    MergedInterface, MergedInterfaces, NipartInterface,
 };
 
 impl MergedInterfaces {
+    // * When veth been marked as delete/down, its peer should also
+    // * Automatically bring veth peer up when creating
     pub(crate) fn post_merge_sanitize_veth(&mut self) {
         self.bring_new_veth_peer_up();
         self.mark_veth_peer_absent_also();
@@ -13,28 +15,26 @@ impl MergedInterfaces {
 
     fn bring_new_veth_peer_up(&mut self) {
         let mut new_veth_peers: Vec<MergedInterface> = Vec::new();
-        for iface in self.kernel_ifaces.values().filter(|i| i.current.is_none())
+        for merged_iface in
+            self.kernel_ifaces.values().filter(|i| i.current.is_none())
         {
             if let Some(Interface::Ethernet(eth_iface)) =
-                iface.for_apply.as_ref()
+                merged_iface.for_apply.as_ref()
                 && let Some(peer) =
                     eth_iface.veth.as_ref().map(|v| v.peer.as_str())
                 && !self.kernel_ifaces.contains_key(peer)
             {
-                let mut base_iface = BaseInterface::new(
+                let base_iface = BaseInterface::new(
                     peer.to_string(),
                     InterfaceType::Ethernet,
                 );
 
-                // Veth peer should be activated after creation which
-                // is holding up_priority 0
-                base_iface.up_priority = 1;
                 let des_iface = Interface::Ethernet(Box::new(
                     EthernetInterface::new_veth(base_iface, eth_iface.name()),
                 ));
 
-                let mut merged_iface =
-                    match MergedInterface::new(Some(des_iface), None) {
+                let mut new_merged_iface =
+                    match MergedInterface::new(Some(des_iface), None, None) {
                         Ok(i) => i,
                         Err(e) => {
                             log::error!(
@@ -45,9 +45,12 @@ impl MergedInterfaces {
                             continue;
                         }
                     };
-                merged_iface.for_verify = None;
+                // Veth peer should be activated after creation which
+                // is holding up_priority 0
+                new_merged_iface.up_priority = Some(1);
+                new_merged_iface.for_verify = None;
 
-                new_veth_peers.push(merged_iface);
+                new_veth_peers.push(new_merged_iface);
             }
         }
         for merged_iface in new_veth_peers {
@@ -79,50 +82,6 @@ impl MergedInterfaces {
                 .and_then(|i| i.for_apply.as_mut())
             {
                 iface.base_iface_mut().state = InterfaceState::Absent;
-            }
-        }
-    }
-}
-
-impl Interfaces {
-    // * Sync veth state in new_ifaces to its peer(if exist) also
-    pub(crate) fn post_merge_veth(&mut self, new_ifaces: &Self) {
-        // Holds Vec<veth_peer_name, interface_type>
-        let mut pending_changes: Vec<(String, InterfaceState)> = Vec::new();
-        for new_iface in new_ifaces.kernel_ifaces.values().filter_map(|i| {
-            if let Interface::Ethernet(iface) = i {
-                Some(iface)
-            } else {
-                None
-            }
-        }) {
-            let old_iface = if let Some(old_iface) =
-                self.kernel_ifaces.get(new_iface.kernel_iface_name())
-                && let Interface::Ethernet(iface) = old_iface
-            {
-                iface
-            } else {
-                continue;
-            };
-            let peer = if let Some(p) = new_iface
-                .veth
-                .as_ref()
-                .map(|v| v.peer.as_str())
-                .or_else(|| old_iface.veth.as_ref().map(|v| v.peer.as_str()))
-            {
-                p
-            } else {
-                continue;
-            };
-            if let Some(peer_iface) = self.kernel_ifaces.get(peer)
-                && peer_iface.base_iface().state != new_iface.base.state
-            {
-                pending_changes.push((peer.to_string(), new_iface.base.state));
-            }
-        }
-        for (peer_name, iface_state) in pending_changes {
-            if let Some(iface) = self.kernel_ifaces.get_mut(&peer_name) {
-                iface.base_iface_mut().state = iface_state;
             }
         }
     }

@@ -122,26 +122,31 @@ impl NipartInterface for LinuxBridgeInterface {
         true
     }
 
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         current: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        merged: &mut Self,
     ) -> Result<(), NipartError> {
+        let desired = self;
         if let Some(opts) =
-            self.bridge.as_ref().and_then(|b| b.options.as_ref())
+            desired.bridge.as_ref().and_then(|b| b.options.as_ref())
         {
-            opts.validate_vlan_default_pvid(self, current)?;
+            opts.validate_vlan_default_pvid(desired, current)?;
         }
         if let Some(opts) =
-            self.bridge.as_mut().and_then(|b| b.options.as_mut())
+            for_apply.bridge.as_mut().and_then(|b| b.options.as_mut())
         {
-            opts.sanitize_group_fwd_mask(&self.base)?;
+            opts.sanitize_group_fwd_mask(&for_apply.base)?;
         }
-        self.sort_ports();
-        self.sanitize_stp_opts()?;
-        self.use_upper_case_of_mac_address();
-        self.compress_port_vlan_ranges();
-        self.remove_runtime_only_timers();
-        if let Some(port_confs) = self
+        for_apply.sort_ports();
+        for_apply.sanitize_stp_opts()?;
+        for_apply.use_upper_case_of_mac_address();
+        for_apply.compress_port_vlan_ranges();
+        for_apply.remove_runtime_only_timers();
+        if let Some(port_confs) = for_apply
             .bridge
             .as_mut()
             .and_then(|br_conf| br_conf.ports.as_mut())
@@ -152,6 +157,10 @@ impl NipartInterface for LinuxBridgeInterface {
                 }
             }
         }
+        merged.bridge = for_apply.bridge.clone();
+        for_verify.bridge = for_apply.bridge.clone();
+        for_save.bridge = for_apply.bridge.clone();
+
         Ok(())
     }
 
@@ -166,11 +175,8 @@ impl NipartInterface for LinuxBridgeInterface {
 
     /// * Include port_name if port config defined
     /// * Include VLAN config if changed
-    fn include_diff_context_iface_specific(
-        &mut self,
-        desired: &Self,
-        current: &Self,
-    ) {
+    fn include_diff_context(&mut self, desired: &Self, current: &Self) {
+        let diff = self;
         if let Some(des_ports) = desired
             .bridge
             .as_ref()
@@ -192,7 +198,7 @@ impl NipartInterface for LinuxBridgeInterface {
                     diff_port.vlan = des_port.vlan.clone();
                 }
             }
-            self.bridge
+            diff.bridge
                 .get_or_insert(LinuxBridgeConfig::default())
                 .ports = Some(diff_ports);
         }
@@ -207,16 +213,17 @@ impl NipartInterface for LinuxBridgeInterface {
                 .and_then(|br_conf| br_conf.vlan.as_ref())
             && des_vlan != cur_vlan
         {
-            self.bridge.get_or_insert(LinuxBridgeConfig::default()).vlan =
+            diff.bridge.get_or_insert(LinuxBridgeConfig::default()).vlan =
                 Some(des_vlan.clone());
         }
     }
 
     /// * Sort ports
     /// * Fix round up issue
-    fn sanitize_before_verify_iface_specfic(&mut self, current: &mut Self) {
+    fn sanitize_before_verify(&mut self, current: &mut Self) {
+        let desired = self;
         current.sort_ports();
-        fix_round_up(self, current);
+        fix_round_up(desired, current);
     }
 }
 

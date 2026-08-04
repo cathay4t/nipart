@@ -43,12 +43,12 @@ impl From<&VxlanConfig> for nispor::VxlanConf {
         let mut np_vxlan = nispor::VxlanConf::default();
         np_vxlan.vxlan_id = v.id;
         np_vxlan.base_iface = v.base_iface.clone();
-        if let Some(ref remote) = v.remote
+        if let Some(remote) = v.remote.as_ref()
             && let Ok(ip) = remote.parse::<std::net::IpAddr>()
         {
             np_vxlan.remote = Some(ip);
         }
-        if let Some(ref local) = v.local
+        if let Some(local) = v.local.as_ref()
             && let Ok(ip) = local.parse::<std::net::IpAddr>()
         {
             np_vxlan.local = Some(ip);

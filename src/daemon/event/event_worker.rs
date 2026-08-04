@@ -100,9 +100,8 @@ impl NipartEventWorker {
             NipartNoDaemon::query_network_state(NipartQueryOption::running())
                 .await?;
 
-        let cur_iface = cur_state
-            .ifaces
-            .get(&event.iface_name, Some(&event.iface_type));
+        // Kernel event is always for kernel interface
+        let cur_iface = cur_state.ifaces.kernel_ifaces.get(&event.iface_name);
         if let Some(cur_iface) = cur_iface {
             log::trace!("Current interface state: {cur_iface}");
 
@@ -176,6 +175,7 @@ impl NipartEventWorker {
             let merged_state = MergedNetworkState::new(
                 desired_state,
                 cur_state,
+                None,
                 NipartApplyOption::new().no_verify(),
             )?;
             commander.apply_merged_state(None, &merged_state).await?;

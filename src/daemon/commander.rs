@@ -185,7 +185,8 @@ fn remove_ready_state(
     let mut pending_ifaces: HashMap<String, Option<InterfaceType>> =
         HashMap::new();
     for kernel_iface_name in ready_kernel_iface_names {
-        if let Some(iface) = state.ifaces.get(kernel_iface_name.as_str(), None)
+        if let Some(iface) =
+            state.ifaces.kernel_ifaces.get(kernel_iface_name.as_str())
             && iface.base_iface().controller.is_none()
         {
             pending_ifaces.insert(iface.kernel_iface_name().to_string(), None);
@@ -229,10 +230,11 @@ fn remove_ready_state(
         }
     });
 
-    for (kernel_iface_name, iface_type) in pending_ifaces.drain() {
+    for (kernel_iface_name, _iface_type) in pending_ifaces.drain() {
         if let Some(iface) = state
             .ifaces
-            .remove(kernel_iface_name.as_str(), iface_type.as_ref())
+            .kernel_ifaces
+            .remove(kernel_iface_name.as_str())
         {
             ret.ifaces.push(iface);
         }

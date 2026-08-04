@@ -22,8 +22,8 @@ impl Interface {
                 let mut new_iface_value = serde_json::to_value(&new_iface)?;
                 copy_undefined_value(&mut new_iface_value, &diff_value);
                 let mut new_iface =
-                    serde_json::from_value::<Interface>(new_iface_value)?;
-                new_iface.include_diff_context(self, old);
+                    serde_json::from_value::<Self>(new_iface_value)?;
+                Self::include_diff_context(&mut new_iface, self, old);
                 Ok(Some(new_iface))
             } else {
                 Ok(None)

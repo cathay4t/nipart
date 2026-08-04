@@ -91,12 +91,14 @@ def test_add_ip_to_loopback(clean_up_loopback, query_kind):
         assert state_match(
             [
                 {"ip": "127.0.0.2", "prefix-length": 32},
+                {"ip": "127.0.0.1", "prefix-length": 8},
             ],
             iface_state["ipv4"]["address"],
         )
         assert state_match(
             [
                 {"ip": "::2", "prefix-length": 128},
+                {"ip": "::1", "prefix-length": 128},
             ],
             iface_state["ipv6"]["address"],
         )

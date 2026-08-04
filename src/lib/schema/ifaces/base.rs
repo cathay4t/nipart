@@ -26,6 +26,8 @@ pub struct BaseInterface {
     /// [InterfaceIdentifier::MacAddress], this holds the resolved kernel
     /// interface name. When [InterfaceIdentifier::Name] or undefined,
     /// this is copied from `name` during sanitization.
+    /// For `[InterfaceIdentifier::Name]` (default), if this property
+    /// undefined during apply, this will take `name` property.
     /// Serialize and deserialize to/from `kernel-iface-name`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kernel_iface_name: String,
@@ -33,7 +35,10 @@ pub struct BaseInterface {
     /// [InterfaceIdentifier::MacAddress].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_name: Option<String>,
-    #[serde(default, rename = "type")]
+    // TODO: To simplify the code and workflow, we ask user to always define
+    //       interface type. Let's heard feedback or use case to release
+    //       this restriction.
+    #[serde(rename = "type")]
     pub iface_type: InterfaceType,
     /// Define network backend matching method on choosing network interface.
     /// Default to [InterfaceIdentifier::Name].
@@ -53,12 +58,6 @@ pub struct BaseInterface {
     /// Serialize to `link-state`
     #[serde(skip_serializing_if = "Option::is_none")]
     pub link_state: Option<InterfaceLinkState>,
-    /// In which order should this interface been activated. The smallest
-    /// number will be activated first.
-    /// Undefined or set to 0 when applying desire state means automatically
-    /// decide the correct value.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub up_priority: u32,
     /// Controller interface name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub controller: Option<String>,
@@ -66,6 +65,8 @@ pub struct BaseInterface {
     pub controller_type: Option<InterfaceType>,
     /// MAC address in the format: upper case hex string separated by `:` on
     /// every two characters. Case insensitive when applying.
+    /// When applying, this property is only used with
+    /// `InterfaceIdentifier::MacAddress`, otherwise, silently ignored.
     /// Serialize and deserialize to/from `mac-address`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_address: Option<String>,
@@ -98,29 +99,67 @@ pub struct BaseInterface {
 }
 
 impl BaseInterface {
-    pub fn hide_secrets(&mut self) {}
-
     pub fn sanitize(
-        &mut self,
+        &self,
         current: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        _merged: &mut Self,
     ) -> Result<(), NipartError> {
-        if let Some(ipv4) = self.ipv4.as_mut() {
+        let desired = self;
+        // Ignore MAC address if not InterfaceIdentifier::MacAddress
+        if for_apply.identifier != Some(InterfaceIdentifier::MacAddress)
+            && for_apply.mac_address.is_some()
+            && for_apply.is_up()
+        {
+            log::info!(
+                "Ignoring interface {}/{} MAC address property for apply \
+                 action because it is not `identifier: mac-address`",
+                for_apply.name,
+                for_apply.iface_type,
+            );
+            for_apply.mac_address = None;
+            for_verify.mac_address = None;
+        }
+
+        if let Some(ipv4) = for_apply.ipv4.as_mut() {
             ipv4.sanitize(current.and_then(|c| c.ipv4.as_ref()))?;
         }
-        if let Some(ipv6) = self.ipv6.as_mut() {
+        if let Some(ipv6) = for_apply.ipv6.as_mut() {
             ipv6.sanitize(current.and_then(|c| c.ipv6.as_ref()))?;
         }
-        self.iface_index = None;
-        self.validate_mtu(current)?;
-        if self.identifier == Some(InterfaceIdentifier::MacAddress)
-            && self.iface_type != InterfaceType::Ethernet
+        for_save.ipv4 = for_apply.ipv4.clone();
+        for_save.ipv6 = for_apply.ipv6.clone();
+        for_verify.ipv4 = for_apply.ipv4.clone();
+        for_verify.ipv6 = for_apply.ipv6.clone();
+
+        if let Some(cur_kernel_iface_name) =
+            current.as_ref().map(|c| c.kernel_iface_name.as_str())
+            && !cur_kernel_iface_name.is_empty()
+            && for_apply.kernel_iface_name.is_empty()
+        {
+            for_apply.kernel_iface_name = cur_kernel_iface_name.to_string();
+        }
+
+        if !for_apply.is_name_matching() {
+            for_save.kernel_iface_name = String::new();
+        }
+
+        // iface_index is query only
+        for_save.iface_index = None;
+        for_apply.iface_index = None;
+
+        desired.validate_mtu(current)?;
+        if desired.identifier == Some(InterfaceIdentifier::MacAddress)
+            && desired.iface_type != InterfaceType::Ethernet
         {
             return Err(NipartError::new(
                 ErrorKind::InvalidArgument,
                 format!(
                     "The `identifier: mac-address` is only supported on \
                      ethernet interfaces, but interface {} is of type {}",
-                    self.name, self.iface_type
+                    desired.name, desired.iface_type
                 ),
             ));
         }
@@ -128,9 +167,10 @@ impl BaseInterface {
     }
 
     fn validate_mtu(&self, current: Option<&Self>) -> Result<(), NipartError> {
+        let desired = self;
         if let Some(current) = current
             && let (Some(desire_mtu), Some(min_mtu), Some(max_mtu)) =
-                (self.mtu, current.min_mtu, current.max_mtu)
+                (desired.mtu, current.min_mtu, current.max_mtu)
         {
             if desire_mtu > max_mtu {
                 return Err(NipartError::new(
@@ -138,7 +178,7 @@ impl BaseInterface {
                     format!(
                         "Desired MTU {} for interface {} is bigger than \
                          maximum allowed MTU {}",
-                        desire_mtu, self.name, max_mtu
+                        desire_mtu, desired.name, max_mtu
                     ),
                 ));
             } else if desire_mtu < min_mtu {
@@ -147,7 +187,7 @@ impl BaseInterface {
                     format!(
                         "Desired MTU {} for interface {} is smaller than \
                          minimum allowed MTU {}",
-                        desire_mtu, self.name, min_mtu
+                        desire_mtu, desired.name, min_mtu
                     ),
                 ));
             }
@@ -159,7 +199,6 @@ impl BaseInterface {
         self.identifier = None;
         self.profile_name = None;
         self.kernel_iface_name.clear();
-        self.up_priority = 0;
         self.controller_type = None;
         if let Some(des_ipv4) = self.ipv4.as_mut()
             && let Some(cur_ipv4) = current.ipv4.as_mut()
@@ -173,10 +212,6 @@ impl BaseInterface {
         }
     }
 
-    pub(crate) fn sanitize_for_diff(&mut self, current: &mut Self) {
-        self.sanitize_before_verify(current);
-    }
-
     pub fn clone_name_type_only(&self) -> Self {
         Self {
             name: self.name.clone(),
@@ -187,16 +222,16 @@ impl BaseInterface {
         }
     }
 
+    pub(crate) fn is_up(&self) -> bool {
+        self.state == InterfaceState::Up
+    }
+
     pub(crate) fn is_absent(&self) -> bool {
         self.state == InterfaceState::Absent
     }
 
-    pub(crate) fn is_up_priority_valid(&self) -> bool {
-        if self.has_controller() {
-            self.up_priority != 0
-        } else {
-            true
-        }
+    pub(crate) fn is_userspace(&self) -> bool {
+        self.iface_type.is_userspace()
     }
 
     fn has_controller(&self) -> bool {
@@ -205,10 +240,6 @@ impl BaseInterface {
         } else {
             false
         }
-    }
-
-    pub(crate) fn include_extra_for_apply(&mut self, current: Option<&Self>) {
-        self.iface_index = current.and_then(|c| c.iface_index);
     }
 
     pub(crate) fn is_ipv4_enabled(&self) -> bool {
@@ -229,9 +260,11 @@ impl BaseInterface {
             || self.iface_type == InterfaceType::OvsInterface
             || self.controller_type == Some(InterfaceType::Vrf)
     }
-}
 
-impl BaseInterface {
+    pub fn is_name_matching(&self) -> bool {
+        matches!(self.identifier, None | Some(InterfaceIdentifier::Name))
+    }
+
     pub fn new(name: String, iface_type: InterfaceType) -> Self {
         Self {
             name,
@@ -240,8 +273,4 @@ impl BaseInterface {
             ..Default::default()
         }
     }
-}
-
-fn is_zero(d: &u32) -> bool {
-    *d == 0
 }

@@ -175,41 +175,78 @@ impl<'de> Deserialize<'de> for Interface {
     }
 }
 
-macro_rules! gen_sanitize_iface_specfic {
-    ( $desired:ident, $current:ident, $($variant:path,)+ ) => {
+macro_rules! gen_sanitize {
+    ( $desired:ident,
+      $current:ident,
+      $for_save:ident,
+      $for_apply:ident,
+      $for_verify:ident,
+      $merged:ident,
+      $($variant:path,)+ ) => {
         match $desired {
             $(
-                $variant(i) => {
-                    let cur_iface = if let Some($variant(c)) = $current {
-                        Some(c)
+                $variant(desired) => {
+                    let cur_iface = if let Some($variant(c)) = $current
+                    {
+                        Some(&**c)
                     } else {
                         if let Some(current) = $current {
                             return Err(NipartError::new(
                                 ErrorKind::Bug,
                                 format!(
-                                    "current interface holding the same \
+                                    "current interface holding the different \
                                     interface type as as desired, current {}, \
-                                    desired {}", i.iface_type(),
+                                    desired {}", desired.iface_type(),
                                     current.iface_type(),
                                 ),
                             ));
                         }
                         None
                     };
-                    i.sanitize_iface_specfic(cur_iface.map(|v| &**v))
+                    let (for_save, for_apply, for_verify, merged) =
+                        if let $variant(save) = $for_save &&
+                           let $variant(apply) = $for_apply &&
+                           let $variant(verify) = $for_verify &&
+                           let $variant(merged) = $merged
+                    {
+                        (save, apply, verify, merged)
+                    } else {
+                        return Err(NipartError::new(
+                            ErrorKind::Bug,
+                            format!(
+                                "merged interface holding the different \
+                                interface type as as desired, for_saved {}, \
+                                for_apply {} , for_verify {}, merged {},
+                                desired {}",
+                                desired.iface_type(),
+                                $for_save.iface_type(),
+                                $for_apply.iface_type(),
+                                $for_verify.iface_type(),
+                                $merged.iface_type(),
+                            ),
+                        ));
+                    };
+
+                    desired.sanitize(
+                        cur_iface,
+                        for_save,
+                        for_apply,
+                        for_verify,
+                        merged,
+                    )
                 }
             )+
         }
     };
 }
 
-macro_rules! gen_sanitize_before_verify_iface_specfic {
+macro_rules! gen_sanitize_before_verify {
     ( $desired:ident, $current:ident, $($variant:path,)+ ) => {
         match $desired {
             $(
                 $variant(i) => {
                     if let $variant(cur_iface) = $current {
-                        i.sanitize_before_verify_iface_specfic(cur_iface);
+                        i.sanitize_before_verify(cur_iface);
                     };
                 }
             )+
@@ -217,21 +254,7 @@ macro_rules! gen_sanitize_before_verify_iface_specfic {
     };
 }
 
-macro_rules! gen_sanitize_for_diff_iface_specific {
-    ( $desired:ident, $current:ident, $($variant:path,)+ ) => {
-        match $desired {
-            $(
-                $variant(i) => {
-                    if let $variant(cur_iface) = $current {
-                        i.sanitize_for_diff_iface_specific(cur_iface);
-                    };
-                }
-            )+
-        }
-    };
-}
-
-macro_rules! gen_include_diff_context_iface_specific {
+macro_rules! gen_include_diff_context {
     ( $diff:ident, $desired:ident, $current:ident, $($variant:path,)+ ) => {
         match ($diff, $desired, $current) {
             $(
@@ -239,11 +262,11 @@ macro_rules! gen_include_diff_context_iface_specific {
                     $variant(i),
                     $variant(desired),
                     $variant(current),
-                ) => i.include_diff_context_iface_specific(desired, current),
+                ) => i.include_diff_context(desired, current),
             )+
             (_, desired, current) => {
                 log::error!(
-                    "BUG: Interface::include_diff_context_iface_specific() \
+                    "BUG: Interface::include_diff_context() \
                      Unexpected desired {:?} current {:?}",
                      desired, current,
                 );
@@ -252,7 +275,7 @@ macro_rules! gen_include_diff_context_iface_specific {
     };
 }
 
-macro_rules! gen_include_revert_context_iface_specific{
+macro_rules! gen_include_revert_context{
     ( $revert:ident, $desired:ident, $pre_apply:ident, $($variant:path,)+ ) => {
         match ($revert, $desired, $pre_apply) {
             $(
@@ -260,14 +283,14 @@ macro_rules! gen_include_revert_context_iface_specific{
                     $variant(i),
                     $variant(desired),
                     $variant(pre_apply),
-                ) => i.include_revert_context_iface_specific(
+                ) => i.include_revert_context(
                     desired,
                     pre_apply,
                 ),
             )+
             _ => {
                 log::error!(
-                    "BUG: Interface::include_revert_context_iface_specific() \
+                    "BUG: Interface::include_revert_context() \
                      Unexpected input desired {:?} pre_apply {:?}",
                      $desired, $pre_apply
                 );
@@ -276,16 +299,16 @@ macro_rules! gen_include_revert_context_iface_specific{
     };
 }
 
-macro_rules! gen_post_merge_iface_specific{
+macro_rules! gen_post_merge{
     ( $merged:ident, $new:ident, $old:ident, $($variant:path,)+ ) => {
         match ($merged, $new, $old) {
             $(
                 ($variant(i), $variant(n), $variant(o)) =>
-                    i.post_merge_iface_specific(n, o),
+                    i.post_merge(n, o),
             )+
             (merged, new, old) => {
                 log::error!(
-                    "BUG: Interface::post_merge_iface_specific() \
+                    "BUG: Interface::post_merge() \
                      Unexpected input merged {merged:?} new_state {new:?}, \
                      old_state {old:?}"
                 );
@@ -303,7 +326,7 @@ macro_rules! gen_need_delete_before_change {
             )+
             (desired, current) => {
                 log::error!(
-                    "BUG: Interface::include_revert_context_iface_specific() \
+                    "BUG: Interface::include_revert_context() \
                      Unexpected input merged {desired:?} old_state {current:?}"
                 );
                 false
@@ -385,16 +408,24 @@ impl NipartInterface for Interface {
 
     gen_iface_trait_impl_mut!(
         (base_iface_mut, &mut BaseInterface),
-        (hide_secrets_iface_specific, ()),
+        (hide_secrets, ()),
     );
 
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         current: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        merged: &mut Self,
     ) -> Result<(), NipartError> {
-        gen_sanitize_iface_specfic!(
+        gen_sanitize!(
             self,
             current,
+            for_save,
+            for_apply,
+            for_verify,
+            merged,
             Interface::Ethernet,
             Interface::OvsBridge,
             Interface::OvsInterface,
@@ -411,8 +442,8 @@ impl NipartInterface for Interface {
         )
     }
 
-    fn sanitize_before_verify_iface_specfic(&mut self, current: &mut Self) {
-        gen_sanitize_before_verify_iface_specfic!(
+    fn sanitize_before_verify(&mut self, current: &mut Self) {
+        gen_sanitize_before_verify!(
             self,
             current,
             Interface::Ethernet,
@@ -431,32 +462,8 @@ impl NipartInterface for Interface {
         );
     }
 
-    fn sanitize_for_diff_iface_specific(&mut self, current: &mut Self) {
-        gen_sanitize_for_diff_iface_specific!(
-            self,
-            current,
-            Interface::Ethernet,
-            Interface::OvsBridge,
-            Interface::OvsInterface,
-            Interface::Loopback,
-            Interface::WifiPhy,
-            Interface::WifiCfg,
-            Interface::Dummy,
-            Interface::Vlan,
-            Interface::Vxlan,
-            Interface::Bond,
-            Interface::LinuxBridge,
-            Interface::Wireguard,
-            Interface::Unknown,
-        );
-    }
-
-    fn include_diff_context_iface_specific(
-        &mut self,
-        desired: &Self,
-        current: &Self,
-    ) {
-        gen_include_diff_context_iface_specific!(
+    fn include_diff_context(&mut self, desired: &Self, current: &Self) {
+        gen_include_diff_context!(
             self,
             desired,
             current,
@@ -476,12 +483,8 @@ impl NipartInterface for Interface {
         )
     }
 
-    fn include_revert_context_iface_specific(
-        &mut self,
-        desired: &Self,
-        pre_apply: &Self,
-    ) {
-        gen_include_revert_context_iface_specific!(
+    fn include_revert_context(&mut self, desired: &Self, pre_apply: &Self) {
+        gen_include_revert_context!(
             self,
             desired,
             pre_apply,
@@ -501,12 +504,12 @@ impl NipartInterface for Interface {
         )
     }
 
-    fn post_merge_iface_specific(
+    fn post_merge(
         &mut self,
         new_state: &Self,
         old_state: &Self,
     ) -> Result<(), NipartError> {
-        gen_post_merge_iface_specific!(
+        gen_post_merge!(
             self,
             new_state,
             old_state,

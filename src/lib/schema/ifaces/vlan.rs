@@ -10,8 +10,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BaseInterface, ErrorKind, Interface, InterfaceType, JsonDisplay,
-    MergedInterface, NipartError, NipartInterface,
+    BaseInterface, ErrorKind, InterfaceType, JsonDisplay, NipartError,
+    NipartInterface,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonDisplay)]
@@ -51,13 +51,6 @@ impl Default for VlanInterface {
 }
 
 impl NipartInterface for VlanInterface {
-    const LIVE_CHANGE_PROP_LIST: &'static [&'static str] = &[
-        "reorder-headers",
-        "loose-binding",
-        "bridge-binding",
-        "registration-protocol",
-    ];
-
     fn base_iface(&self) -> &BaseInterface {
         &self.base
     }
@@ -74,70 +67,96 @@ impl NipartInterface for VlanInterface {
         self.vlan.as_ref().and_then(|v| v.base_iface.as_deref())
     }
 
-    fn config_value(&self) -> serde_json::Value {
-        match self.vlan.as_ref() {
-            Some(c) => serde_json::to_value(c).unwrap_or_default(),
-            None => serde_json::Value::Null,
-        }
-    }
-
     /// * VLAN base-iface is mandatory for new VLAN
     /// * Always copy the base-iface and VLAN ID whenever vlan conf defined.
     /// * Sort and dedup QoS mapping
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         current: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        merged: &mut Self,
     ) -> Result<(), NipartError> {
-        if let Some(vlan_conf) = self.vlan.as_mut() {
-            if let Some(cur_vlan_conf) =
+        let desired = self;
+
+        if desired.is_absent() {
+            return Ok(());
+        }
+
+        if desired.vlan.is_none() && current.is_none() {
+            return Err(NipartError::new(
+                ErrorKind::InvalidArgument,
+                format!(
+                    "`vlan.base-iface` and `vlan.id` are mandatory for \
+                     creating new VLAN {}",
+                    desired.name()
+                ),
+            ));
+        }
+
+        if current.is_none()
+            && let Some(des_vlan_conf) = desired.vlan.as_ref()
+        {
+            if des_vlan_conf.base_iface.is_none() {
+                return Err(NipartError::new(
+                    ErrorKind::InvalidArgument,
+                    format!(
+                        "`vlan.base-iface` is mandatory for creating new VLAN \
+                         {}",
+                        desired.name()
+                    ),
+                ));
+            }
+            if des_vlan_conf.id.is_none() {
+                return Err(NipartError::new(
+                    ErrorKind::InvalidArgument,
+                    format!(
+                        "`vlan.id` is mandatory for creating new VLAN {}",
+                        desired.name()
+                    ),
+                ));
+            }
+        }
+
+        // Copy ID and base-iface if undefined in desired but VLAN section
+        // included.
+
+        if let Some(vlan_conf) = for_apply.vlan.as_mut()
+            && let Some(cur_vlan_conf) =
                 current.as_ref().and_then(|c| c.vlan.as_ref())
-            {
-                if vlan_conf.id.is_none() {
-                    vlan_conf.id = cur_vlan_conf.id;
-                }
-                if vlan_conf.base_iface.is_none() {
-                    vlan_conf.base_iface = cur_vlan_conf.base_iface.clone();
-                }
-            } else {
-                if vlan_conf.base_iface.is_none() {
-                    return Err(NipartError::new(
-                        ErrorKind::InvalidArgument,
-                        format!(
-                            "`vlan.base-iface` is mandatory for creating new \
-                             VLAN {}",
-                            self.name()
-                        ),
-                    ));
-                }
-                if vlan_conf.id.is_none() {
-                    return Err(NipartError::new(
-                        ErrorKind::InvalidArgument,
-                        format!(
-                            "`vlan.id` is mandatory for creating new VLAN {}",
-                            self.name()
-                        ),
-                    ));
-                }
+        {
+            if vlan_conf.id.is_none() {
+                vlan_conf.id = cur_vlan_conf.id;
             }
-            if let Some(qos_map) = vlan_conf.ingress_qos_map.as_mut() {
-                qos_map.sort_unstable();
-                qos_map.dedup();
+            if vlan_conf.base_iface.is_none() {
+                vlan_conf.base_iface = cur_vlan_conf.base_iface.clone();
             }
-            if let Some(qos_map) = vlan_conf.egress_qos_map.as_mut() {
-                qos_map.sort_unstable();
-                qos_map.dedup();
+            if let Some(for_save_conf) = for_save.vlan.as_mut() {
+                for_save_conf.id = vlan_conf.id;
+                for_save_conf.base_iface = vlan_conf.base_iface.clone();
             }
+        }
+
+        if let Some(vlan_conf) = merged.vlan.as_mut() {
+            vlan_conf.sanitize();
+        }
+        if let Some(vlan_conf) = for_apply.vlan.as_mut() {
+            vlan_conf.sanitize();
+        }
+        if let Some(vlan_conf) = for_save.vlan.as_mut() {
+            vlan_conf.sanitize();
+        }
+        if let Some(vlan_conf) = for_verify.vlan.as_mut() {
+            vlan_conf.sanitize();
         }
 
         Ok(())
     }
 
     /// Include both base-iface and ID if changed.
-    fn include_diff_context_iface_specific(
-        &mut self,
-        desired: &Self,
-        current: &Self,
-    ) {
+    fn include_diff_context(&mut self, desired: &Self, current: &Self) {
+        let diff = self;
         if let Some(des_vlan_conf) = desired.vlan.as_ref()
             && let Some(cur_vlan_conf) = current.vlan.as_ref()
             && des_vlan_conf != cur_vlan_conf
@@ -149,11 +168,11 @@ impl NipartInterface for VlanInterface {
             if diff_vlan_conf.id.is_none() {
                 diff_vlan_conf.id = cur_vlan_conf.id;
             }
-            self.vlan = Some(diff_vlan_conf);
+            diff.vlan = Some(diff_vlan_conf);
         }
     }
 
-    fn sanitize_before_verify_iface_specfic(&mut self, current: &mut Self) {
+    fn sanitize_before_verify(&mut self, current: &mut Self) {
         if let Some(vlan_conf) = current.vlan.as_mut() {
             if vlan_conf.ingress_qos_map.is_none() {
                 vlan_conf.ingress_qos_map = Some(Vec::new());
@@ -163,6 +182,36 @@ impl NipartInterface for VlanInterface {
             }
         }
     }
+
+    fn need_delete_before_change(&self, current: &Self) -> bool {
+        let desired = self;
+        if let Some(des) = desired.vlan.as_ref()
+            && let Some(cur) = current.vlan.as_ref()
+        {
+            if des.id.is_some() && des.id != cur.id {
+                return true;
+            }
+            if des.base_iface.is_some() && des.base_iface != cur.base_iface {
+                return true;
+            }
+            if des.protocol.is_some() && des.protocol != cur.protocol {
+                return true;
+            }
+            // Kernel IFLA_VLAN_INGRESS_QOS/EGRESS_QOS is add-only, cannot
+            // clear existing entries. Delete and recreate the VLAN instead.
+            if des.ingress_qos_map == Some(vec![])
+                && cur.ingress_qos_map.as_ref().is_some_and(|v| !v.is_empty())
+            {
+                return true;
+            }
+            if des.egress_qos_map == Some(vec![])
+                && cur.egress_qos_map.as_ref().is_some_and(|v| !v.is_empty())
+            {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[derive(
@@ -171,8 +220,10 @@ impl NipartInterface for VlanInterface {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 #[non_exhaustive]
 pub struct VlanConfig {
+    /// Change existing VLAN base interface will cause VLAN been deleted first.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_iface: Option<String>,
+    /// Change existing VLAN ID will cause VLAN been deleted first.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
@@ -180,6 +231,7 @@ pub struct VlanConfig {
     )]
     pub id: Option<u16>,
     /// Could be `802.1q` or `802.1ad`. Default to `802.1q` if not defined.
+    /// Change existing VLAN protocol will cause VLAN been deleted first.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protocol: Option<VlanProtocol>,
     /// Could be `gvrp`, `mvrp` or `none`. Default to none if not defined.
@@ -219,6 +271,19 @@ pub struct VlanConfig {
     /// 802.1Q-2018 PCP field definition.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub egress_qos_map: Option<Vec<VlanQosMapping>>,
+}
+
+impl VlanConfig {
+    fn sanitize(&mut self) {
+        if let Some(qos_map) = self.ingress_qos_map.as_mut() {
+            qos_map.sort_unstable();
+            qos_map.dedup();
+        }
+        if let Some(qos_map) = self.egress_qos_map.as_mut() {
+            qos_map.sort_unstable();
+            qos_map.dedup();
+        }
+    }
 }
 
 #[derive(
@@ -261,57 +326,6 @@ pub enum VlanRegistrationProtocol {
     Mvrp,
     /// No Registration Protocol
     None,
-}
-
-impl MergedInterface {
-    // Default reorder_headers to Some(true) unless current interface
-    // has `reorder_headers` set to `false`.
-    // If base-iface is not defined in the desired state, take it from the
-    // current state.
-    pub(crate) fn post_merge_sanitize_vlan(&mut self) {
-        if let Some(Interface::Vlan(apply_iface)) = self.for_apply.as_mut() {
-            if let Some(Interface::Vlan(cur_iface)) = self.current.as_ref() {
-                if cur_iface
-                    .vlan
-                    .as_ref()
-                    .and_then(|v| v.reorder_headers.as_ref())
-                    != Some(&false)
-                    && let Some(vlan_conf) = apply_iface.vlan.as_mut()
-                    && vlan_conf.reorder_headers.is_none()
-                {
-                    vlan_conf.reorder_headers = Some(true);
-                }
-            } else if let Some(vlan_conf) = apply_iface.vlan.as_mut()
-                && vlan_conf.reorder_headers.is_none()
-            {
-                vlan_conf.reorder_headers = Some(true);
-            }
-        }
-
-        if let (
-            Some(Interface::Vlan(apply_iface)),
-            Some(Interface::Vlan(verify_iface)),
-            Some(Interface::Vlan(cur_iface)),
-        ) = (&mut self.for_apply, &mut self.for_verify, &self.current)
-        {
-            if let Some(apply_vlan) = &mut apply_iface.vlan
-                && apply_vlan.base_iface.is_none()
-            {
-                apply_vlan.base_iface = cur_iface
-                    .vlan
-                    .as_ref()
-                    .and_then(|vlan| vlan.base_iface.clone());
-            }
-            if let Some(verify_vlan) = &mut verify_iface.vlan
-                && verify_vlan.base_iface.is_none()
-            {
-                verify_vlan.base_iface = cur_iface
-                    .vlan
-                    .as_ref()
-                    .and_then(|vlan| vlan.base_iface.clone());
-            }
-        }
-    }
 }
 
 /// VLAN QoS Mapping

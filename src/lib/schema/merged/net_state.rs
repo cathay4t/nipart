@@ -32,15 +32,27 @@ impl MergedNetworkState {
     pub fn new(
         desired: NetworkState,
         current: NetworkState,
+        saved_config: Option<NetworkState>,
         option: NipartApplyOption,
     ) -> Result<Self, NipartError> {
-        let mut desired = desired;
-        desired.resolve_kernel_iface_name(&current)?;
         let desired_clone = desired.clone();
-        let merged_ifaces =
-            MergedInterfaces::new(desired.ifaces, current.ifaces)?;
-        let merged_routes =
-            MergedRoutes::new(desired.routes, current.routes, &merged_ifaces)?;
+
+        let (saved_ifaces, saved_routes) = match saved_config {
+            Some(c) => (Some(c.ifaces), Some(c.routes)),
+            None => (None, None),
+        };
+
+        let merged_ifaces = MergedInterfaces::new(
+            desired.ifaces,
+            current.ifaces,
+            saved_ifaces,
+        )?;
+        let merged_routes = MergedRoutes::new(
+            desired.routes,
+            current.routes,
+            saved_routes,
+            &merged_ifaces,
+        )?;
 
         Ok(Self {
             version: desired.version,
@@ -60,10 +72,23 @@ impl MergedNetworkState {
         self.ifaces.verify(&current.ifaces)
     }
 
+    /// Generate a NetworkState with desired and impact changes only.
     pub fn gen_state_for_apply(&self) -> NetworkState {
         NetworkState {
             ifaces: self.ifaces.gen_state_for_apply(),
             routes: self.routes.gen_state_for_apply(),
+            wait_online: self.desired.wait_online.clone(),
+            version: self.version,
+            description: self.description.clone(),
+        }
+    }
+
+    /// Generate a NetworkState combined with desired, impacted and previous
+    /// stored state.
+    pub fn gen_state_for_save(&self) -> NetworkState {
+        NetworkState {
+            ifaces: self.ifaces.gen_state_for_save(),
+            routes: self.routes.gen_state_for_save(),
             wait_online: self.desired.wait_online.clone(),
             version: self.version,
             description: self.description.clone(),
@@ -118,19 +143,15 @@ impl MergedNetworkState {
 
 impl NetworkState {
     pub fn merge(&mut self, new_state: &Self) -> Result<(), NipartError> {
-        *self = Self {
-            version: new_state.version.or(self.version),
-            description: new_state
-                .description
-                .clone()
-                .or_else(|| self.description.clone()),
-            ifaces: self.ifaces.merge(&new_state.ifaces)?,
-            routes: self.routes.merge(&new_state.routes)?,
-            wait_online: new_state
-                .wait_online
-                .clone()
-                .or(self.wait_online.clone()),
-        };
+        self.version = new_state.version.or(self.version);
+        self.description = new_state
+            .description
+            .clone()
+            .or_else(|| self.description.clone());
+        self.routes = self.routes.merge(&new_state.routes)?;
+        self.ifaces.merge(&new_state.ifaces)?;
+        self.wait_online =
+            new_state.wait_online.clone().or(self.wait_online.clone());
         Ok(())
     }
 }

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ErrorKind, Interface, InterfaceType, Interfaces, JsonDisplayHideSecrets,
-    MergedInterface, NipartError, NipartInterface, schema::IfaceSearch,
+    ErrorKind, Interface, InterfaceIdentifier, InterfaceType, Interfaces,
+    JsonDisplayHideSecrets, MergedInterface, NipartError, NipartInterface,
+    schema::IfaceSearch,
 };
 
 // The max loop count for Interfaces.set_ifaces_up_priority()
@@ -27,10 +28,21 @@ const INTERFACES_SET_PRIORITY_MAX_RETRY: u32 = 4;
 )]
 #[non_exhaustive]
 pub struct MergedInterfaces {
+    /// Interface has kernel interface index number.
+    /// The HashMap key is kernel interface name
     pub kernel_ifaces: HashMap<String, MergedInterface>,
+    /// Interface does not have kernel interface index number.
+    /// The HashMap key is interface name and type
     pub user_ifaces: HashMap<(String, InterfaceType), MergedInterface>,
+    /// The ordering of interface in desired YAML/JSON or original desired
+    /// state `insert_order` property.
+    /// The HashMap key is the kernel_iface_name for kernel interface and
+    /// interface.name for userspace interface.
     pub insert_order: Vec<(String, InterfaceType)>,
     pub current: Interfaces,
+    /// Use for indexed search data.
+    // TODO: speed up InterfaceIdentifier::MacAddress
+    pub(crate) iface_search: IfaceSearch,
 }
 
 impl MergedInterfaces {
@@ -40,28 +52,60 @@ impl MergedInterfaces {
         }
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = &MergedInterface> {
+        self.kernel_ifaces.values().chain(self.user_ifaces.values())
+    }
+
+    pub fn push(&mut self, merged_iface: MergedInterface) {
+        if merged_iface.is_userspace() {
+            self.insert_order.push((
+                merged_iface.name().to_string(),
+                merged_iface.iface_type().clone(),
+            ));
+            self.user_ifaces.insert(
+                (
+                    merged_iface.name().to_string(),
+                    merged_iface.iface_type().clone(),
+                ),
+                merged_iface,
+            );
+        } else {
+            self.insert_order.push((
+                merged_iface.kernel_iface_name().to_string(),
+                merged_iface.iface_type().clone(),
+            ));
+            self.kernel_ifaces.insert(
+                merged_iface.kernel_iface_name().to_string(),
+                merged_iface,
+            );
+        }
+    }
+
     pub fn new(
         desired: Interfaces,
         current: Interfaces,
+        saved: Option<Interfaces>,
     ) -> Result<Self, NipartError> {
         let mut desired = desired;
         let mut current = current;
-        let mut insert_order: Vec<(String, InterfaceType)> = Vec::new();
+        let mut ret = Self {
+            current: current.clone(),
+            ..Default::default()
+        };
+        let mut consumed_saved_ifaces: HashSet<(String, InterfaceType)> =
+            HashSet::new();
+        let mut consumed_current_ifaces: HashSet<(String, InterfaceType)> =
+            HashSet::new();
 
         desired.unify_veth_and_ethernet();
         current.unify_veth_and_ethernet();
 
-        desired.auto_managed_controller_ports(&current);
-
-        desired.resolve_mac_identifier_in_desired(&current)?;
-
-        let mut kernel_ifaces: HashMap<String, MergedInterface> =
-            HashMap::new();
-        let mut user_ifaces: HashMap<(String, InterfaceType), MergedInterface> =
-            HashMap::new();
         // TODO: Remove ignore interface
         // TODO: Resolve `type: unknown` in desired based on current state
         for mut des_iface in desired.drain() {
+            // TODO: when certain interface been marked as ignore, we should
+            //       also make sure it is ignored all side-changes like
+            //       port check and route changes.
             if des_iface.is_ignore() {
                 log::info!(
                     "Ignoring interface {} for `state: ignore`",
@@ -69,53 +113,103 @@ impl MergedInterfaces {
                 );
                 continue;
             }
-            insert_order.push((
-                des_iface.kernel_iface_name().to_string(),
-                des_iface.iface_type().clone(),
-            ));
-            let cur_iface = current.remove(
-                des_iface.kernel_iface_name(),
-                Some(des_iface.iface_type()),
-            );
-            des_iface.sanitize(cur_iface.as_ref())?;
-            if des_iface.is_userspace() {
-                user_ifaces.insert(
-                    (
-                        des_iface.kernel_iface_name().to_string(),
-                        des_iface.iface_type().clone(),
-                    ),
-                    MergedInterface::new(Some(des_iface), cur_iface)?,
+
+            let saved_iface = saved.as_ref().and_then(|s| {
+                s.get_matched_iface_from_save(des_iface.base_iface())
+            });
+            if let Some(saved_iface) = saved_iface.as_ref() {
+                log::debug!(
+                    "Matches saved config for {}/{}: {saved_iface}",
+                    des_iface.name(),
+                    des_iface.iface_type()
                 );
-            } else {
-                kernel_ifaces.insert(
-                    des_iface.kernel_iface_name().to_string(),
-                    MergedInterface::new(Some(des_iface), cur_iface)?,
+                consumed_saved_ifaces.insert((
+                    saved_iface.name().to_string(),
+                    saved_iface.iface_type().clone(),
+                ));
+                // When desired interface is pointing to saved config which
+                // saved state is holding special identifier
+                // config, we will not able to search out
+                // current interface because desired interface
+                // has no identifier configurations.
+                // Hence, we copy saved identifier information to desired
+                // interface
+                if !saved_iface.is_name_matching()
+                    && des_iface.base_iface().identifier.is_none()
+                {
+                    des_iface
+                        .base_iface_mut()
+                        .copy_identifier_config_from(saved_iface.base_iface());
+                    if des_iface.base_iface_mut().profile_name.is_none() {
+                        des_iface.base_iface_mut().profile_name =
+                            saved_iface.base_iface().profile_name.clone();
+                    }
+                }
+            }
+            let cur_iface = current
+                .get_matched_iface_from_current(des_iface.base_iface())?;
+            if let Some(cur_iface) = cur_iface.as_ref() {
+                log::debug!(
+                    "Matches current config for {}/{}: {cur_iface}",
+                    des_iface.name(),
+                    des_iface.iface_type()
                 );
+                consumed_current_ifaces.insert((
+                    cur_iface.name().to_string(),
+                    cur_iface.iface_type().clone(),
+                ));
+                // For MAC identifier, resolve the desired interface name
+                // to the kernel interface name.
+                if des_iface.base_iface().identifier
+                    == Some(InterfaceIdentifier::MacAddress)
+                {
+                    let kernel_name = cur_iface.kernel_iface_name().to_string();
+                    if des_iface.base_iface().profile_name.is_none() {
+                        des_iface.base_iface_mut().profile_name =
+                            Some(des_iface.name().to_string());
+                    }
+                    des_iface.base_iface_mut().name = kernel_name.clone();
+                    des_iface.base_iface_mut().kernel_iface_name = kernel_name;
+                }
+            }
+            let merged_iface = MergedInterface::new(
+                Some(des_iface),
+                cur_iface.cloned(),
+                saved_iface.cloned(),
+            )?;
+            ret.push(merged_iface);
+        }
+
+        // Include current exist but not desired interfaces
+        for cur_iface in current.drain() {
+            if !consumed_current_ifaces.contains(&(
+                cur_iface.name().to_string(),
+                cur_iface.iface_type().clone(),
+            )) {
+                // Single current interface can match multiple saved
+                // config, hence no reason to search saved config for
+                // undesired interface.
+                let merged_iface =
+                    MergedInterface::new(None, Some(cur_iface), None)?;
+                ret.push(merged_iface);
             }
         }
 
-        for cur_iface in current.drain() {
-            if cur_iface.is_userspace() {
-                user_ifaces.insert(
-                    (
-                        cur_iface.kernel_iface_name().to_string(),
-                        cur_iface.iface_type().clone(),
-                    ),
-                    MergedInterface::new(None, Some(cur_iface))?,
-                );
-            } else {
-                kernel_ifaces.insert(
-                    cur_iface.kernel_iface_name().to_string(),
-                    MergedInterface::new(None, Some(cur_iface))?,
-                );
+        // Include saved config but not desired interfaces
+        if let Some(mut saved_ifaces) = saved {
+            for saved_iface in saved_ifaces.drain() {
+                if !consumed_saved_ifaces.contains(&(
+                    saved_iface.name().to_string(),
+                    saved_iface.iface_type().clone(),
+                )) {
+                    let merged_iface =
+                        MergedInterface::new(None, None, Some(saved_iface))?;
+                    ret.push(merged_iface);
+                }
             }
         }
-        let mut ret = Self {
-            kernel_ifaces,
-            user_ifaces,
-            insert_order,
-            current,
-        };
+
+        ret.iface_search = IfaceSearch::new(ret.gen_merged_state().iter());
 
         ret.post_merge_sanitize()?;
 
@@ -124,38 +218,9 @@ impl MergedInterfaces {
         Ok(ret)
     }
 
-    pub(crate) fn get_iface<'a>(
-        &'a self,
-        iface_name: &str,
-        iface_type: InterfaceType,
-    ) -> Option<&'a MergedInterface> {
-        if iface_type.is_userspace() {
-            self.user_ifaces.get(&(iface_name.to_string(), iface_type))
-        } else {
-            self.kernel_ifaces.get(iface_name)
-        }
-    }
-
-    /// Resolve a route next-hop-interface name to its kernel interface name.
-    ///
-    /// The route `next-hop-interface` may refer to a logical interface name
-    /// (e.g. from `identifier: mac-address`). This method first checks for a
-    /// direct match by kernel interface name, then falls back to matching by
-    /// `profile_name` (the logical name stored during MAC resolution).
-    ///
-    /// Returns `InvalidArgument` error if the name matches multiple interfaces
-    /// by logical name.
-    pub(crate) fn resolve_route_next_hop_iface(
-        &self,
-        next_hop_iface: &str,
-    ) -> Result<String, NipartError> {
-        let search = IfaceSearch::new_from_merged(self);
-        search.resolve_kernel_iface_name(next_hop_iface)
-    }
-
     fn _set_up_priority(&mut self) -> Result<(), NipartError> {
         for _ in 0..INTERFACES_SET_PRIORITY_MAX_RETRY {
-            if self.set_ifaces_up_priority() {
+            if self.set_ifaces_up_priority()? {
                 return Ok(());
             }
         }
@@ -172,37 +237,71 @@ impl MergedInterfaces {
         ))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &MergedInterface> {
-        self.user_ifaces.values().chain(self.kernel_ifaces.values())
-    }
-
     pub fn gen_state_for_apply(&self) -> Interfaces {
-        let kernel_ifaces: HashMap<String, Interface> = self
-            .kernel_ifaces
+        let mut ret_vec: Vec<(bool, u32, Interface)> = self
             .iter()
-            .filter_map(|(name, iface)| {
-                iface
-                    .for_apply
-                    .as_ref()
-                    .map(|i| (name.to_string(), i.clone()))
-            })
-            .collect();
-
-        let user_ifaces: HashMap<(String, InterfaceType), Interface> = self
-            .user_ifaces
-            .iter()
-            .filter_map(|((name, iface_type), iface)| {
-                iface.for_apply.as_ref().map(|i| {
-                    ((name.to_string(), iface_type.clone()), i.clone())
+            .filter_map(|i| {
+                i.for_apply.as_ref().map(|for_apply| {
+                    (
+                        i.is_absent(),
+                        i.up_priority.unwrap_or_default(),
+                        for_apply.clone(),
+                    )
                 })
             })
             .collect();
 
-        Interfaces {
-            kernel_ifaces,
-            user_ifaces,
-            ..Default::default()
-        }
+        // Place interface to delete at the beginning.
+        ret_vec.sort_unstable_by_key(|(is_absent, up_priority, _)| {
+            (!is_absent, *up_priority)
+        });
+        Interfaces::new(
+            ret_vec.into_iter().map(|(_, _, iface)| iface).collect(),
+        )
+    }
+
+    pub fn gen_state_for_save(&self) -> Interfaces {
+        let mut ret_vec: Vec<(bool, u32, Interface)> = self
+            .iter()
+            .filter_map(|i| {
+                i.for_save.as_ref().map(|for_save| {
+                    (
+                        i.is_absent(),
+                        i.up_priority.unwrap_or_default(),
+                        for_save.clone(),
+                    )
+                })
+            })
+            .collect();
+
+        // Place interface to delete at the beginning.
+        ret_vec.sort_unstable_by_key(|(is_absent, up_priority, _)| {
+            (!is_absent, *up_priority)
+        });
+        Interfaces::new(
+            ret_vec.into_iter().map(|(_, _, iface)| iface).collect(),
+        )
+    }
+
+    pub(crate) fn gen_merged_state(&self) -> Interfaces {
+        let mut ret_vec: Vec<(bool, u32, Interface)> = self
+            .iter()
+            .map(|i| {
+                (
+                    i.is_absent(),
+                    i.up_priority.unwrap_or_default(),
+                    i.merged.clone(),
+                )
+            })
+            .collect();
+
+        // Place interface to delete at the beginning.
+        ret_vec.sort_unstable_by_key(|(is_absent, up_priority, _)| {
+            (!is_absent, *up_priority)
+        });
+        Interfaces::new(
+            ret_vec.into_iter().map(|(_, _, iface)| iface).collect(),
+        )
     }
 
     pub(crate) fn iter_mut(
@@ -213,6 +312,13 @@ impl MergedInterfaces {
             .chain(self.kernel_ifaces.values_mut())
     }
 
+    pub(crate) fn resolve_route_next_hop_iface(
+        &self,
+        name: &str,
+    ) -> Option<String> {
+        self.iface_search.search_name(name)
+    }
+
     pub(crate) fn verify(
         &self,
         current: &Interfaces,
@@ -221,6 +327,7 @@ impl MergedInterfaces {
         let mut current = current.clone();
 
         current.unify_veth_and_ethernet();
+
         for des_iface in merged.iter_mut().filter(|i| i.is_desired()) {
             let iface = if let Some(i) = des_iface.for_verify.as_mut() {
                 i
@@ -228,18 +335,27 @@ impl MergedInterfaces {
                 continue;
             };
             iface.hide_secrets();
+            let cur_iface = if iface.is_userspace() {
+                current.user_ifaces.get_mut(&(
+                    iface.name().to_string(),
+                    iface.iface_type().clone(),
+                ))
+            } else if !iface.kernel_iface_name().is_empty() {
+                current.kernel_ifaces.get_mut(iface.kernel_iface_name())
+            } else {
+                current.kernel_ifaces.get_mut(iface.name())
+            };
 
             if iface.is_absent() || (iface.is_virtual() && iface.is_down()) {
-                if let Some(cur_iface) = current
-                    .get(iface.kernel_iface_name(), Some(iface.iface_type()))
-                {
+                if let Some(cur_iface) = cur_iface {
                     verify_desire_absent_but_found_in_current(
                         iface, cur_iface,
                     )?;
                 }
-            } else if let Some(cur_iface) = current
-                .get_mut(iface.kernel_iface_name(), Some(iface.iface_type()))
-            {
+            } else if let Some(cur_iface) = cur_iface {
+                iface
+                    .base_iface_mut()
+                    .sanitize_before_verify(cur_iface.base_iface_mut());
                 iface.sanitize_before_verify(cur_iface);
                 // Do not verify physical interface with state:down
                 if iface.is_up() {
@@ -259,23 +375,11 @@ impl MergedInterfaces {
         Ok(())
     }
 
+    /// Sanitize actions which require cross-interfaces information:
+    /// * Controller/port relationship
+    /// * Parent/child relationship
+    /// * WIFI Phy and Cfg relationship
     fn post_merge_sanitize(&mut self) -> Result<(), NipartError> {
-        for iface in self
-            .kernel_ifaces
-            .values_mut()
-            .chain(self.user_ifaces.values_mut())
-        {
-            if iface.merged.iface_type() == &InterfaceType::Loopback {
-                iface.post_merge_sanitize_loopback();
-            }
-            if iface.merged.iface_type() == &InterfaceType::Vlan {
-                iface.post_merge_sanitize_vlan();
-            }
-            if iface.merged.iface_type() == &InterfaceType::Vxlan {
-                iface.post_merge_sanitize_vxlan();
-            }
-        }
-
         self.post_merge_sanitize_veth();
         self.post_merge_sanitize_wifi();
         self.post_merge_sanitize_controller_and_port()?;
@@ -284,68 +388,91 @@ impl MergedInterfaces {
     }
 
     // Return True if we have all up_priority fixed.
-    pub(crate) fn set_ifaces_up_priority(&mut self) -> bool {
+    fn set_ifaces_up_priority(&mut self) -> Result<bool, NipartError> {
         // Return true when all interface has correct priority.
         let mut ret = true;
         let mut pending_changes: HashMap<String, u32> = HashMap::new();
         // Use the push order to allow user providing help on dependency order
 
         for (iface_name, iface_type) in &self.insert_order {
-            let iface = match self.get_iface(iface_name, iface_type.clone()) {
-                Some(i) => {
-                    if let Some(i) = i.for_apply.as_ref() {
-                        i
-                    } else {
-                        continue;
-                    }
-                }
-                None => continue,
+            let merged_iface = if iface_type.is_userspace() {
+                self.user_ifaces
+                    .get(&(iface_name.to_string(), iface_type.clone()))
+            } else {
+                self.kernel_ifaces.get(iface_name)
             };
-            if !iface.is_up() {
+
+            let Some(merged_iface) = merged_iface else {
+                continue;
+            };
+
+            if merged_iface.is_up_priority_valid() {
+                continue;
+            }
+            let Some(for_apply) = merged_iface.for_apply.as_ref() else {
+                continue;
+            };
+
+            if !for_apply.is_up() {
                 continue;
             }
 
-            if iface.base_iface().is_up_priority_valid() {
-                continue;
-            }
-
-            if let Some(ref ctrl_name) = iface.base_iface().controller {
+            if let Some(ctrl_name) = for_apply.base_iface().controller.as_ref()
+            {
                 if ctrl_name.is_empty() {
                     continue;
                 }
-                let ctrl_iface = self
-                    .get_iface(
-                        ctrl_name,
-                        iface
-                            .base_iface()
-                            .controller_type
-                            .clone()
-                            .unwrap_or_default(),
-                    )
-                    .and_then(|i| i.for_apply.as_ref());
+                let Some(ctrl_iface_type) =
+                    for_apply.base_iface().controller_type.as_ref()
+                else {
+                    return Err(NipartError::new(
+                        ErrorKind::Bug,
+                        format!(
+                            "Got for_apply interface with empty \
+                             controller_type and non-empty controller: \
+                             {for_apply}"
+                        ),
+                    ));
+                };
+                let ctrl_iface = if ctrl_iface_type.is_userspace() {
+                    self.user_ifaces
+                        .get(&(ctrl_name.to_string(), ctrl_iface_type.clone()))
+                } else {
+                    self.kernel_ifaces.get(ctrl_name)
+                };
+
                 if let Some(ctrl_iface) = ctrl_iface {
                     if let Some(ctrl_pri) = pending_changes.remove(ctrl_name) {
                         pending_changes.insert(ctrl_name.to_string(), ctrl_pri);
                         pending_changes
                             .insert(iface_name.to_string(), ctrl_pri + 1);
-                    } else if ctrl_iface.base_iface().is_up_priority_valid() {
+                    } else if ctrl_iface.is_up_priority_valid() {
                         pending_changes.insert(
                             iface_name.to_string(),
-                            ctrl_iface.base_iface().up_priority + 1,
+                            ctrl_iface.up_priority.unwrap_or_default() + 1,
                         );
                     } else {
                         // Its controller does not have valid up priority yet.
                         log::debug!(
                             "Controller {ctrl_name} of {iface_name} is has no \
-                             up priority"
+                             up priority yet"
                         );
                         ret = false;
                     }
                 } else {
-                    // Interface has no controller defined in desire
-                    continue;
+                    // self.post_merge_sanitize() should already
+                    return Err(NipartError::new(
+                        ErrorKind::Bug,
+                        format!(
+                            "Failed to find controller interface of {}/{}: \
+                             {self}",
+                            for_apply.name(),
+                            for_apply.iface_type()
+                        ),
+                    ));
                 }
             } else {
+                // Interface has no controller defined in desire
                 continue;
             }
         }
@@ -354,36 +481,42 @@ impl MergedInterfaces {
         // up_priority
         if ret {
             for (iface_name, iface_type) in &self.insert_order {
-                let iface = match self.get_iface(iface_name, iface_type.clone())
-                {
-                    Some(i) => {
-                        if let Some(i) = i.for_apply.as_ref() {
-                            i
-                        } else {
-                            continue;
-                        }
-                    }
-                    None => continue,
+                let merged_iface = if iface_type.is_userspace() {
+                    self.user_ifaces
+                        .get(&(iface_name.to_string(), iface_type.clone()))
+                } else {
+                    self.kernel_ifaces.get(iface_name)
                 };
-                if !iface.is_up() {
+
+                let Some(merged_iface) = merged_iface else {
+                    continue;
+                };
+
+                if merged_iface.is_up_priority_valid() {
                     continue;
                 }
-                if let Some(parent) = iface.parent() {
+                let Some(for_apply) = merged_iface.for_apply.as_ref() else {
+                    continue;
+                };
+
+                if !for_apply.is_up() {
+                    continue;
+                }
+
+                if let Some(parent) = for_apply.parent() {
                     let parent_priority = pending_changes.get(parent).cloned();
                     if let Some(parent_priority) = parent_priority {
                         pending_changes.insert(
                             iface_name.to_string(),
                             parent_priority + 1,
                         );
-                    } else if let Some(parent_iface) = self
-                        .kernel_ifaces
-                        .get(parent)
-                        .and_then(|i| i.for_apply.as_ref())
-                        && parent_iface.base_iface().is_up_priority_valid()
+                    } else if let Some(parent_iface) =
+                        self.kernel_ifaces.get(parent)
+                        && parent_iface.is_up_priority_valid()
                     {
                         pending_changes.insert(
                             iface_name.to_string(),
-                            parent_iface.base_iface().up_priority + 1,
+                            parent_iface.up_priority.unwrap_or_default() + 1,
                         );
                     }
                 }
@@ -395,17 +528,13 @@ impl MergedInterfaces {
                 "Pending kernel up priority changes {pending_changes:?}"
             );
             for (iface_name, priority) in pending_changes.iter() {
-                if let Some(iface) = self
-                    .kernel_ifaces
-                    .get_mut(iface_name)
-                    .and_then(|i| i.for_apply.as_mut())
-                {
-                    iface.base_iface_mut().up_priority = *priority;
+                if let Some(iface) = self.kernel_ifaces.get_mut(iface_name) {
+                    iface.up_priority = Some(*priority);
                 }
             }
         }
 
-        ret
+        Ok(ret)
     }
 }
 
@@ -428,7 +557,7 @@ fn verify_desire_absent_but_found_in_current(
             ),
         ))
     } else {
-        // Hard to predict real hardware state due to backend variety.
+        // Real hardware NIC cannot be removed
         Ok(())
     }
 }
@@ -436,48 +565,21 @@ fn verify_desire_absent_but_found_in_current(
 impl Interfaces {
     pub fn unify_veth_and_ethernet(&mut self) {
         for iface in self
-            .kernel_ifaces
-            .values_mut()
+            .iter_mut()
             .filter(|i| i.iface_type() == &InterfaceType::Veth)
         {
             iface.base_iface_mut().iface_type = InterfaceType::Ethernet;
         }
     }
 
-    pub(crate) fn merge(&self, new_ifaces: &Self) -> Result<Self, NipartError> {
-        let mut ret = Self::default();
+    pub fn merge(&mut self, new_ifaces: &Self) -> Result<(), NipartError> {
         for new_iface in new_ifaces.iter() {
-            let iface_key = new_iface.kernel_iface_name();
-            let iface_key = if iface_key.is_empty() {
-                new_iface.name()
+            if let Some(old_iface) = self.get_mut(new_iface.base_iface()) {
+                old_iface.merge(new_iface)?;
             } else {
-                iface_key
-            };
-            if let Some(old_iface) =
-                self.get(iface_key, Some(new_iface.iface_type()))
-            {
-                ret.push(old_iface.merge(new_iface)?);
-            } else {
-                ret.push(new_iface.clone());
+                self.push(new_iface.clone())
             }
         }
-
-        for old_iface in self.iter().filter(|old_iface| {
-            let iface_key = old_iface.kernel_iface_name();
-            let iface_key = if iface_key.is_empty() {
-                old_iface.name()
-            } else {
-                iface_key
-            };
-            new_ifaces
-                .get(iface_key, Some(old_iface.iface_type()))
-                .is_none()
-        }) {
-            ret.push(old_iface.clone());
-        }
-
-        ret.post_merge_veth(new_ifaces);
-
-        Ok(ret)
+        Ok(())
     }
 }

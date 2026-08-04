@@ -222,11 +222,21 @@ impl NipartInterface for BondInterface {
     /// * Validate `arp_interval`.
     /// * Validate conflict between `miimon` and `arp_interval`.
     /// * Validate conflict between `num_grat_arp` and `num_grat_arp`
-    fn sanitize_iface_specfic(
-        &mut self,
+    fn sanitize(
+        &self,
         current: Option<&Self>,
+        for_save: &mut Self,
+        for_apply: &mut Self,
+        for_verify: &mut Self,
+        merged: &mut Self,
     ) -> Result<(), NipartError> {
-        let Some(bond_mode) = self
+        let desired = self;
+
+        if desired.is_absent() {
+            return Ok(());
+        }
+
+        let Some(bond_mode) = desired
             .mode()
             .or_else(|| current.as_ref().and_then(|c| c.mode()))
         else {
@@ -234,15 +244,16 @@ impl NipartInterface for BondInterface {
                 ErrorKind::InvalidArgument,
                 format!(
                     "Bond mode is mandatory for creating new bond {}",
-                    self.name()
+                    desired.name()
                 ),
             ));
         };
 
-        if let Some(bond_conf) = self.bond.as_mut() {
+        if let Some(bond_conf) = for_apply.bond.as_mut() {
             if let Some(ports_config) = bond_conf.ports.as_mut() {
                 ports_config.sort_unstable_by_key(|p| p.name.clone());
             }
+            bond_conf.mode = Some(bond_mode);
 
             if let Some(bond_opts) = bond_conf.options.as_mut() {
                 let cur_bond_opts = current
@@ -277,27 +288,26 @@ impl NipartInterface for BondInterface {
             }
         }
         self.check_overlap_queue_id()?;
-        self.sanitize_mac_restricted_mode(current);
+        for_apply.sanitize_mac_restricted_mode(current);
+        for_save.bond = for_apply.bond.clone();
+        for_verify.bond = for_apply.bond.clone();
+        merged.bond = for_apply.bond.clone();
         Ok(())
     }
 
     // TODO: Include bond port name when bond port config changed.
-    fn include_diff_context_iface_specific(
-        &mut self,
-        _desired: &Self,
-        _current: &Self,
-    ) {
-    }
+    fn include_diff_context(&mut self, _desired: &Self, _current: &Self) {}
 
     // When bond mode changed, do not merge bond options from old state.
-    fn post_merge_iface_specific(
+    fn post_merge(
         &mut self,
         new_state: &Self,
         old_state: &Self,
     ) -> Result<(), NipartError> {
+        let merged = self;
         if new_state.mode().is_some()
             && new_state.mode() != old_state.mode()
-            && let Some(bond_conf) = self.bond.as_mut()
+            && let Some(bond_conf) = merged.bond.as_mut()
             && let Some(new_bond_conf) = new_state.bond.as_ref()
         {
             log::debug!(
