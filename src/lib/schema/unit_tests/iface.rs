@@ -169,3 +169,15 @@ fn test_iface_de_linux_bridge() {
     assert!(matches!(iface, Interface::LinuxBridge(_)));
 }
 
+#[test]
+fn test_iface_de_wireguard() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: wg0
+        type: wireguard
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::Wireguard(_)));
+}
+
