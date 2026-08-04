@@ -104,3 +104,12 @@ fn test_de_option_bool_native() {
     assert_eq!(t.v, Some(false));
 }
 
+#[test]
+fn test_de_option_bool_string_truthy() {
+    for s in ["1", "true", "yes", "on", "y"] {
+        let t: TestOptionBool =
+            serde_yaml::from_str(&format!("v: \"{s}\"")).unwrap();
+        assert_eq!(t.v, Some(true), "string {s}");
+    }
+}
+
