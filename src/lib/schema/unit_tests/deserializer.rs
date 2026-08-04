@@ -309,3 +309,9 @@ fn test_de_option_i32_overflow() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_option_i32_absent_is_none() {
+    let t: TestOptionI32 = serde_yaml::from_str("{}").unwrap();
+    assert_eq!(t.v, None);
+}
+
