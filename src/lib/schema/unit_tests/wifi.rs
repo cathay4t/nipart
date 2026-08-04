@@ -198,3 +198,24 @@ fn test_wifi_cfg_password_in_hide_secrets() {
     assert_eq!(secrets_wifi.password.as_deref(), Some("12345678"));
 }
 
+#[test]
+fn test_wifi_cfg_password_in_merge() {
+    let mut safe_state = gen_wifi_cfg_state_with_hidden_password();
+    let secret_state = gen_wifi_cfg_state_with_password();
+
+    safe_state.merge(&secret_state).unwrap();
+
+    let wifi_iface = safe_state
+        .ifaces
+        .get("Test-WIFI", Some(&InterfaceType::WifiCfg))
+        .and_then(|i| {
+            if let Interface::WifiCfg(w) = i {
+                w.wifi.as_ref()
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(wifi_iface.password.as_deref(), Some("12345678"));
+}
+
