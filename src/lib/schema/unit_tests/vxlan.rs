@@ -66,3 +66,23 @@ fn test_sanitize_vxlan_invalid_remote() {
     }
 }
 
+#[test]
+fn test_sanitize_vxlan_invalid_local() {
+    let mut iface = vxlan_iface_with_config(VxlanConfig {
+        id: Some(100),
+        base_iface: Some("eth0".to_string()),
+        local: Some("bad.local.value".to_string()),
+        ..Default::default()
+    });
+    let result = iface.sanitize(None);
+    assert!(result.is_err());
+    if let Err(e) = result {
+        assert_eq!(e.kind(), ErrorKind::InvalidArgument);
+        assert!(
+            e.msg().contains("not a valid IP address"),
+            "Unexpected error: {}",
+            e.msg()
+        );
+    }
+}
+
