@@ -147,3 +147,30 @@ def test_modify_linux_bridge_options(linux_bridge_over_dummy, opt_key_value):
     )
 
 
+def test_modify_linux_bridge_stp_options(linux_bridge_over_dummy):
+    nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_BRIDGE_NIC}
+                type: linux-bridge
+                bridge:
+                  options:
+                    stp:
+                      enabled: true
+                      forward-delay: 30
+                      hello-time: 4
+                      max-age: 40
+                      priority: 10000
+            """))
+    linux_bridge_iface = show_only(TEST_BRIDGE_NIC)
+    assert state_match(
+        {
+            "enabled": True,
+            "forward-delay": 30,
+            "hello-time": 4,
+            "max-age": 40,
+            "priority": 10000,
+        },
+        linux_bridge_iface["bridge"]["options"]["stp"],
+    )
+
+
