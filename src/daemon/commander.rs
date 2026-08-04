@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use futures_channel::mpsc::UnboundedSender;
 use nipart::{
-    InterfaceIdentifier, InterfaceType, NetworkState, NipartApplyOption,
-    NipartError, NipartInterface, NipartNoDaemon, NipartQueryOption,
-    NipartWifiScanOption, WifiConfig,
+    InterfaceType, NetworkState, NipartApplyOption, NipartError,
+    NipartInterface, NipartNoDaemon, NipartQueryOption, NipartWifiScanOption,
+    WifiConfig,
 };
 
 use super::{
@@ -132,32 +132,11 @@ async fn get_initialized_nics(
         .filter(|i| !i.is_virtual())
     {
         let kernel_iface_name = iface.kernel_iface_name();
-        let cur_iface = if iface.base_iface().identifier
-            == Some(InterfaceIdentifier::MacAddress)
-        {
-            if let Some(mac) = iface.base_iface().mac_address.as_deref() {
-                let mac_upper = mac.to_ascii_uppercase();
-                cur_state.ifaces.kernel_ifaces.values().find(|ci| {
-                    ci.base_iface()
-                        .permanent_mac_address
-                        .as_deref()
-                        .map(|m| m.to_ascii_uppercase())
-                        .as_deref()
-                        == Some(&mac_upper)
-                        || ci
-                            .base_iface()
-                            .mac_address
-                            .as_deref()
-                            .map(|m| m.to_ascii_uppercase())
-                            .as_deref()
-                            == Some(&mac_upper)
-                })
-            } else {
-                None
-            }
-        } else {
-            cur_state.ifaces.kernel_ifaces.get(kernel_iface_name)
-        };
+        let cur_iface = cur_state
+            .ifaces
+            .kernel_ifaces
+            .values()
+            .find(|cur_iface| iface.is_match(cur_iface));
 
         if let Some(cur_iface) = cur_iface
             && let Some(cur_iface_index) = cur_iface.base_iface().iface_index

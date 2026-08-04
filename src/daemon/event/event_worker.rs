@@ -145,10 +145,11 @@ impl NipartEventWorker {
                     log::trace!("Pending apply config: {new_iface}");
                     desired_state.ifaces.push(new_iface);
                 }
-            } else if saved_iface.iface_type() == &event.iface_type
-                && saved_iface.kernel_iface_name() == event.iface_name
+            } else if cur_iface
+                .map(|cur_iface| saved_iface.is_match(cur_iface))
+                .unwrap_or(false)
                 && saved_iface.base_iface().trigger.is_none()
-                && event.is_up
+                && !event.is_delete
             {
                 log::trace!("Pending apply config for {saved_iface}");
                 desired_state.ifaces.push(saved_iface.clone());
