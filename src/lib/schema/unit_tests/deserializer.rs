@@ -184,3 +184,9 @@ fn test_de_option_u64_invalid_string() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_option_u64_absent_is_none() {
+    let t: TestOptionU64 = serde_yaml::from_str("{}").unwrap();
+    assert_eq!(t.v, None);
+}
+
