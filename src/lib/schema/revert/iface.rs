@@ -49,12 +49,16 @@ impl Interface {
 
         let mut revert_iface: Interface = serde_json::from_value(revert_value)?;
 
+        revert_iface.base_iface_mut().include_revert_context(
+            for_apply.base_iface(),
+            current.base_iface(),
+        );
         revert_iface.include_revert_context(for_apply, current);
 
         if is_no_op(&revert_iface, for_apply) {
-            Ok(Some(revert_iface))
-        } else {
             Ok(None)
+        } else {
+            Ok(Some(revert_iface))
         }
     }
 }

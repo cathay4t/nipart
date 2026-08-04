@@ -596,6 +596,28 @@ impl Interface {
         self.base_iface().clone_name_type_only().into()
     }
 
+    pub(crate) fn change_port_name(
+        &mut self,
+        org_port_name: &str,
+        new_port_name: String,
+    ) -> Result<(), NipartError> {
+        if let Interface::LinuxBridge(iface) = self {
+            iface.change_port_name(org_port_name, new_port_name)
+        } else if let Interface::OvsBridge(iface) = self {
+            iface.change_port_name(org_port_name, new_port_name)
+        } else if let Interface::Bond(iface) = self {
+            iface.change_port_name(org_port_name, new_port_name)
+        } else {
+            Err(NipartError::new(
+                ErrorKind::Bug,
+                format!(
+                    "Interface type {} does not support changing port names",
+                    self.iface_type()
+                ),
+            ))
+        }
+    }
+
     pub(crate) fn verify(&self, current: &Self) -> Result<(), NipartError> {
         let self_value = serde_json::to_value(self.clone())?;
         let current_value = serde_json::to_value(current.clone())?;

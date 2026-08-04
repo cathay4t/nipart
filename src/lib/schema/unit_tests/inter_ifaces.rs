@@ -846,3 +846,227 @@ fn test_ipv4_sanitize_clears_when_ip_disabled() {
     ipv4.sanitize(None).unwrap();
     assert_eq!(ipv4.auto_gateway, None);
 }
+
+/// Test that bond port names are resolved from profile names to kernel
+/// interface names when ports use MAC address identifier.
+#[test]
+fn test_bond_resolve_port_ref_by_mac_identifier() {
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: bond1
+          type: bond
+          state: up
+          bond:
+            mode: active-backup
+            ports:
+            - name: port1
+            - name: port2
+        - name: port1
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+          identifier: mac-address
+        - name: port2
+          type: ethernet
+          mac-address: 00:23:45:67:89:1b
+          identifier: mac-address"#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+        - name: eth1
+          type: ethernet
+          mac-address: 00:23:45:67:89:1b"#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+
+    let bond = merged.kernel_ifaces.get("bond1").unwrap();
+
+    assert_eq!(
+        bond.for_apply.as_ref().unwrap().ports().unwrap(),
+        vec!["eth0", "eth1"]
+    );
+    assert_eq!(
+        bond.for_verify.as_ref().unwrap().ports().unwrap(),
+        vec!["eth0", "eth1"]
+    );
+    assert_eq!(
+        bond.for_save.as_ref().unwrap().ports().unwrap(),
+        vec!["port1", "port2"]
+    );
+    assert_eq!(bond.merged.ports().unwrap(), vec!["eth0", "eth1"]);
+}
+
+/// Test that linux bridge port names are resolved from profile names to
+/// kernel interface names when ports use MAC address identifier.
+#[test]
+fn test_linux_bridge_resolve_port_ref_by_mac_identifier() {
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: br0
+          type: linux-bridge
+          state: up
+          bridge:
+            port:
+            - name: port1
+        - name: port1
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+          identifier: mac-address"#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a"#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+
+    let br = merged.kernel_ifaces.get("br0").unwrap();
+
+    assert_eq!(
+        br.for_apply.as_ref().unwrap().ports().unwrap(),
+        vec!["eth0"]
+    );
+    assert_eq!(
+        br.for_verify.as_ref().unwrap().ports().unwrap(),
+        vec!["eth0"]
+    );
+    assert_eq!(
+        br.for_save.as_ref().unwrap().ports().unwrap(),
+        vec!["port1"]
+    );
+    assert_eq!(br.merged.ports().unwrap(), vec!["eth0"]);
+}
+
+/// Test that OVS bridge port names are resolved from profile names to
+/// kernel interface names when ports use MAC address identifier.
+#[test]
+fn test_ovs_bridge_resolve_port_ref_by_mac_identifier() {
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: ovs-br0
+          type: ovs-bridge
+          state: up
+          bridge:
+            ports:
+            - name: port1
+        - name: port1
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+          identifier: mac-address"#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+
+    let br = merged
+        .user_ifaces
+        .get(&("ovs-br0".to_string(), crate::InterfaceType::OvsBridge))
+        .unwrap();
+
+    assert_eq!(
+        br.for_apply.as_ref().unwrap().ports().unwrap(),
+        vec!["eth0"]
+    );
+    assert_eq!(
+        br.for_verify.as_ref().unwrap().ports().unwrap(),
+        vec!["eth0"]
+    );
+    assert_eq!(
+        br.for_save.as_ref().unwrap().ports().unwrap(),
+        vec!["port1"]
+    );
+    assert_eq!(br.merged.ports().unwrap(), vec!["eth0"]);
+}
+
+/// Test gen_state_for_apply() and gen_state_for_save() with bond ports
+/// resolved by MAC identifier matching uppercase MACs in current state.
+#[test]
+fn test_bond_gen_state_for_apply_and_save() {
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: port1
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:23:45:67:89:1a
+        - name: port2
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:23:45:67:89:1b
+        - name: bond0
+          kernel-iface-name: bond0
+          type: bond
+          state: up
+          bond:
+            mode: balance-rr
+            ports:
+            - name: port1
+            - name: port2"#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth1
+          kernel-iface-name: eth1
+          type: ethernet
+          state: down
+          mac-address: 00:23:45:67:89:1A
+        - name: eth2
+          kernel-iface-name: eth2
+          type: ethernet
+          state: down
+          mac-address: 00:23:45:67:89:1B"#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+
+    let apply_state = merged.gen_state_for_apply();
+    let save_state = merged.gen_state_for_save();
+
+    let eth1_apply = apply_state.kernel_ifaces.get("eth1").unwrap();
+    let eth1_saved = save_state.kernel_ifaces.get("port1").unwrap();
+
+    let eth2_apply = apply_state.kernel_ifaces.get("eth2").unwrap();
+    let eth2_saved = save_state.kernel_ifaces.get("port2").unwrap();
+    assert_eq!(eth1_apply.name(), "eth1");
+    assert_eq!(eth1_saved.name(), "port1");
+    assert_eq!(
+        eth1_apply.base_iface().profile_name.as_deref(),
+        Some("port1")
+    );
+    assert_eq!(
+        eth1_saved.base_iface().profile_name.as_deref(),
+        Some("port1")
+    );
+    assert_eq!(eth2_apply.name(), "eth2");
+    assert_eq!(eth2_saved.name(), "port2");
+    assert_eq!(
+        eth2_apply.base_iface().profile_name.as_deref(),
+        Some("port2")
+    );
+    assert_eq!(
+        eth2_saved.base_iface().profile_name.as_deref(),
+        Some("port2")
+    );
+}

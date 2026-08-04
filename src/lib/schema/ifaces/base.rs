@@ -144,6 +144,11 @@ impl BaseInterface {
 
         if !for_apply.is_name_matching() {
             for_save.kernel_iface_name = String::new();
+            if let Some(profile_name) = for_save.profile_name.as_ref()
+                && !profile_name.is_empty()
+            {
+                for_save.name.clone_from(profile_name);
+            }
         }
 
         // iface_index is query only

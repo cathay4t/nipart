@@ -90,6 +90,9 @@ impl Interfaces {
         }
     }
 
+    /// Unlike get_matched_iface_from_current(), this function does not
+    /// search MAC identifier, just simply search kernel_iface_name or
+    /// interface.name.
     pub fn get(&self, base_iface: &BaseInterface) -> Option<&Interface> {
         if base_iface.is_userspace() {
             self.user_ifaces.get(&(
@@ -182,7 +185,7 @@ impl Interfaces {
                     ));
                 };
                 let kernel_iface_names =
-                    self.iface_search.search_mac(&search_mac);
+                    self.iface_search.search_mac(search_mac);
                 // TODO: For now, we raise error for not found, but we might
                 //       need to allow user store config without apply.
                 if kernel_iface_names.is_empty() {

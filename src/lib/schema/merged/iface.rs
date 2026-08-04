@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::super::value::copy_undefined_value;
 use crate::{
-    ErrorKind, Interface, InterfaceState, InterfaceType, JsonDisplay,
-    MergedInterfaces, NipartError, NipartInterface,
+    ErrorKind, Interface, InterfaceIdentifier, InterfaceState, InterfaceType,
+    JsonDisplay, MergedInterfaces, NipartError, NipartInterface,
 };
 
 #[derive(
@@ -268,6 +268,15 @@ impl MergedInterface {
                 Some(ctrl_name.to_string());
             apply_iface.base_iface_mut().controller_type =
                 Some(ctrl_type.clone());
+            // MAC address might change after port attached to bond.
+            // Remove mac-address from for_verify to avoid false
+            // verification errors.
+            if ctrl_type == InterfaceType::Bond
+                && apply_iface.base_iface().identifier
+                    == Some(InterfaceIdentifier::MacAddress)
+                && let Some(for_verify) = self.for_verify.as_mut() {
+                    for_verify.base_iface_mut().mac_address = None;
+                }
             self.merged.base_iface_mut().controller = Some(ctrl_name);
             self.merged.base_iface_mut().controller_type = Some(ctrl_type);
             if !self.merged.base_iface().can_have_ip() {

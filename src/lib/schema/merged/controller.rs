@@ -40,16 +40,16 @@ impl MergedInterface {
     /// Return two list, first is new port attached to specified interface,
     /// second is old port detached from specified interface.
     pub(crate) fn get_changed_ports(&self) -> Option<(Vec<&str>, Vec<&str>)> {
-        let desired_iface = self.desired.as_ref()?;
+        let for_apply_iface = self.for_apply.as_ref()?;
 
-        if desired_iface.is_absent() {
+        if for_apply_iface.is_absent() {
             {
                 let ports = self.current.as_ref().and_then(|c| c.ports())?;
                 return Some((Vec::new(), ports));
             }
         }
 
-        let desired_port_names = match desired_iface.ports() {
+        let desired_port_names = match for_apply_iface.ports() {
             Some(p) => HashSet::from_iter(p.iter().cloned()),
             None => {
                 // If current interface is in ignore state, even user did not
@@ -98,11 +98,83 @@ impl MergedInterfaces {
     pub(crate) fn post_merge_sanitize_controller_and_port(
         &mut self,
     ) -> Result<(), NipartError> {
+        self.post_merge_resolve_port_ref()?;
         self.handle_changed_ports()?;
         self.resolve_controller_type()?;
         self.check_overbook_ports()?;
         self.check_infiniband_as_ports()?;
         self.validate_controller_and_port_list_confliction()?;
+        Ok(())
+    }
+
+    fn post_merge_resolve_port_ref(&mut self) -> Result<(), NipartError> {
+        let mut profile_to_kernel: HashMap<String, String> = HashMap::new();
+        for merged_iface in self.iter() {
+            let iface = &merged_iface.merged;
+            if let Some(profile_name) = iface.base_iface().profile_name.as_ref()
+                && !profile_name.is_empty()
+                && !iface.kernel_iface_name().is_empty()
+            {
+                profile_to_kernel.insert(
+                    profile_name.to_string(),
+                    iface.kernel_iface_name().to_string(),
+                );
+            }
+        }
+
+        if profile_to_kernel.is_empty() {
+            return Ok(());
+        }
+
+        let mut port_renames: Vec<(String, InterfaceType, String, String)> =
+            Vec::new();
+        for merged_iface in self.iter() {
+            if !merged_iface.merged.is_controller() {
+                continue;
+            }
+            if let Some(ports) = merged_iface.merged.ports() {
+                for port_name in ports {
+                    if let Some(kernel_name) = profile_to_kernel.get(port_name)
+                    {
+                        port_renames.push((
+                            merged_iface.kernel_iface_name().to_string(),
+                            merged_iface.iface_type().clone(),
+                            port_name.to_string(),
+                            kernel_name.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        for (ctrl_name, ctrl_type, org_port_name, new_port_name) in port_renames
+        {
+            let merged_iface = if ctrl_type.is_userspace() {
+                self.user_ifaces
+                    .get_mut(&(ctrl_name.clone(), ctrl_type.clone()))
+            } else {
+                self.kernel_ifaces.get_mut(&ctrl_name)
+            };
+
+            if let Some(merged_iface) = merged_iface {
+                if let Some(for_apply) = merged_iface.for_apply.as_mut() {
+                    for_apply.change_port_name(
+                        &org_port_name,
+                        new_port_name.clone(),
+                    )?;
+                }
+                if let Some(for_verify) = merged_iface.for_verify.as_mut() {
+                    for_verify.change_port_name(
+                        &org_port_name,
+                        new_port_name.clone(),
+                    )?;
+                }
+                merged_iface
+                    .merged
+                    .change_port_name(&org_port_name, new_port_name)?;
+            }
+        }
+
         Ok(())
     }
 
