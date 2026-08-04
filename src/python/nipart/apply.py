@@ -9,7 +9,7 @@ from .schema.state_option import NipartApplyOption
 _LOG = logging.getLogger(__name__)
 
 
-def apply(desired_state, *, verify_change=True):
+def apply(desired_state, *, verify_change=True, memory_only=False):
     try:
         cli = NipartClient()
     except OSError as e:
@@ -17,5 +17,7 @@ def apply(desired_state, *, verify_change=True):
             _LOG.warning("apply: daemon not running, skipping")
             return
         raise
-    opt = NipartApplyOption(verify_change=verify_change)
+    opt = NipartApplyOption(
+        verify_change=verify_change, memory_only=memory_only
+    )
     cli.apply_network_state(desired_state, opt)
