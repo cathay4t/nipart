@@ -12,3 +12,4 @@ mod serializer;
 mod vxlan;
 mod wifi;
 mod yaml_roundtrip;
+mod yaml_stringified;
