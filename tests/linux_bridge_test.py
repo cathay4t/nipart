@@ -127,3 +127,23 @@ def test_create_and_remove_linux_bridge(linux_bridge_over_dummy):
         "vlan-protocol",
     ],
 )
+def test_modify_linux_bridge_options(linux_bridge_over_dummy, opt_key_value):
+    opt_name, opt_value = opt_key_value
+    nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_BRIDGE_NIC}
+                type: linux-bridge
+                bridge:
+                  options:
+                    {opt_name}: "{opt_value}"
+            """))
+    linux_bridge_iface = show_only(TEST_BRIDGE_NIC)
+    assert (
+        state_match(
+            {opt_name: opt_value},
+            linux_bridge_iface["bridge"]["options"],
+        )
+        or opt_value - linux_bridge_iface["bridge"]["options"][opt_name] == 1
+    )
+
+
