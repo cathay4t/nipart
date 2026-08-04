@@ -220,3 +220,9 @@ fn test_de_option_u16_valid() {
     assert_eq!(t.v, Some(4096));
 }
 
+#[test]
+fn test_de_option_u16_overflow() {
+    let result: Result<TestOptionU16, _> = serde_yaml::from_str("v: 65536");
+    assert!(result.is_err());
+}
+
