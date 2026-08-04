@@ -5,7 +5,8 @@ use serde::{
 };
 
 use crate::{
-    Interface, InterfaceLinkEvent, Interfaces, JsonDisplay, NipartInterface,
+    Interface, InterfaceIdentifier, InterfaceLinkEvent, Interfaces,
+    JsonDisplay, NipartInterface,
 };
 
 /// Defines whether and when an interface should be activated automatically.
@@ -47,8 +48,38 @@ impl Interface {
         match self.base_iface().auto_connect.as_ref()? {
             InterfaceAutoConnect::Manual => None,
             InterfaceAutoConnect::AutoConnect => {
-                // TODO: handle MAC address identifier
-                if self.kernel_iface_name() != event.iface_name {
+                let name_matched = self.kernel_iface_name() == event.iface_name;
+                // When the kernel interface name does not match (e.g. the
+                // device got a new name after unplug/replug), fall back to
+                // matching the MAC address of the interface from the event.
+                let mac_matched = !name_matched
+                    && self.base_iface().identifier
+                        == Some(InterfaceIdentifier::MacAddress)
+                    && self.base_iface().mac_address.as_deref().is_some_and(
+                        |saved_mac| {
+                            let saved_mac = saved_mac.to_ascii_uppercase();
+                            cur_ifaces
+                                .kernel_ifaces
+                                .get(&event.iface_name)
+                                .is_some_and(|cur_iface| {
+                                    let cur_base = cur_iface.base_iface();
+                                    cur_base
+                                        .permanent_mac_address
+                                        .as_deref()
+                                        .is_some_and(|m| {
+                                            m.to_ascii_uppercase() == saved_mac
+                                        })
+                                        || cur_base
+                                            .mac_address
+                                            .as_deref()
+                                            .is_some_and(|m| {
+                                                m.to_ascii_uppercase()
+                                                    == saved_mac
+                                            })
+                                })
+                        },
+                    );
+                if !name_matched && !mac_matched {
                     None
                 } else if event.is_delete {
                     // interface been removed, no action required.

@@ -25,6 +25,13 @@ struct IfaceLists<'a> {
     ipv6_disabled: HashSet<&'a str>,
     dhcpv4_enabled: HashSet<&'a str>,
     will_delete: HashSet<&'a str>,
+    // Kernel interfaces present in the desired state. Only these may have
+    // their current routes removed due to IPv4/IPv6 being disabled: a
+    // partial apply (e.g. a link event) must not infer route removal from
+    // the transient IP-disabled state of untouched interfaces (e.g. a DHCP
+    // interface whose lease has not been re-acquired yet after daemon
+    // restart).
+    desired_ifaces: HashSet<&'a str>,
 }
 
 #[derive(
@@ -218,12 +225,20 @@ fn collect_iface_lists(merged_ifaces: &MergedInterfaces) -> IfaceLists<'_> {
         .map(|i| i.merged.kernel_iface_name())
         .collect();
 
+    let desired_ifaces: HashSet<&str> = merged_ifaces
+        .kernel_ifaces
+        .values()
+        .filter(|i| i.desired.is_some())
+        .map(|i| i.merged.kernel_iface_name())
+        .collect();
+
     IfaceLists {
         absent,
         ipv4_disabled,
         ipv6_disabled,
         dhcpv4_enabled,
         will_delete,
+        desired_ifaces,
     }
 }
 
@@ -358,11 +373,22 @@ fn build_merged_and_changed_routes(
                     // them from current so they get re-applied.
                     continue;
                 }
-                if iface_lists.absent.contains(&via.as_str())
-                    || (rt.is_ipv6()
+                // Only interfaces changed by this apply may have their
+                // routes removed due to IP being disabled: a current-only
+                // interface may be temporarily IP-disabled (e.g. DHCP
+                // lease not re-acquired after daemon restart) and its
+                // routes must not be dropped by an unrelated apply.
+                let via_ip_disabled = iface_lists
+                    .desired_ifaces
+                    .contains(&via.as_str())
+                    && ((rt.is_ipv6()
                         && iface_lists.ipv6_disabled.contains(&via.as_str()))
-                    || (!rt.is_ipv6()
-                        && iface_lists.ipv4_disabled.contains(&via.as_str()))
+                        || (!rt.is_ipv6()
+                            && iface_lists
+                                .ipv4_disabled
+                                .contains(&via.as_str())));
+                if iface_lists.absent.contains(&via.as_str())
+                    || via_ip_disabled
                     || desired_routes
                         .iter()
                         .filter(|r| r.is_absent())
