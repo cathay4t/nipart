@@ -181,3 +181,35 @@ fn test_yaml_serialize_hide_secrets() {
     assert!(serialized.contains(NetworkState::HIDE_SECRET_STR));
     assert!(!serialized.contains("12345678"));
 }
+
+#[test]
+fn test_yaml_serialize_skips_none_fields() {
+    let state = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: eth1
+            type: ethernet
+        "#,
+    )
+    .unwrap();
+
+    let value = serde_yaml::to_value(&state).unwrap();
+
+    let iface = value
+        .get("interfaces")
+        .and_then(|v| v.as_sequence())
+        .unwrap()
+        .first()
+        .unwrap()
+        .clone();
+    assert!(iface.get("name").is_some());
+    assert!(iface.get("type").is_some());
+    assert!(iface.get("mtu").is_none());
+    assert!(iface.get("mac-address").is_none());
+    assert!(iface.get("controller").is_none());
+    assert!(iface.get("ipv4").is_none());
+    assert!(iface.get("ipv6").is_none());
+
+    assert!(value.get("description").is_none());
+    assert!(value.get("wait-online").is_none());
+}
