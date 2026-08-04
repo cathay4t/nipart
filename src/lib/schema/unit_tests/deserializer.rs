@@ -440,3 +440,10 @@ fn test_de_option_enum_string_or_integer_integer() {
     assert_eq!(t.v, Some(BondMode::ActiveBackup));
 }
 
+#[test]
+fn test_de_option_enum_string_or_integer_invalid() {
+    let result: Result<TestOptionBondMode, _> =
+        serde_yaml::from_str("v: bogus");
+    assert!(result.is_err());
+}
+
