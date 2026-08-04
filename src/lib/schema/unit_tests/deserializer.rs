@@ -280,3 +280,10 @@ fn test_de_option_i64_string() {
     assert_eq!(t.v, Some(5));
 }
 
+#[test]
+fn test_de_option_i64_invalid_string() {
+    let result: Result<TestOptionI64, _> =
+        serde_yaml::from_str("v: \"not-a-number\"");
+    assert!(result.is_err());
+}
+
