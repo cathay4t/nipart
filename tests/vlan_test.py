@@ -6,12 +6,14 @@ import pytest
 
 import nipart
 
+from .testlib.cmdlib import exec_cmd
 from .testlib.statelib import load_yaml
 from .testlib.statelib import show_only
 
 TEST_BASE_NIC = "dummy1"
 TEST_BASE_NIC2 = "dummy2"
 TEST_VLAN_NIC = "dummy1.100"
+TEST_VLAN_ROUTE_DST = "198.51.100.0/24"
 
 
 @pytest.fixture
@@ -114,3 +116,74 @@ def test_vlan_change_property(vlan_over_dummy, dummy2):
                 prop_value = None
         assert vlan_iface["state"] == "up"
         assert vlan_iface["vlan"].get(prop_name) == prop_value
+
+
+@pytest.fixture
+def vlan_over_dummy_with_route():
+    nipart.apply(
+        load_yaml(f"""---
+            interfaces:
+              - name: {TEST_VLAN_NIC}
+                type: vlan
+                state: up
+                vlan:
+                  id: 100
+                  base-iface: {TEST_BASE_NIC}
+                ipv4:
+                  enabled: true
+                  dhcp: false
+              - name: {TEST_BASE_NIC}
+                type: dummy
+                state: up
+            routes:
+              config:
+                - destination: {TEST_VLAN_ROUTE_DST}
+                  next-hop-interface: {TEST_VLAN_NIC}
+                  metric: 100
+            """),
+        verify_change=False,
+    )
+    yield
+    # Deleting the interface also removes its routes from kernel
+    nipart.apply(
+        load_yaml(f"""---
+            interfaces:
+              - name: {TEST_VLAN_NIC}
+                type: vlan
+                state: absent
+              - name: {TEST_BASE_NIC}
+                type: dummy
+                state: absent
+            """),
+        verify_change=False,
+    )
+
+
+def test_vlan_id_change_preserves_routes(vlan_over_dummy_with_route):
+    rc, out, _ = exec_cmd(
+        ["ip", "route", "show", "dev", TEST_VLAN_NIC], check=False
+    )
+    assert TEST_VLAN_ROUTE_DST in out
+
+    # TODO: remove verify_change=False once VLAN IP apply bug is fixed
+    nipart.apply(
+        load_yaml(f"""---
+            interfaces:
+              - name: {TEST_VLAN_NIC}
+                type: vlan
+                state: up
+                vlan:
+                  id: 101
+            """),
+        verify_change=False,
+    )
+
+    vlan_iface = show_only(TEST_VLAN_NIC)
+    assert vlan_iface["vlan"]["id"] == 101
+
+    rc, out, _ = exec_cmd(
+        ["ip", "route", "show", "dev", TEST_VLAN_NIC], check=False
+    )
+    assert TEST_VLAN_ROUTE_DST in out, (
+        f"Route {TEST_VLAN_ROUTE_DST} lost after VLAN ID change: {out}"
+    )

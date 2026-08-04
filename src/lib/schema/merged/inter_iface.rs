@@ -215,7 +215,27 @@ impl MergedInterfaces {
 
         ret._set_up_priority()?;
 
+        ret.mark_will_delete();
+
         Ok(ret)
+    }
+
+    fn mark_will_delete(&mut self) {
+        for merged_iface in self.kernel_ifaces.values_mut() {
+            if merged_iface.merged.is_up()
+                && let Some(for_apply) = merged_iface.for_apply.as_ref()
+                && let Some(current) = merged_iface.current.as_ref()
+                && Interface::need_delete_before_change(for_apply, current)
+            {
+                log::debug!(
+                    "Interface {}/{} will be deleted and recreated during \
+                     apply",
+                    merged_iface.merged.kernel_iface_name(),
+                    merged_iface.merged.iface_type()
+                );
+                merged_iface.will_delete = true;
+            }
+        }
     }
 
     fn _set_up_priority(&mut self) -> Result<(), NipartError> {
