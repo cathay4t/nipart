@@ -131,3 +131,28 @@ def no_ovs_db_socket():
     exec_cmd(["umount", OVS_DB_SOCK], check=False)
 
 
+def test_ovs_apply_dependency_error_plugin_not_found(
+    no_nipart_ovs_plugin, restart_daemon
+):
+    desired_state = load_yaml("""---
+        interfaces:
+          - name: test-br
+            type: ovs-bridge
+            state: up
+    """)
+    with pytest.raises(nipart.NipartError) as err:
+        nipart.apply(desired_state)
+    assert err.value.kind == "dependency-error", (
+        f"Expected dependency-error, got {err.value.kind}: {err.value.msg}"
+    )
+
+
+def _count_plugin_processes():
+    rc, out, _ = exec_cmd(
+        ["pgrep", "-f", "nipart-plugin"], check=False
+    )
+    if rc == 0:
+        return len(out.strip().splitlines())
+    return 0
+
+
