@@ -14,4 +14,5 @@
 * [Linux 网桥](bridge.md)
 * [OpenvSwitch 网桥](ovs.md)
 * [Wireguard](wireguard.md)
+* [插件设计](plugin_design.md)
 

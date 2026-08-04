@@ -77,7 +77,7 @@ interfaces:
 ```bash
 cargo build --release
 sudo systemctl stop nipart || true
-sudo cp -fv target/release/nipartd /usr/bin/
+sudo cp -fv target/release/nipart /usr/bin/
 sudo cp -fv target/release/npt /usr/bin/
 sudo cp -fv packaging/nipart.service /etc/systemd/system/
 sudo cp -fv packaging/nipart-wait-online.service /etc/systemd/system/

@@ -14,4 +14,5 @@
 * [Linux Bridge](features/bridge.md)
 * [OpenvSwitch Bridge](features/ovs.md)
 * [Wireguard](features/wireguard.md)
+* [Plugin Design](features/plugin_design.md)
 
