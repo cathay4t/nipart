@@ -7,7 +7,7 @@ Before=network.target
 
 [Service]
 Type=exec
-ExecStart=/usr/bin/nipartd
+ExecStart=/usr/bin/nipart
 
 [Install]
 WantedBy=multi-user.target

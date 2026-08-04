@@ -1,5 +1,5 @@
 [package]
-name = "nipartd"
+name = "nipart-daemon"
 version.workspace = true
 authors.workspace = true
 description = "The daemon of Nipart"
@@ -25,5 +25,5 @@ nix = { workspace = true }
 wl-nl80211 = { workspace = true }
 
 [[bin]]
-name = "nipartd"
+name = "nipart"
 path = "main.rs"
