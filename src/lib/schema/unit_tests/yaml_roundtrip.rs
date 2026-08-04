@@ -115,3 +115,25 @@ fn test_yaml_round_trip_wireguard() {
     );
     assert_eq!(state, reparsed);
 }
+
+#[test]
+fn test_yaml_round_trip_routes() {
+    let (state, reparsed) = round_trip(
+        r#"---
+        routes:
+          config:
+            - destination: 0.0.0.0/0
+              next-hop-address: 192.0.2.1
+              next-hop-interface: eth1
+              metric: 100
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth2
+              state: absent
+          running:
+            - destination: 203.0.113.0/24
+              next-hop-address: 192.0.2.9
+              next-hop-interface: eth1
+        "#,
+    );
+    assert_eq!(state, reparsed);
+}
