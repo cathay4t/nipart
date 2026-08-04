@@ -194,3 +194,28 @@ fn test_resolve_mac_identifier_unknown_type() {
 }
 
 /// Test error when mac_address is not provided.
+#[test]
+fn test_resolve_mac_identifier_missing_mac() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: wan0
+          type: ethernet
+          identifier: mac-address
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    let result = desired.resolve_mac_identifier(&current);
+    assert!(result.is_err());
+}
+
+/// Test that already-resolved interface (name matches kernel name) is skipped.
