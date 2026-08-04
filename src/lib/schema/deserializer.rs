@@ -21,7 +21,7 @@ where
         if let Some(i) = i {
             Ok(i)
         } else {
-            Err(de::Error::custom("Required filed undefined"))
+            Err(de::Error::custom("Required field undefined"))
         }
     })
 }
@@ -34,7 +34,7 @@ where
         if let Some(i) = i {
             Ok(i)
         } else {
-            Err(de::Error::custom("Required filed undefined"))
+            Err(de::Error::custom("Required field undefined"))
         }
     })
 }
@@ -47,7 +47,7 @@ where
         if let Some(i) = i {
             Ok(i)
         } else {
-            Err(de::Error::custom("Required filed undefined"))
+            Err(de::Error::custom("Required field undefined"))
         }
     })
 }
@@ -60,7 +60,7 @@ where
         if let Some(i) = i {
             Ok(i)
         } else {
-            Err(de::Error::custom("Required filed undefined"))
+            Err(de::Error::custom("Required field undefined"))
         }
     })
 }
@@ -344,7 +344,7 @@ where
         if let Some(i) = i {
             Ok(i)
         } else {
-            Err(de::Error::custom("Required filed undefined"))
+            Err(de::Error::custom("Required field undefined"))
         }
     })
 }
