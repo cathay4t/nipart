@@ -34,3 +34,10 @@ fn test_iface_type_de_kebab_case_names() {
     }
 }
 
+#[test]
+fn test_iface_type_de_unknown_string() {
+    let t: InterfaceType = serde_yaml::from_str("bogus-type").unwrap();
+    assert_eq!(t, InterfaceType::Unknown("bogus-type".to_string()));
+    assert!(t.is_unknown());
+}
+
