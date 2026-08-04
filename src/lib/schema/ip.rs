@@ -281,6 +281,7 @@ impl InterfaceIpv4 {
 ///         prefix-length: 64
 ///     autoconf: true
 ///     dhcp: true
+///     dhcp-state: done
 ///     enabled: true
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -303,6 +304,9 @@ pub struct InterfaceIpv6 {
         deserialize_with = "crate::deserializer::option_bool_or_string"
     )]
     pub dhcp: Option<bool>,
+    /// DHCPv6 state. Query only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dhcp_state: Option<DhcpState>,
     /// Whether autoconf via IPv6 router announcement enabled.
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -332,6 +336,7 @@ impl InterfaceIpv6 {
         Self {
             enabled: Some(false),
             dhcp: None,
+            dhcp_state: None,
             autoconf: None,
             addresses: None,
         }
@@ -358,6 +363,7 @@ impl InterfaceIpv6 {
         &mut self,
         _current: Option<&Self>,
     ) -> Result<(), NipartError> {
+        self.dhcp_state = None;
         if let Some(addrs) = self.addresses.as_mut() {
             for addr in addrs.as_slice().iter().filter(|a| a.is_auto()) {
                 log::info!("Ignoring Auto IP address {addr}");
@@ -694,6 +700,7 @@ mod test {
         let mut current = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: Some(true),
+            dhcp_state: None,
             autoconf: Some(true),
             addresses: Some(vec![InterfaceIpAddr {
                 ip: IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
@@ -720,6 +727,7 @@ mod test {
         let mut current = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: Some(true),
+            dhcp_state: None,
             autoconf: Some(true),
             addresses: Some(vec![addr.clone()]),
         };
@@ -735,6 +743,7 @@ mod test {
         let mut current = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: None,
+            dhcp_state: None,
             autoconf: None,
             addresses: Some(vec![]),
         };
@@ -750,6 +759,7 @@ mod test {
         let mut current = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: Some(true),
+            dhcp_state: None,
             autoconf: Some(true),
             addresses: None,
         };
@@ -777,12 +787,14 @@ mod test {
         let mut desired = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: None,
+            dhcp_state: None,
             autoconf: None,
             addresses: Some(vec![addr.clone()]),
         };
         let mut current = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: None,
+            dhcp_state: None,
             autoconf: None,
             addresses: Some(vec![cur_addr.clone()]),
         };
@@ -811,12 +823,14 @@ mod test {
         let mut desired = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: None,
+            dhcp_state: None,
             autoconf: None,
             addresses: Some(vec![addr0.clone(), addr1.clone()]),
         };
         let mut current = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: None,
+            dhcp_state: None,
             autoconf: None,
             addresses: Some(vec![]),
         };
@@ -845,12 +859,14 @@ mod test {
         let mut desired = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: None,
+            dhcp_state: None,
             autoconf: None,
             addresses: Some(vec![addr1.clone(), addr0.clone()]),
         };
         let mut current = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: None,
+            dhcp_state: None,
             autoconf: None,
             addresses: Some(vec![addr0.clone(), addr1.clone()]),
         };
@@ -880,6 +896,7 @@ mod test {
         let mut current = InterfaceIpv6 {
             enabled: Some(true),
             dhcp: Some(true),
+            dhcp_state: None,
             autoconf: Some(true),
             addresses: Some(vec![link_local_addr, global_addr.clone()]),
         };

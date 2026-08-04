@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::str::FromStr;
+use std::{net::IpAddr, str::FromStr};
 
 use super::iface::init_np_iface;
 use crate::{
@@ -78,7 +78,14 @@ pub(crate) fn np_ipv6_to_nipart(
         }
         let mut addresses = Vec::new();
         for np_addr in &np_ip.addresses {
-            if np_addr.valid_lft != "forever" {
+            // A `kernel_ra` address might hold `forever` lifetime (e.g. RA
+            // with infinite valid lifetime), detect it via the address
+            // protocol so autoconf can still be verified.
+            if np_addr.protocol
+                == Some(nispor::AddressProtocol::RouterAnnouncement)
+            {
+                ip.autoconf = Some(true);
+            } else if np_addr.valid_lft != "forever" {
                 if np_addr.prefix_len == 128 {
                     ip.dhcp = Some(true);
                 } else {
@@ -179,14 +186,35 @@ pub(crate) fn apply_iface_ip_changes(
             des_addrs = d;
         }
 
-        let mut cur_addrs: &[InterfaceIpAddr] = &[];
-        if let Some(cur_ipv6) = cur_iface.ipv6.as_ref()
-            && cur_ipv6.is_enabled()
-            && let Some(c) = cur_ipv6.addresses.as_ref()
-        {
-            cur_addrs = c;
-        }
-        let np_addrs = nipart_ip_addrs_to_nispor(des_addrs, cur_addrs);
+        // The IPv6 link-local address is auto-assigned by kernel, it should
+        // not be removed by the apply action while IPv6 stays enabled,
+        // otherwise the DHCPv6 client would lose the source address for its
+        // traffic. When IPv6 is explicitly disabled, all addresses including
+        // the link-local one are purged.
+        let cur_addrs: Vec<InterfaceIpAddr> = {
+            let mut addrs = Vec::new();
+            if let Some(cur_ipv6) = cur_iface.ipv6.as_ref()
+                && cur_ipv6.is_enabled()
+                && let Some(c) = cur_ipv6.addresses.as_ref()
+            {
+                for cur_addr in c.iter().filter(|a| {
+                    if des_ipv6.is_enabled() {
+                        match a.ip {
+                            IpAddr::V6(ip_addr) => {
+                                !ip_addr.is_unicast_link_local()
+                            }
+                            IpAddr::V4(_) => true,
+                        }
+                    } else {
+                        true
+                    }
+                }) {
+                    addrs.push(cur_addr.clone());
+                }
+            }
+            addrs
+        };
+        let np_addrs = nipart_ip_addrs_to_nispor(des_addrs, &cur_addrs);
 
         if !np_addrs.is_empty() {
             let mut np_ip_conf = nispor::IpConf::default();
@@ -275,4 +303,92 @@ fn is_replacing(
                     && des_addr.prefix_length == cur_addr.prefix_length
             })
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv6Addr};
+
+    use crate::{BaseInterface, InterfaceIpAddr, InterfaceIpv6, InterfaceType};
+
+    use super::apply_iface_ip_changes;
+
+    fn iface_with_ipv6(ipv6: InterfaceIpv6) -> BaseInterface {
+        let mut iface =
+            BaseInterface::new("eth0".to_string(), InterfaceType::Ethernet);
+        iface.ipv6 = Some(ipv6);
+        iface
+    }
+
+    fn ipv6_addr(ip: &str, prefix_length: u8) -> InterfaceIpAddr {
+        InterfaceIpAddr {
+            ip: IpAddr::V6(ip.parse::<Ipv6Addr>().unwrap()),
+            prefix_length,
+            valid_life_time: None,
+            preferred_life_time: None,
+        }
+    }
+
+    /// The kernel auto-assigned IPv6 link-local address must not be removed
+    /// while IPv6 stays enabled, otherwise the DHCPv6 client would lose the
+    /// source address for its traffic.
+    #[test]
+    fn test_link_local_not_removed_when_ipv6_enabled() {
+        let des_iface = iface_with_ipv6(InterfaceIpv6 {
+            enabled: Some(true),
+            dhcp: Some(true),
+            addresses: None,
+            ..Default::default()
+        });
+        let cur_iface = iface_with_ipv6(InterfaceIpv6 {
+            enabled: Some(true),
+            addresses: Some(vec![
+                ipv6_addr("fe80::1", 64),
+                ipv6_addr("2001:db8::1", 64),
+            ]),
+            ..Default::default()
+        });
+
+        let np_iface =
+            apply_iface_ip_changes(&des_iface, Some(&cur_iface)).unwrap();
+        let np_addrs = np_iface.unwrap().ipv6.unwrap().addresses;
+
+        // The static global address is purged when switching to DHCP...
+        assert!(
+            np_addrs
+                .iter()
+                .any(|a| { a.remove && a.address == "2001:db8::1" })
+        );
+        // ...but the link-local address is never removed.
+        assert!(
+            np_addrs
+                .iter()
+                .all(|a| { !(a.remove && a.address.starts_with("fe80")) })
+        );
+    }
+
+    /// When IPv6 is explicitly disabled, the link-local address is purged
+    /// together with all other IPv6 addresses.
+    #[test]
+    fn test_link_local_removed_when_ipv6_disabled() {
+        let des_iface = iface_with_ipv6(InterfaceIpv6 {
+            enabled: Some(false),
+            ..Default::default()
+        });
+        let cur_iface = iface_with_ipv6(InterfaceIpv6 {
+            enabled: Some(true),
+            addresses: Some(vec![ipv6_addr("fe80::1", 64)]),
+            ..Default::default()
+        });
+
+        let np_iface =
+            apply_iface_ip_changes(&des_iface, Some(&cur_iface)).unwrap();
+        let np_addrs = np_iface.unwrap().ipv6.unwrap().addresses;
+
+        assert!(
+            np_addrs
+                .iter()
+                .any(|a| { a.remove && a.address == "fe80::1" })
+        );
+    }
 }

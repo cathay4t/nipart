@@ -1,22 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use futures_util::{StreamExt, stream::FuturesUnordered};
-use mozim::{DhcpV4Client, DhcpV4Config, DhcpV4Lease, DhcpV4State};
+use mozim::{
+    DhcpV4Client, DhcpV4Config, DhcpV4Lease, DhcpV4State, DhcpV6Client,
+    DhcpV6Config, DhcpV6Lease, DhcpV6Mode, DhcpV6State,
+};
 
 use super::{ip::apply_iface_ip_changes, route::apply_routes};
 use crate::{
-    ErrorKind, InterfaceIpAddr, InterfaceIpv4, InterfaceType, MergedInterfaces,
-    MergedRoutes, NipartError, NipartInterface, NipartNoDaemon, RouteEntry,
-    Routes,
+    BaseInterface, ErrorKind, InterfaceIpAddr, InterfaceIpv4, InterfaceIpv6,
+    InterfaceType, MergedInterfaces, MergedRoutes, NipartError,
+    NipartInterface, NipartNoDaemon, RouteEntry, Routes,
 };
 
 const DEFAULT_ROUTE_TABLE_ID: u32 = 254;
+
+const DHCPV6_INIT_RETRY_COUNT: usize = 30;
+const DHCPV6_INIT_RETRY_INTERVAL_MS: u64 = 1000;
 
 impl NipartNoDaemon {
     pub(crate) async fn run_dhcp_once(
         merged_ifaces: &MergedInterfaces,
     ) -> Result<(), NipartError> {
-        let mut get_lease_futures = FuturesUnordered::new();
+        // DHCPv4
+        let mut v4_get_lease_futures = FuturesUnordered::new();
 
         for iface in merged_ifaces
             .kernel_ifaces
@@ -28,20 +35,43 @@ impl NipartNoDaemon {
             })
         {
             let get_lease_future =
-                get_lease(iface.kernel_iface_name(), iface.iface_type());
-            get_lease_futures.push(get_lease_future);
+                get_lease_v4(iface.kernel_iface_name(), iface.iface_type());
+            v4_get_lease_futures.push(get_lease_future);
         }
 
-        while let Some(result) = get_lease_futures.next().await {
+        while let Some(result) = v4_get_lease_futures.next().await {
             // Should fail the whole apply action for any errors of DHCP.
             let (kernel_iface_name, lease) = result?;
-            apply_lease(merged_ifaces, kernel_iface_name, lease).await?;
+            apply_lease_v4(merged_ifaces, kernel_iface_name, lease).await?;
+        }
+
+        // DHCPv6
+        let mut v6_get_lease_futures = FuturesUnordered::new();
+
+        for iface in merged_ifaces
+            .kernel_ifaces
+            .values()
+            .filter_map(|i| i.for_apply.as_ref())
+            .filter(|i| {
+                i.base_iface().ipv6.as_ref().and_then(|ip| ip.dhcp)
+                    == Some(true)
+            })
+        {
+            let get_lease_future =
+                get_lease_v6(iface.kernel_iface_name(), iface.iface_type());
+            v6_get_lease_futures.push(get_lease_future);
+        }
+
+        while let Some(result) = v6_get_lease_futures.next().await {
+            // Should fail the whole apply action for any errors of DHCP.
+            let (kernel_iface_name, lease) = result?;
+            apply_lease_v6(merged_ifaces, kernel_iface_name, lease).await?;
         }
         Ok(())
     }
 }
 
-async fn get_lease<'a>(
+async fn get_lease_v4<'a>(
     kernel_iface_name: &'a str,
     iface_type: &InterfaceType,
 ) -> Result<(&'a str, DhcpV4Lease), NipartError> {
@@ -90,7 +120,163 @@ async fn get_lease<'a>(
     }
 }
 
-async fn apply_lease(
+async fn get_lease_v6<'a>(
+    kernel_iface_name: &'a str,
+    iface_type: &InterfaceType,
+) -> Result<(&'a str, DhcpV6Lease), NipartError> {
+    log::debug!(
+        "Waiting link carrier up for interface {}/{} before start DHCPv6",
+        kernel_iface_name,
+        iface_type
+    );
+    NipartNoDaemon::wait_link_carrier_up(kernel_iface_name).await?;
+    log::debug!(
+        "Interface {}/{} link carrier is up, starting DHCPv6 process",
+        kernel_iface_name,
+        iface_type
+    );
+    // The DHCPv6 client needs the IPv6 link-local address as its source
+    // address, enable IPv6 first if it was previously disabled.
+    NipartNoDaemon::enable_ipv6(kernel_iface_name).await?;
+    // Whether we already forced the kernel to regenerate the IPv6 link-local
+    // address for this round of init attempts.
+    let mut link_local_regenerated = false;
+    let mut dhcp_client = None;
+    // The DHCPv6 client init resolves the interface index and link-local
+    // address via netlink, retry a few times to cover the window between
+    // link carrier up and the link-local address being assigned on the
+    // interface.
+    for retry_count in 0..DHCPV6_INIT_RETRY_COUNT {
+        let dhcp_config = DhcpV6Config::new(
+            kernel_iface_name,
+            DhcpV6Mode::NonTemporaryAddresses,
+        );
+        match DhcpV6Client::init(dhcp_config, None).await {
+            Ok(cli) => {
+                dhcp_client = Some(cli);
+                break;
+            }
+            Err(e) => {
+                // The init failure is usually caused by the interface holding
+                // no IPv6 link-local address, flip `disable_ipv6` once so the
+                // kernel regenerates the link-local address for it.
+                if !link_local_regenerated {
+                    link_local_regenerated = true;
+                    log::info!(
+                        "DHCPv6 client init failed on iface {}/{}, forcing \
+                         the kernel to regenerate the IPv6 link-local \
+                         address: {e}",
+                        kernel_iface_name,
+                        iface_type,
+                    );
+                    if let Err(regen_err) =
+                        NipartNoDaemon::regenerate_link_local(kernel_iface_name)
+                            .await
+                    {
+                        log::warn!(
+                            "Failed to regenerate IPv6 link-local address on \
+                             iface {}/{}: {regen_err}",
+                            kernel_iface_name,
+                            iface_type,
+                        );
+                    }
+                }
+                if retry_count + 1 == DHCPV6_INIT_RETRY_COUNT {
+                    return Err(NipartError::new(
+                        ErrorKind::Bug,
+                        format!(
+                            "Failed to start DHCPv6 client on iface {}/{}: \
+                             {e}",
+                            kernel_iface_name, iface_type,
+                        ),
+                    ));
+                }
+                log::debug!(
+                    "Failed to init DHCPv6 client on iface {}/{}, retry \
+                     ({retry_count}/{DHCPV6_INIT_RETRY_COUNT}): {e}",
+                    kernel_iface_name,
+                    iface_type,
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    DHCPV6_INIT_RETRY_INTERVAL_MS,
+                ))
+                .await;
+            }
+        }
+    }
+    let mut dhcp_client = dhcp_client.unwrap();
+    loop {
+        let state = dhcp_client.run().await.map_err(|e| {
+            NipartError::new(
+                ErrorKind::InvalidArgument,
+                format!("DHCPv6 failed: {e}"),
+            )
+        })?;
+        if let DhcpV6State::Done(lease) = state {
+            log::info!(
+                "DHCPv6 on interface acquired lease: {}/{}",
+                lease.address,
+                lease.prefix_len
+            );
+            return Ok((kernel_iface_name, *lease));
+        } else {
+            log::info!(
+                "DHCPv6 on interface {kernel_iface_name}/{iface_type} reach \
+                 {state} state",
+            );
+        }
+    }
+}
+
+/// Apply DHCPv6 lease to kernel directly.
+/// The DHCPv6 lease only provides a /128 address, no routes are generated.
+impl NipartNoDaemon {
+    pub async fn apply_dhcpv6_lease(
+        base_iface: &BaseInterface,
+        lease: &DhcpV6Lease,
+    ) -> Result<(), NipartError> {
+        log::debug!(
+            "Applying DHCPv6 lease {}/{} to interface {}({})",
+            lease.address,
+            lease.prefix_len,
+            base_iface.name,
+            base_iface.iface_type
+        );
+
+        let mut ip_addr =
+            InterfaceIpAddr::new(lease.address.into(), lease.prefix_len);
+        ip_addr.preferred_life_time =
+            Some(format!("{}sec", lease.preferred_time_sec));
+        ip_addr.valid_life_time = Some(format!("{}sec", lease.valid_time_sec));
+
+        let ipv6_conf = InterfaceIpv6 {
+            enabled: Some(true),
+            dhcp: Some(true),
+            addresses: Some(vec![ip_addr]),
+            ..Default::default()
+        };
+
+        let mut apply_base_iface = base_iface.clone_name_type_only();
+        apply_base_iface.ipv6 = Some(ipv6_conf);
+
+        // Apply directly to kernel without going through the schema sanitize()
+        // which drops dynamic (auto) IPv6 addresses from desired state.
+        if let Some(np_iface) = apply_iface_ip_changes(&apply_base_iface, None)?
+        {
+            let mut net_conf = nispor::NetConf::default();
+            net_conf.ifaces = Some(vec![np_iface]);
+            if let Err(e) = net_conf.apply_async().await {
+                return Err(NipartError::new(
+                    ErrorKind::Bug,
+                    format!("Failed to apply DHCPv6 lease address: {e}"),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+async fn apply_lease_v4(
     merged_ifaces: &MergedInterfaces,
     kernel_iface_name: &str,
     lease: DhcpV4Lease,
@@ -100,8 +286,8 @@ async fn apply_lease(
         return Err(NipartError::new(
             ErrorKind::Bug,
             format!(
-                "apply_lease(): Failed to find merged interface for interface \
-                 {kernel_iface_name}"
+                "apply_lease_v4(): Failed to find merged interface for \
+                 interface {kernel_iface_name}"
             ),
         ));
     };
@@ -185,4 +371,31 @@ async fn apply_lease(
     apply_routes(&merged_routes).await?;
 
     Ok(())
+}
+
+async fn apply_lease_v6(
+    merged_ifaces: &MergedInterfaces,
+    kernel_iface_name: &str,
+    lease: DhcpV6Lease,
+) -> Result<(), NipartError> {
+    let Some(merged_iface) = merged_ifaces.kernel_ifaces.get(kernel_iface_name)
+    else {
+        return Err(NipartError::new(
+            ErrorKind::Bug,
+            format!(
+                "apply_lease_v6(): Failed to find merged interface for \
+                 interface {kernel_iface_name}"
+            ),
+        ));
+    };
+    log::debug!(
+        "Applying DHCPv6 lease {}/{} to interface {}/{}",
+        lease.address,
+        lease.prefix_len,
+        kernel_iface_name,
+        merged_iface.merged.iface_type(),
+    );
+
+    NipartNoDaemon::apply_dhcpv6_lease(merged_iface.merged.base_iface(), &lease)
+        .await
 }
