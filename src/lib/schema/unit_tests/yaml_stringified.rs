@@ -93,3 +93,34 @@ fn test_yaml_stringified_vlan_id() {
     }
 }
 
+#[test]
+fn test_yaml_stringified_hex_bridge_option() {
+    let state = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: br0
+            type: linux-bridge
+            bridge:
+              options:
+                group-fwd-mask: "0x4000"
+        "#,
+    )
+    .unwrap();
+
+    let iface = state.ifaces.kernel_ifaces.get("br0").unwrap();
+    match iface {
+        Interface::LinuxBridge(b) => {
+            assert_eq!(
+                b.bridge
+                    .as_ref()
+                    .unwrap()
+                    .options
+                    .as_ref()
+                    .unwrap()
+                    .group_fwd_mask,
+                Some(0x4000)
+            );
+        }
+        _ => panic!("expected linux bridge interface"),
+    }
+}
