@@ -143,3 +143,16 @@ fn test_sanitize_vxlan_missing_config_with_current() {
     assert!(iface.sanitize(Some(&cur)).is_ok());
 }
 
+#[test]
+fn test_sanitize_vxlan_absent_no_config() {
+    let mut iface = VxlanInterface {
+        base: BaseInterface {
+            name: "vxlan0".to_string(),
+            iface_type: InterfaceType::Vxlan,
+            state: InterfaceState::Absent,
+            ..Default::default()
+        },
+        vxlan: None,
+    };
+    assert!(iface.sanitize(None).is_ok());
+}
