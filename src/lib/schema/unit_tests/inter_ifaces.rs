@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    BaseInterface, DhcpState, InterfaceIdentifier, InterfaceIpv4,
+    BaseInterface, DhcpState, Interface, InterfaceIdentifier, InterfaceIpv4,
     InterfaceIpv6, InterfaceState, InterfaceType, Interfaces, MergedInterfaces,
     MergedNetworkState, NetworkState, NipartInterface,
 };
@@ -536,6 +536,110 @@ fn test_sanitize_does_not_override_mac_kernel_iface_name() {
     .unwrap();
     // kernel_iface_name should be preserved (not overwritten by sanitize)
     assert_eq!(for_apply.kernel_iface_name.as_str(), "eth0");
+}
+
+/// A MAC-identifier desired interface with a route referencing its logical
+/// name must resolve the next-hop-interface to the kernel name even when the
+/// saved state holds both the MAC-identifier config and a plain saved config
+/// of the same kernel interface (which must not overwrite the merged
+/// interface).
+#[test]
+fn test_route_next_hop_iface_with_plain_saved_config_not_overwritten() {
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: my-gw-iface
+            type: ethernet
+            state: up
+            identifier: mac-address
+            mac-address: 86:FC:DF:CF:66:E1
+            ipv4:
+              enabled: true
+              dhcp: false
+              address:
+                - ip: 192.0.2.99
+                  prefix-length: 24
+        routes:
+          config:
+            - destination: 0.0.0.0/0
+              next-hop-interface: my-gw-iface
+              next-hop-address: 192.0.2.1
+              table-id: 254
+              metric: 199
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: veth-mac0
+            kernel-iface-name: veth-mac0
+            type: ethernet
+            mac-address: 86:FC:DF:CF:66:E1
+            state: up
+            ipv4:
+              enabled: false
+            ipv6:
+              enabled: true
+              dhcp: false
+              autoconf: false
+              address:
+                - ip: fe80::38ce:43ff:fea8:fcc5
+                  prefix-length: 64
+            ethernet:
+              auto-negotiation: false
+              speed: 10000
+              duplex: full
+            veth:
+              peer: veth-mac1
+        "#,
+    )
+    .unwrap();
+
+    // Saved config of the previous apply (keyed by profile name), plus the
+    // plain saved config of the same kernel interface from its creation.
+    let saved: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: my-veth
+            profile-name: my-veth
+            type: ethernet
+            identifier: mac-address
+            state: up
+            mac-address: 86:FC:DF:CF:66:E1
+            ipv4:
+              enabled: true
+              dhcp: false
+              address:
+                - ip: 192.0.2.99
+                  prefix-length: 24
+            veth:
+              peer: veth-mac1
+          - name: veth-mac0
+            kernel-iface-name: veth-mac0
+            type: ethernet
+            state: up
+            veth:
+              peer: veth-mac1
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+    let changed: Vec<&str> = merged
+        .routes
+        .changed_routes
+        .iter()
+        .filter_map(|r| r.next_hop_iface.as_deref())
+        .collect();
+    assert_eq!(changed, vec!["veth-mac0"]);
 }
 
 /// Test that route next-hop-interface with MAC identifier resolves from
@@ -1712,6 +1816,87 @@ fn test_for_apply_ipv4_keeps_lease_addr_when_prev_ipv4_disabled() {
     assert_eq!(apply_addrs.len(), 1);
     assert_eq!(apply_addrs[0].ip.to_string(), "192.0.2.225");
     assert_eq!(apply_addrs[0].prefix_length, 24);
+}
+
+/// A MAC-identifier desired interface matching a current interface whose
+/// saved config is a plain one (no `identifier`/`mac-address`, e.g. the
+/// veth was created before being referenced by MAC) must keep its IPv4
+/// config in `for_apply`/`for_save`. The saved config must be consumed
+/// (merged into `for_save`) instead of being pushed as a saved-only
+/// interface which would overwrite the merged interface.
+#[test]
+fn test_mac_identifier_desired_keeps_ipv4_with_plain_saved_config() {
+    let desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: my-veth
+          type: ethernet
+          identifier: mac-address
+          mac-address: 86:FC:DF:CF:66:E1
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: false
+            address:
+            - ip: 192.0.2.99
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: veth-mac0
+          type: ethernet
+          mac-address: 86:FC:DF:CF:66:E1
+          state: up
+          ipv4:
+            enabled: false
+        "#,
+    )
+    .unwrap();
+
+    // The saved config of the veth does not carry the identifier or the
+    // MAC address, so the MAC-based saved matching fails.
+    let saved: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: veth-mac0
+          type: ethernet
+          state: up
+          veth:
+            peer: veth-mac1
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, Some(saved)).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("veth-mac0").unwrap();
+    assert!(
+        merged_iface
+            .for_apply
+            .as_ref()
+            .unwrap()
+            .base_iface()
+            .ipv4
+            .is_some(),
+        "for_apply must keep ipv4"
+    );
+    let for_save = merged_iface.for_save.as_ref().unwrap().base_iface();
+    let save_ipv4 = for_save.ipv4.as_ref().expect("for_save must keep ipv4");
+    assert_eq!(save_ipv4.enabled, Some(true));
+    assert_eq!(save_ipv4.dhcp, Some(false));
+    assert_eq!(save_ipv4.addresses.as_ref().unwrap().len(), 1);
+
+    // The saved veth config must be merged into for_save, not dropped.
+    // MAC-identifier ifaces are saved keyed by `profile-name`.
+    let save_state = merged.gen_state_for_save();
+    let saved_iface = save_state.kernel_ifaces.get("my-veth").unwrap();
+    assert!(
+        matches!(
+            saved_iface,
+            Interface::Ethernet(eth) if eth.veth.as_ref().is_some()
+        ),
+        "saved veth config must be retained: {saved_iface:?}"
+    );
 }
 
 /// Saved MAC-identifier ifaces must all be retained in for_save when

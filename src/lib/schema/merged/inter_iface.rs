@@ -65,12 +65,32 @@ impl MergedInterfaces {
         // config from `for_save` to determine the correct map and key,
         // falling back to `profile-name` (then `name`) when the stored
         // `kernel-iface-name` is empty (e.g. `identifier: mac-address`).
+        //
+        // When the derived key already holds a desired merged interface
+        // (e.g. a MAC-identifier desired matched to the same kernel
+        // interface, while an unconsumed plain saved config for that
+        // interface also exists), the saved config is already represented
+        // by that interface's `for_save` — do not overwrite it, or the
+        // pending apply/save state would be purged.
         if merged_iface.name().is_empty()
             && let Some(saved) = merged_iface.for_save.as_ref()
         {
             if saved.is_userspace() {
                 let key =
                     (saved.name().to_string(), saved.iface_type().clone());
+                if let Some(existing) = self.user_ifaces.get_mut(&key) {
+                    // The interface is already represented. A desired
+                    // interface already carries the saved config in its
+                    // `for_save`; a current-only interface should keep its
+                    // current/merged state while retaining the saved config
+                    // so it is not purged on save.
+                    if existing.for_apply.is_none()
+                        && existing.for_save.is_none()
+                    {
+                        existing.for_save = merged_iface.for_save;
+                    }
+                    return;
+                }
                 self.insert_order.push(key.clone());
                 self.user_ifaces.insert(key, merged_iface);
             } else {
@@ -82,6 +102,19 @@ impl MergedInterfaces {
                 } else {
                     base.name.clone()
                 };
+                if let Some(existing) = self.kernel_ifaces.get_mut(&iface_name)
+                {
+                    // See the userspace case above: never overwrite an
+                    // existing merged interface (its current/merged state is
+                    // needed by the apply logic, e.g. re-attaching bond
+                    // ports), just retain the saved config on it.
+                    if existing.for_apply.is_none()
+                        && existing.for_save.is_none()
+                    {
+                        existing.for_save = merged_iface.for_save;
+                    }
+                    return;
+                }
                 let iface_type = saved.iface_type().clone();
                 self.insert_order.push((iface_name.clone(), iface_type));
                 self.kernel_ifaces.insert(iface_name, merged_iface);
@@ -146,7 +179,7 @@ impl MergedInterfaces {
                 continue;
             }
 
-            let saved_iface = saved.as_ref().and_then(|s| {
+            let mut saved_iface = saved.as_ref().and_then(|s| {
                 s.get_matched_iface_from_save(des_iface.base_iface())
             });
             if let Some(saved_iface) = saved_iface.as_ref() {
@@ -202,6 +235,37 @@ impl MergedInterfaces {
                     }
                     des_iface.base_iface_mut().name = kernel_name.clone();
                     des_iface.base_iface_mut().kernel_iface_name = kernel_name;
+                }
+            }
+            // When the desired interface matches a current interface by
+            // `identifier: mac-address` but its saved config is a plain one
+            // (no `identifier`/`mac-address` stored, e.g. the interface was
+            // created as a veth before being referenced by MAC address),
+            // `get_matched_iface_from_save()` cannot match it. Fall back to
+            // the saved config holding the same resolved kernel name so it
+            // gets consumed (merged into `for_save`) instead of being
+            // pushed as a saved-only interface which would overwrite this
+            // merged interface in `MergedInterfaces::push()`.
+            if saved_iface.is_none()
+                && des_iface.base_iface().identifier
+                    == Some(InterfaceIdentifier::MacAddress)
+                && cur_iface.is_some()
+                && let Some(saved_ifaces) = saved.as_ref()
+            {
+                saved_iface = saved_ifaces
+                    .kernel_ifaces
+                    .get(des_iface.kernel_iface_name());
+                if let Some(saved_iface) = saved_iface {
+                    log::debug!(
+                        "Fallback matched saved config for {}/{}: \
+                         {saved_iface}",
+                        des_iface.name(),
+                        des_iface.iface_type()
+                    );
+                    consumed_saved_ifaces.insert((
+                        saved_iface.name().to_string(),
+                        saved_iface.iface_type().clone(),
+                    ));
                 }
             }
             let merged_iface = MergedInterface::new(
