@@ -431,3 +431,50 @@ fn test_resolve_mac_identifier_re_resolve_type_change() {
 }
 
 /// Test full merge flow with MAC identifier via MergedNetworkState.
+#[test]
+fn test_merge_flow_with_mac_identifier() {
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: wan0
+            type: ethernet
+            state: up
+            identifier: mac-address
+            mac-address: 00:23:45:67:89:1a
+            ipv4:
+              enabled: true
+              address:
+                - ip: 192.168.1.100
+                  prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth0
+            type: ethernet
+            mac-address: 00:23:45:67:89:1a
+            state: up
+        "#,
+    )
+    .unwrap();
+
+    let merged =
+        MergedNetworkState::new(desired, current, Default::default()).unwrap();
+    let apply_state = merged.gen_state_for_apply();
+
+    // After merge, the interface should be keyed by kernel name
+    let apply_iface = apply_state.ifaces.kernel_ifaces.get("eth0").unwrap();
+    assert_eq!(apply_iface.base_iface().name, "eth0");
+    assert_eq!(apply_iface.base_iface().kernel_iface_name.as_str(), "eth0");
+    assert_eq!(
+        apply_iface.base_iface().profile_name.as_deref(),
+        Some("wan0")
+    );
+    // IP config should have been merged
+    assert!(apply_iface.base_iface().ipv4.is_some());
+}
+
+/// Test that kernel_iface_name() method works on Interface.
