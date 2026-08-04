@@ -74,3 +74,17 @@ fn test_iface_de_loopback() {
     assert!(matches!(iface, Interface::Loopback(_)));
 }
 
+#[test]
+fn test_iface_de_wifi_phy() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: wlan0
+        type: wifi-phy
+        wifi:
+          ssid: Test-WIFI
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::WifiPhy(_)));
+}
+
