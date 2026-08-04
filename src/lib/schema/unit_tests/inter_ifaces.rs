@@ -478,3 +478,59 @@ fn test_merge_flow_with_mac_identifier() {
 }
 
 /// Test that kernel_iface_name() method works on Interface.
+#[test]
+fn test_kernel_iface_name_method() {
+    let mut iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: wan0
+        type: ethernet
+        "#,
+    )
+    .unwrap();
+
+    // Without kernel_iface_name set, should return empty (before sanitize)
+    assert!(iface.kernel_iface_name().is_empty());
+
+    // After setting kernel_iface_name, should return it
+    iface.base_iface_mut().kernel_iface_name = "eth0".to_string();
+    assert_eq!(iface.kernel_iface_name(), "eth0");
+
+    // After resolve, both name and kernel_iface_name are set
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: wan0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:11:22:33:44:55
+        "#,
+    )
+    .unwrap();
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: 00:11:22:33:44:55
+        "#,
+    )
+    .unwrap();
+    desired.resolve_mac_identifier(&current).unwrap();
+    let resolved = desired.kernel_ifaces.get("eth0").unwrap();
+    assert_eq!(resolved.kernel_iface_name(), "eth0");
+    assert_eq!(resolved.name(), "eth0");
+
+    // When identifier is Name, resolve_name_identifier copies name to
+    // kernel_iface_name
+    let mut ifaces: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth1
+          type: ethernet
+        "#,
+    )
+    .unwrap();
+    ifaces.resolve_name_identifier();
+    let resolved = ifaces.kernel_ifaces.get("eth1").unwrap();
+    assert_eq!(resolved.kernel_iface_name(), "eth1");
+}
+
+/// Test that sanitize does NOT override kernel_iface_name for MacAddress
+/// identifier.
