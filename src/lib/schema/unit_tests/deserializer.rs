@@ -211,3 +211,12 @@ fn test_de_option_u8_absent_is_none() {
     assert_eq!(t.v, None);
 }
 
+#[test]
+fn test_de_option_u16_valid() {
+    let t: TestOptionU16 = serde_yaml::from_str("v: 65535").unwrap();
+    assert_eq!(t.v, Some(65535));
+
+    let t: TestOptionU16 = serde_yaml::from_str("v: \"4096\"").unwrap();
+    assert_eq!(t.v, Some(4096));
+}
+
