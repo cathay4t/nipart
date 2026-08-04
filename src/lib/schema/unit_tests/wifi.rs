@@ -86,3 +86,38 @@ fn gen_wifi_phy_state_with_hidden_password() -> NetworkState {
     NetworkState::new_from_yaml(hidden_yaml).unwrap()
 }
 
+#[test]
+fn test_wifi_phy_password_in_hide_secrets() {
+    let mut state = gen_wifi_phy_state_with_password();
+    let secrets = state.hide_secrets();
+
+    let wifi_iface = state
+        .ifaces
+        .get("wlan0", Some(&InterfaceType::WifiPhy))
+        .and_then(|i| {
+            if let Interface::WifiPhy(w) = i {
+                w.wifi.as_ref()
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        wifi_iface.password.as_deref(),
+        Some(NetworkState::HIDE_SECRET_STR)
+    );
+
+    let secrets_wifi = secrets
+        .ifaces
+        .get("wlan0", Some(&InterfaceType::WifiPhy))
+        .and_then(|i| {
+            if let Interface::WifiPhy(w) = i {
+                w.wifi.as_ref()
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(secrets_wifi.password.as_deref(), Some("12345678"));
+}
+
