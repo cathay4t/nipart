@@ -115,3 +115,18 @@ fn test_iface_de_dummy() {
     assert!(matches!(iface, Interface::Dummy(_)));
 }
 
+#[test]
+fn test_iface_de_vlan() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: eth1.100
+        type: vlan
+        vlan:
+          base-iface: eth1
+          id: 100
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::Vlan(_)));
+}
+
