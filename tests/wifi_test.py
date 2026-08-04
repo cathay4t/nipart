@@ -56,3 +56,16 @@ class TestWifi:
                           prefix-length: 24"""))
         assert retry_till_true_or_timeout(5, ping_peer)
 
+    def test_wifi_iface_dhcpv4(self, clean_up, wifi_env):  # noqa: F811
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                  - name: {WIFI_TEST_NIC}
+                    type: wifi-phy
+                    state: up
+                    wifi:
+                      ssid: {TEST_WIFI_SSID}
+                      password: {TEST_WIFI_PSK}
+                    ipv4:
+                      enabled: true
+                      dhcp: true"""))
+        assert retry_till_true_or_timeout(5, ping_peer)
