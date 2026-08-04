@@ -1,41 +1,57 @@
 # Nipart
 
-Nipart is a network management tool written in Rust providing descriptive
-API for network management.
+Nipart is a Rust-based Linux network management tool, offering a memory-safe,
+thread-safe daemon, command-line tool, and API library.
 
-Nipart can work in common daemon-client mode, or one-shot daemon-free mode.
+Nipart's declarative YAML dramatically reduces the complexity of network
+deployment.
 
-The `nipartd` daemon provides complex network management features, such as
-DHCP, conditional network up/down.
+Nipart supports a daemonless mode for swift network configuration with zero
+residual processes or files — purpose-built for cloud-native container
+environments.
 
-The `npt` client by default, send request to daemon for querying and applying
-network changes. With `npt apply <YAML> --no-daemon`, it bypass daemon and
-apply network changes directly to Linux kernel or related daemon(e.g. OVS).
+With a polished plugin interface, Nipart supports custom VPN and third-party
+interface management plugins.
 
-Example YAML connecting to a WIFI network(works both in daemon and no-daemon
-mode):
+## YAML API Example
 
-```yaml
+Example output of `npt show`:
+
+```bash
 ---
 version: 1
 routes:
   config:
   - destination: 0.0.0.0/0
-    next-hop-interface: wlan0
+    next-hop-interface: bond1
     next-hop-address: 192.0.2.1
-    metric: 100
+    table-id: 254
+    metric: 1000
 interfaces:
-- name: wlan0
-  type: wifi-phy
-  wifi:
-    ssid: Test-WIFI
-    password: 12345678
-  ipv4:
-    enabled: true
-    dhcp: false
-    address:
-    - ip: 192.0.2.99
-      prefix-length: 24
+  - name: bond1
+    type: bond
+    state: up
+    ipv4:
+      address:
+      - ip: 192.0.2.252
+        prefix-length: 24
+      dhcp: false
+      enabled: true
+    bond:
+      mode: active-backup
+      ports:
+        - name: port1
+        - name: port2
+  - name: port1
+    type: ethernet
+    state: up
+    mac-address: 00:23:45:67:89:1a
+    identifier: mac-address
+  - name: port2
+    type: ethernet
+    state: up
+    mac-address: 00:23:45:67:89:1b
+    identifier: mac-address
 ```
 
 
