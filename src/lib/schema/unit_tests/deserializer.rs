@@ -293,3 +293,12 @@ fn test_de_option_i64_absent_is_none() {
     assert_eq!(t.v, None);
 }
 
+#[test]
+fn test_de_option_i32_valid() {
+    let t: TestOptionI32 = serde_yaml::from_str("v: -42").unwrap();
+    assert_eq!(t.v, Some(-42));
+
+    let t: TestOptionI32 = serde_yaml::from_str("v: \"-5\"").unwrap();
+    assert_eq!(t.v, Some(-5));
+}
+
