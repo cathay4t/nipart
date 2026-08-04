@@ -105,7 +105,7 @@ impl BaseInterface {
         for_save: &mut Self,
         for_apply: &mut Self,
         for_verify: &mut Self,
-        _merged: &mut Self,
+        merged: &mut Self,
     ) -> Result<(), NipartError> {
         let desired = self;
         // Ignore MAC address if not InterfaceIdentifier::MacAddress
@@ -123,6 +123,13 @@ impl BaseInterface {
             for_verify.mac_address = None;
         }
 
+        if let Some(mac) = for_apply.mac_address.as_mut() {
+            *mac = mac.to_uppercase();
+        }
+        if let Some(mac) = for_apply.permanent_mac_address.as_mut() {
+            *mac = mac.to_uppercase();
+        }
+
         if let Some(ipv4) = for_apply.ipv4.as_mut() {
             ipv4.sanitize(current.and_then(|c| c.ipv4.as_ref()))?;
         }
@@ -133,6 +140,13 @@ impl BaseInterface {
         for_save.ipv6 = for_apply.ipv6.clone();
         for_verify.ipv4 = for_apply.ipv4.clone();
         for_verify.ipv6 = for_apply.ipv6.clone();
+        for_save.mac_address = for_apply.mac_address.clone();
+        for_save.permanent_mac_address = for_apply.permanent_mac_address.clone();
+        for_verify.mac_address = for_apply.mac_address.clone();
+        for_verify.permanent_mac_address =
+            for_apply.permanent_mac_address.clone();
+        merged.mac_address = for_apply.mac_address.clone();
+        merged.permanent_mac_address = for_apply.permanent_mac_address.clone();
 
         if let Some(cur_kernel_iface_name) =
             current.as_ref().map(|c| c.kernel_iface_name.as_str())
