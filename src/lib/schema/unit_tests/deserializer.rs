@@ -302,3 +302,10 @@ fn test_de_option_i32_valid() {
     assert_eq!(t.v, Some(-5));
 }
 
+#[test]
+fn test_de_option_i32_overflow() {
+    let result: Result<TestOptionI32, _> =
+        serde_yaml::from_str("v: 2147483648");
+    assert!(result.is_err());
+}
+
