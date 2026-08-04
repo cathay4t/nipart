@@ -20,3 +20,8 @@ fn test_serialize_is_option_string_empty_empty_str() {
     assert!(is_option_string_empty(&Some(String::new())));
 }
 
+#[test]
+fn test_serialize_is_option_string_empty_non_empty() {
+    assert!(!is_option_string_empty(&Some("hello".to_string())));
+}
+
