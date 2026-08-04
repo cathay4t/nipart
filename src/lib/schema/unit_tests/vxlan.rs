@@ -98,3 +98,26 @@ fn test_sanitize_vxlan_valid_ips() {
     assert!(iface.sanitize(None).is_ok());
 }
 
+#[test]
+fn test_sanitize_vxlan_missing_config() {
+    let mut iface = VxlanInterface {
+        base: BaseInterface {
+            name: "vxlan0".to_string(),
+            iface_type: InterfaceType::Vxlan,
+            state: InterfaceState::Up,
+            ..Default::default()
+        },
+        vxlan: None,
+    };
+    let result = iface.sanitize(None);
+    assert!(result.is_err());
+    if let Err(e) = result {
+        assert_eq!(e.kind(), ErrorKind::InvalidArgument);
+        assert!(
+            e.msg().contains("vxlan` configuration is mandatory"),
+            "Unexpected error: {}",
+            e.msg()
+        );
+    }
+}
+
