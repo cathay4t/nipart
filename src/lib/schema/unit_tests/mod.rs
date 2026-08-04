@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod absent;
+mod auto_connect;
 mod deserializer;
 mod iface;
 mod iface_type;

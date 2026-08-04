@@ -7,7 +7,7 @@
 * [无守护进程模式](features/no_daemon_mode.md)
 * [WIFI](features/wifi.md)
 * [路由](features/route.md)
-* [条件化网络启停](features/trigger.md)
+* [条件化网络启停](features/auto_connect.md)
 * [网络就绪等待](features/wait-online.md)
 * [MAC 地址标识符](features/mac_identifier.md)
 * [Vlan](features/vlan.md)

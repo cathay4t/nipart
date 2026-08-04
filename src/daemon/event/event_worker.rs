@@ -2,8 +2,8 @@
 
 use futures_channel::{mpsc::UnboundedReceiver, oneshot::Sender};
 use nipart::{
-    BaseInterface, ErrorKind, Interface, InterfaceIpv4, InterfaceIpv6,
-    InterfaceLinkEvent, InterfaceState, InterfaceTrigger, InterfaceType,
+    BaseInterface, ErrorKind, Interface, InterfaceAutoConnect, InterfaceIpv4,
+    InterfaceIpv6, InterfaceLinkEvent, InterfaceState, InterfaceType,
     MergedNetworkState, NetworkState, NipartApplyOption, NipartError,
     NipartInterface, NipartNoDaemon, NipartQueryOption, RouteEntry, RouteState,
 };
@@ -148,14 +148,14 @@ impl NipartEventWorker {
             } else if cur_iface
                 .map(|cur_iface| saved_iface.is_match(cur_iface))
                 .unwrap_or(false)
-                && saved_iface.base_iface().trigger.is_none()
+                && saved_iface.base_iface().auto_connect.is_none()
                 && !event.is_delete
             {
                 log::trace!("Pending apply config for {saved_iface}");
                 desired_state.ifaces.push(saved_iface.clone());
             }
 
-            if let Some((new_iface, routes)) = handle_event_trigger(
+            if let Some((new_iface, routes)) = handle_event_auto_connect(
                 &event,
                 saved_iface,
                 &saved_state,
@@ -208,7 +208,7 @@ fn gen_desired_iface_up(
     let mut ret_routes: Vec<RouteEntry> = Vec::new();
     let mut new_iface = saved_iface.clone();
     new_iface.base_iface_mut().state = InterfaceState::Up;
-    new_iface.base_iface_mut().trigger = None;
+    new_iface.base_iface_mut().auto_connect = None;
 
     // Include routes to this interface also
     if !new_iface.is_userspace()
@@ -226,15 +226,15 @@ fn gen_desired_iface_up(
 }
 
 fn gen_desired_iface_down(
-    trigger: &InterfaceTrigger,
+    auto_connect: &InterfaceAutoConnect,
     saved_iface: &Interface,
     saved_state: &NetworkState,
 ) -> (Interface, Vec<RouteEntry>) {
     let mut new_iface = saved_iface.clone();
     let mut ret_routes: Vec<RouteEntry> = Vec::new();
-    // We cannot bring interface down on carrier trigger, otherwise that
-    // interface will never up again.
-    if trigger != &InterfaceTrigger::Carrier
+    // We cannot bring interface down when `auto-connect` is `true`,
+    // otherwise that interface will never up again.
+    if auto_connect != &InterfaceAutoConnect::AutoConnect
         && saved_iface.iface_type() != &InterfaceType::WifiCfg
     {
         new_iface.base_iface_mut().state = if saved_iface.is_virtual() {
@@ -243,7 +243,7 @@ fn gen_desired_iface_down(
             InterfaceState::Down
         };
     }
-    new_iface.base_iface_mut().trigger = None;
+    new_iface.base_iface_mut().auto_connect = None;
     new_iface.base_iface_mut().ipv4 = Some(InterfaceIpv4::new_disabled());
     new_iface.base_iface_mut().ipv6 = Some(InterfaceIpv6::new_disabled());
 
@@ -276,22 +276,22 @@ fn wifi_cfg_to_wifi_phy(
     desired.into()
 }
 
-fn handle_event_trigger(
+fn handle_event_auto_connect(
     event: &InterfaceLinkEvent,
     saved_iface: &Interface,
     saved_state: &NetworkState,
     cur_state: &NetworkState,
 ) -> Option<(Interface, Vec<RouteEntry>)> {
-    let trigger = saved_iface.base_iface().trigger.as_ref()?;
+    let auto_connect = saved_iface.base_iface().auto_connect.as_ref()?;
 
-    match saved_iface.process_trigger(event, &cur_state.ifaces) {
+    match saved_iface.process_auto_connect(event, &cur_state.ifaces) {
         None => {
-            log::trace!("No trigger action for {event}");
+            log::trace!("No auto-connect action for {event}");
             None
         }
         Some(false) => {
             let (new_iface, routes) =
-                gen_desired_iface_down(trigger, saved_iface, saved_state);
+                gen_desired_iface_down(auto_connect, saved_iface, saved_state);
             log::trace!(
                 "Pending apply action to bring {} down",
                 event.iface_name

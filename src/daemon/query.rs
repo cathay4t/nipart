@@ -41,15 +41,15 @@ impl NipartCommander {
                     }
                 }
 
-                // Us trigger stored in conf_manager
+                // Use `auto-connect` stored in conf_manager
                 for (_, mut iface) in saved_state.ifaces.kernel_ifaces.drain() {
                     if let Some(kernel_iface) = net_state
                         .ifaces
                         .kernel_ifaces
                         .get_mut(iface.kernel_iface_name())
                     {
-                        kernel_iface.base_iface_mut().trigger =
-                            iface.base_iface_mut().trigger.take();
+                        kernel_iface.base_iface_mut().auto_connect =
+                            iface.base_iface_mut().auto_connect.take();
                     }
                 }
 

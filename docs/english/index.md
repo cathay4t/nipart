@@ -62,7 +62,7 @@ interfaces:
 * [No Daemon Mode](features/no_daemon_mode.md)
 * [WIFI](features/wifi.md)
 * [Route](features/route.md)
-* [Conditional Network Up/Down](features/trigger.md)
+* [Conditional Network Up/Down](features/auto_connect.md)
 * [Wait Online](features/wait-online.md)
 * [Vlan](features/vlan.md)
 * [VxLAN](features/vxlan.md)

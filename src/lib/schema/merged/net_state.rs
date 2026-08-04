@@ -117,7 +117,7 @@ impl MergedNetworkState {
         for (iface_name, iface_type) in pending_changes {
             log::trace!(
                 "Interface {}/{} is ignored for instant apply because its \
-                 trigger condition is not met yet",
+                 auto-connect condition is not met yet",
                 iface_name,
                 iface_type
             );

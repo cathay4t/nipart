@@ -187,8 +187,8 @@ impl NipartCommander {
                 .push(Interface::WifiCfg(Box::new(*iface.clone())));
         }
 
-        // Up/down trigger is not stored into config manager yet. In order to
-        // pass the verification, we need to pretend the up/down trigger is
+        // The `auto-connect` is not stored into config manager yet. In order
+        // to pass the verification, we need to pretend the `auto-connect` is
         // stored.
         for merged_iface in merged_state.ifaces.iter() {
             if let Some(post_apply_iface) = post_apply_current_state
@@ -196,10 +196,10 @@ impl NipartCommander {
                 .kernel_ifaces
                 .get_mut(merged_iface.merged.kernel_iface_name())
             {
-                post_apply_iface.base_iface_mut().trigger = merged_iface
+                post_apply_iface.base_iface_mut().auto_connect = merged_iface
                     .for_apply
                     .as_ref()
-                    .and_then(|i| i.base_iface().trigger.clone());
+                    .and_then(|i| i.base_iface().auto_connect.clone());
             }
         }
 

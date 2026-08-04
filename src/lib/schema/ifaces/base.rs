@@ -9,8 +9,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ErrorKind, InterfaceIdentifier, InterfaceIpv4, InterfaceIpv6,
-    InterfaceLinkState, InterfaceState, InterfaceTrigger, InterfaceType,
+    ErrorKind, InterfaceAutoConnect, InterfaceIdentifier, InterfaceIpv4,
+    InterfaceIpv6, InterfaceLinkState, InterfaceState, InterfaceType,
     JsonDisplay, NipartError,
 };
 
@@ -48,12 +48,16 @@ pub struct BaseInterface {
     pub iface_index: Option<u32>,
     #[serde(default)]
     pub state: InterfaceState,
-    /// Bring interface up and down base on [InterfaceTrigger] instruction.
-    /// Default value is `[InterfaceTrigger::OneShot]` meaning daemon use
-    /// `state` value to bring interface up/down and never take any auto action
-    /// afterwards.
+    /// Bring interface up and down base on [InterfaceAutoConnect]
+    /// instruction.
+    /// Default value is [InterfaceAutoConnect::AutoConnect] meaning daemon
+    /// automatically activates the interface: for physical interface, the
+    /// config is applied upon carrier up, for virtual interface, the config
+    /// is applied upon boot or apply action.
+    /// When [InterfaceAutoConnect::Manual], the config is only applied upon
+    /// apply action, ignored in boot action.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub trigger: Option<InterfaceTrigger>,
+    pub auto_connect: Option<InterfaceAutoConnect>,
     /// Link carrier state, query only property.
     /// Serialize to `link-state`
     #[serde(skip_serializing_if = "Option::is_none")]
