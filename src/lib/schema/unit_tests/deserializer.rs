@@ -339,3 +339,9 @@ fn test_de_u16_or_string_valid() {
     assert_eq!(t.v, 4096);
 }
 
+#[test]
+fn test_de_u16_or_string_missing_field() {
+    let result: Result<TestRequiredU16, _> = serde_yaml::from_str("{}");
+    assert!(result.is_err());
+}
+
