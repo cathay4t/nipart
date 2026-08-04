@@ -398,3 +398,9 @@ fn test_de_option_number_as_string_signed() {
     assert_eq!(t.v, Some("-5".to_string()));
 }
 
+#[test]
+fn test_de_option_number_as_string_float() {
+    let t: TestOptionNumberAsString = serde_yaml::from_str("v: 1.5").unwrap();
+    assert_eq!(t.v, Some("1.5".to_string()));
+}
+
