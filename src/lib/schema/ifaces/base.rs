@@ -123,11 +123,11 @@ impl BaseInterface {
             for_verify.mac_address = None;
         }
 
-        if let Some(mac) = for_apply.mac_address.as_mut() {
-            *mac = mac.to_uppercase();
+        if let Some(mac) = for_apply.mac_address.as_ref() {
+            for_apply.mac_address = Some(mac.to_uppercase());
         }
-        if let Some(mac) = for_apply.permanent_mac_address.as_mut() {
-            *mac = mac.to_uppercase();
+        if let Some(mac) = for_apply.permanent_mac_address.as_ref() {
+            for_apply.permanent_mac_address = Some(mac.to_uppercase());
         }
 
         if let Some(ipv4) = for_apply.ipv4.as_mut() {
@@ -140,13 +140,14 @@ impl BaseInterface {
         for_save.ipv6 = for_apply.ipv6.clone();
         for_verify.ipv4 = for_apply.ipv4.clone();
         for_verify.ipv6 = for_apply.ipv6.clone();
-        for_save.mac_address = for_apply.mac_address.clone();
-        for_save.permanent_mac_address = for_apply.permanent_mac_address.clone();
-        for_verify.mac_address = for_apply.mac_address.clone();
-        for_verify.permanent_mac_address =
-            for_apply.permanent_mac_address.clone();
-        merged.mac_address = for_apply.mac_address.clone();
-        merged.permanent_mac_address = for_apply.permanent_mac_address.clone();
+        if let Some(mac) = for_apply.mac_address.as_ref() {
+            for_save.mac_address = Some(mac.to_string());
+            for_verify.mac_address = Some(mac.to_string());
+            merged.mac_address = Some(mac.to_string());
+        }
+        if let Some(mac) = merged.permanent_mac_address.as_ref() {
+            merged.permanent_mac_address = Some(mac.to_uppercase());
+        }
 
         if let Some(cur_kernel_iface_name) =
             current.as_ref().map(|c| c.kernel_iface_name.as_str())
