@@ -20,6 +20,10 @@ impl NipartPluginManager {
         })
     }
 
+    pub(crate) async fn shutdown(&self) {
+        self.mgr.shutdown().await
+    }
+
     // TODO: Support redirect logs from plugin to user
     pub(crate) async fn wifi_scan(
         &mut self,

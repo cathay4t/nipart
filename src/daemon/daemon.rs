@@ -142,6 +142,8 @@ impl NipartDaemon {
                 else => break,
             }
         }
+        log::info!("Shutting down workers");
+        self.commander.shutdown().await;
     }
 
     async fn handle_api_connection(

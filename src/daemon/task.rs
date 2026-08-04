@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::sync::Arc;
+
 use futures_channel::{
     mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
     oneshot::{Sender, channel},
 };
 use futures_util::{SinkExt, StreamExt};
 use nipart::{ErrorKind, NipartError};
+use tokio::{sync::Mutex, task::JoinHandle};
 
 pub(crate) trait TaskWorker: Sized + Send {
     type Cmd: std::fmt::Display + Send;
@@ -71,6 +74,7 @@ where
 {
     name: &'static str,
     sender: UnboundedSender<(C, Sender<Result<R, NipartError>>)>,
+    worker_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl<C, R> TaskManager<C, R>
@@ -86,9 +90,28 @@ where
 
         let mut worker = W::new(receiver).await?;
 
-        tokio::spawn(async move { worker.run().await });
+        let handle = tokio::spawn(async move { worker.run().await });
 
-        Ok(Self { name, sender })
+        Ok(Self {
+            name,
+            sender,
+            worker_handle: Arc::new(Mutex::new(Some(handle))),
+        })
+    }
+
+    /// Close the command channel and wait for the worker task to finish,
+    /// ensuring its Drop-based cleanup (e.g. killing plugin child processes)
+    /// runs before the daemon exits.
+    pub(crate) async fn shutdown(&self) {
+        self.sender.close_channel();
+        if let Some(handle) = self.worker_handle.lock().await.take()
+            && let Err(e) = handle.await
+        {
+            log::error!(
+                "Manager {} worker task failed during shutdown: {e}",
+                self.name
+            );
+        }
     }
 
     pub(crate) async fn exec(&mut self, cmd: C) -> Result<R, NipartError> {

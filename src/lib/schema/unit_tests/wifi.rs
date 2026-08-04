@@ -294,7 +294,7 @@ fn test_extract_secrets_only_includes_changed_secrets() {
 
     // Ethernet interface should NOT be in secrets (no secrets to extract)
     assert!(
-        secrets.ifaces.kernel_ifaces.get("red").is_none(),
+        !secrets.ifaces.kernel_ifaces.contains_key("red"),
         "Ethernet interface 'red' should not be in secrets, but found: {:?}",
         secrets.ifaces.kernel_ifaces.get("red")
     );
@@ -333,5 +333,5 @@ fn test_extract_secrets_only_includes_changed_secrets() {
     );
 
     // Ethernet interface should still be in original state
-    assert!(state.ifaces.kernel_ifaces.get("red").is_some());
+    assert!(state.ifaces.kernel_ifaces.contains_key("red"));
 }

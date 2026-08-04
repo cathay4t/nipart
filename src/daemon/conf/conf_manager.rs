@@ -17,6 +17,10 @@ impl NipartConfManager {
         })
     }
 
+    pub(crate) async fn shutdown(&self) {
+        self.mgr.shutdown().await
+    }
+
     /// Override saved state
     pub(crate) async fn save_state(
         &mut self,

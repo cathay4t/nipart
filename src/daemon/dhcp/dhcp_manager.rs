@@ -23,6 +23,10 @@ impl NipartDhcpV4Manager {
         })
     }
 
+    pub(crate) async fn shutdown(&self) {
+        self.mgr.shutdown().await
+    }
+
     /// Fill the NetworkState with DHCP states
     pub(crate) async fn fill_dhcp_states(
         &mut self,

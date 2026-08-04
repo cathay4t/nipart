@@ -214,6 +214,7 @@ impl Drop for NipartPluginWorker {
     fn drop(&mut self) {
         for mut child in self.children.drain(..) {
             let _ = child.kill();
+            let _ = child.wait();
         }
         for plugin in self.plugins.values() {
             let _ = std::fs::remove_file(&plugin.socket_path);

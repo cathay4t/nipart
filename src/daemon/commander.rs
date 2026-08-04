@@ -50,6 +50,17 @@ impl NipartCommander {
         Ok(ret)
     }
 
+    /// Shut down all task workers, waiting for each to finish so that
+    /// their Drop-based cleanup (e.g. killing plugin child processes)
+    /// completes before the daemon exits.
+    pub(crate) async fn shutdown(&self) {
+        self.plugin_manager.shutdown().await;
+        self.monitor_manager.shutdown().await;
+        self.dhcpv4_manager.shutdown().await;
+        self.conf_manager.shutdown().await;
+        self.event_manager.shutdown().await;
+    }
+
     // Workflow:
     //  1. Query current network state.
     //  2. For each non-virtual interface mentioned in saved state, if udev has
