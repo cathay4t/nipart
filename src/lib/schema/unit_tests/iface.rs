@@ -157,3 +157,15 @@ fn test_iface_de_bond() {
     assert!(matches!(iface, Interface::Bond(_)));
 }
 
+#[test]
+fn test_iface_de_linux_bridge() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: br0
+        type: linux-bridge
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::LinuxBridge(_)));
+}
+
