@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::InterfaceType;
+
+#[test]
+fn test_iface_type_de_kebab_case_names() {
+    for (yaml_str, expected) in [
+        ("bond", InterfaceType::Bond),
+        ("linux-bridge", InterfaceType::LinuxBridge),
+        ("dummy", InterfaceType::Dummy),
+        ("ethernet", InterfaceType::Ethernet),
+        ("hsr", InterfaceType::Hsr),
+        ("loopback", InterfaceType::Loopback),
+        ("mac-vlan", InterfaceType::MacVlan),
+        ("mac-vtap", InterfaceType::MacVtap),
+        ("ovs-bridge", InterfaceType::OvsBridge),
+        ("ovs-interface", InterfaceType::OvsInterface),
+        ("veth", InterfaceType::Veth),
+        ("vlan", InterfaceType::Vlan),
+        ("vrf", InterfaceType::Vrf),
+        ("vxlan", InterfaceType::Vxlan),
+        ("infiniband", InterfaceType::InfiniBand),
+        ("tun", InterfaceType::Tun),
+        ("macsec", InterfaceType::MacSec),
+        ("ipsec", InterfaceType::Ipsec),
+        ("xfrm", InterfaceType::Xfrm),
+        ("ipvlan", InterfaceType::IpVlan),
+        ("wifi-phy", InterfaceType::WifiPhy),
+        ("wifi-cfg", InterfaceType::WifiCfg),
+        ("wireguard", InterfaceType::Wireguard),
+    ] {
+        let t: InterfaceType = serde_yaml::from_str(yaml_str).unwrap();
+        assert_eq!(t, expected, "type string {yaml_str}");
+    }
+}
+
