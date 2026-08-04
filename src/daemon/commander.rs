@@ -23,8 +23,11 @@ const BOOTUP_NIC_CHECK_MAX_COUNT: u64 = 30;
 const BOOTUP_NIC_CHECK_MAX_QUICK: u64 = 10;
 // During quick retry, we retry every 0.5 second.
 const BOOTUP_NIC_CHECK_INTERVAL_MS_QUICK: u64 = 500;
-// After quick retry, we only retry every 10 seconds.
-const BOOTUP_NIC_CHECK_INTERVAL_SEC_SLOW: u64 = 10;
+// After quick retry, we only retry every 2 seconds: the 10 seconds
+// granularity used before meant a NIC that became udev-initialized right
+// after a poll would not be configured until up to 10 seconds later,
+// delaying the whole boot apply (and thus wait-online) on wired NICs.
+const BOOTUP_NIC_CHECK_INTERVAL_SEC_SLOW: u64 = 2;
 
 /// Commander manages all the task managers.
 /// This struct is safe to clone and move to threads

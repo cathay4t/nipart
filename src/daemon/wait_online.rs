@@ -6,7 +6,12 @@ use nipart::{
 
 use super::{commander::NipartCommander, daemon::DAEMON_IS_ONLINE};
 
-const MAX_RETRY_WAIT: u64 = 8;
+// The wait-online polling backs off after the first 5 seconds, but the
+// backoff also delays noticing that the daemon has become online: with a
+// max of 8 seconds, `npt wait-online` could linger up to 8 seconds after
+// the network was already configured. Cap it at 2 seconds so a wired NIC
+// that comes up quickly is reported within ~2 seconds of going online.
+const MAX_RETRY_WAIT: u64 = 2;
 
 impl NipartCommander {
     pub(crate) async fn try_set_daemon_online(
@@ -137,23 +142,23 @@ mod tests {
 
     #[test]
     fn test_backoff_capped_by_max_retry_wait() {
-        // 2^(6-5)=2, 2^(7-5)=4, 2^(8-5)=8, then capped at 8 forever.
+        // 2^(6-5)=2, then capped at 2 forever.
         assert_eq!(
             next_retry_wait(6, BUDGET, Duration::from_secs(6)),
             Duration::from_secs(2)
         );
         assert_eq!(
             next_retry_wait(7, BUDGET, Duration::from_secs(8)),
-            Duration::from_secs(4)
+            Duration::from_secs(2)
         );
         assert_eq!(
             next_retry_wait(8, BUDGET, Duration::from_secs(12)),
-            Duration::from_secs(8)
+            Duration::from_secs(2)
         );
         // A huge retry count must not overflow or exceed the cap.
         assert_eq!(
             next_retry_wait(100, BUDGET, Duration::ZERO),
-            Duration::from_secs(8)
+            Duration::from_secs(2)
         );
     }
 
@@ -163,7 +168,7 @@ mod tests {
         // left.
         assert_eq!(
             next_retry_wait(9, BUDGET, Duration::from_secs(25)),
-            Duration::from_secs(5)
+            Duration::from_secs(2)
         );
         assert_eq!(
             next_retry_wait(9, BUDGET, Duration::from_secs(29)),
@@ -181,7 +186,7 @@ mod tests {
         let long_budget = Duration::from_secs(300);
         assert_eq!(
             next_retry_wait(9, long_budget, Duration::from_secs(20)),
-            Duration::from_secs(8)
+            Duration::from_secs(2)
         );
     }
 }
