@@ -53,3 +53,13 @@ fn test_new_from_yaml_invalid_syntax() {
     assert!(e.msg.contains("Invalid YAML string"));
 }
 
+#[test]
+fn test_new_from_yaml_unknown_field() {
+    let result = NetworkState::new_from_yaml(
+        r#"---
+        bogus-field: true
+        "#,
+    );
+    assert!(result.is_err());
+}
+
