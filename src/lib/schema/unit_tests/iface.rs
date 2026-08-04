@@ -88,3 +88,18 @@ fn test_iface_de_wifi_phy() {
     assert!(matches!(iface, Interface::WifiPhy(_)));
 }
 
+#[test]
+fn test_iface_de_wifi_cfg() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: Test-WIFI
+        type: wifi-cfg
+        wifi:
+          ssid: Test-WIFI
+          base-iface: wlan0
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::WifiCfg(_)));
+}
+
