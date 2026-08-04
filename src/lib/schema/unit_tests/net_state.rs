@@ -63,3 +63,11 @@ fn test_new_from_yaml_unknown_field() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_new_from_yaml_empty_string() {
+    let state = NetworkState::new_from_yaml("").unwrap();
+    assert!(state.is_empty());
+    assert!(state.ifaces.is_empty());
+    assert!(state.routes.is_empty());
+    assert!(state.wait_online.is_none());
+}
