@@ -103,3 +103,15 @@ fn test_iface_de_wifi_cfg() {
     assert!(matches!(iface, Interface::WifiCfg(_)));
 }
 
+#[test]
+fn test_iface_de_dummy() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: dummy0
+        type: dummy
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::Dummy(_)));
+}
+
