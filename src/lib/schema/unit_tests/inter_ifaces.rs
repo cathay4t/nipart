@@ -95,3 +95,39 @@ fn test_resolve_mac_identifier_no_match() {
 }
 
 /// Test re-resolution when profile_name already set and NIC name changed.
+#[test]
+fn test_resolve_mac_identifier_re_resolve() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:23:45:67:89:1a
+          profile-name: wan0
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: enp0s3
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    desired.resolve_mac_identifier(&current).unwrap();
+
+    // name should be updated to new kernel name
+    assert!(desired.kernel_ifaces.contains_key("enp0s3"));
+    assert!(!desired.kernel_ifaces.contains_key("eth0"));
+    let resolved = desired.kernel_ifaces.get("enp0s3").unwrap();
+    assert_eq!(resolved.base_iface().name, "enp0s3");
+    // kernel_iface_name should be updated to new kernel name
+    assert_eq!(resolved.base_iface().kernel_iface_name.as_str(), "enp0s3");
+    // profile_name should be preserved
+    assert_eq!(resolved.base_iface().profile_name.as_deref(), Some("wan0"));
+}
+
+/// Test that absent interfaces are skipped.
