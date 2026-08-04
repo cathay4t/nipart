@@ -222,3 +222,25 @@ fn test_iface_de_absent_strips_extra_properties() {
     assert_eq!(base.ipv4, None);
 }
 
+#[test]
+fn test_iface_de_absent_keeps_identifier_properties() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: eth1
+        type: ethernet
+        state: absent
+        identifier: mac-address
+        mac-address: DE:AD:BE:EF:00:01
+        kernel-iface-name: eth1
+        profile-name: prof1
+        "#,
+    )
+    .unwrap();
+
+    let base = iface.base_iface();
+    assert_eq!(base.state, InterfaceState::Absent);
+    assert_eq!(base.identifier, Some(InterfaceIdentifier::MacAddress));
+    assert_eq!(base.mac_address.as_deref(), Some("DE:AD:BE:EF:00:01"));
+    assert_eq!(base.kernel_iface_name, "eth1");
+    assert_eq!(base.profile_name.as_deref(), Some("prof1"));
+}
