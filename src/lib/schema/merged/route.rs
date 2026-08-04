@@ -54,6 +54,11 @@ impl MergedRoutes {
             for rt in rts {
                 let mut rt = rt.clone();
                 rt.sanitize()?;
+                if let Some(ref iface) = rt.next_hop_iface {
+                    rt.next_hop_iface = Some(
+                        merged_ifaces.resolve_route_next_hop_iface(iface)?,
+                    );
+                }
                 desired_routes.push(rt);
             }
         }
@@ -217,6 +222,16 @@ impl MergedRoutes {
 
         let route_changed_ifaces: Vec<String> =
             changed_ifaces.iter().map(|i| i.to_string()).collect();
+
+        if let Some(ref mut config_rts) = desired.config {
+            for rt in config_rts.iter_mut() {
+                if let Some(ref iface) = rt.next_hop_iface {
+                    rt.next_hop_iface = Some(
+                        merged_ifaces.resolve_route_next_hop_iface(iface)?,
+                    );
+                }
+            }
+        }
 
         let mut ret = Self {
             merged,

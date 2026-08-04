@@ -336,10 +336,10 @@ fn should_retain_route(
     };
 
     // The route is explicitly presented in the api_desired_state
-    if let Some(api_routes) = &api_desired_state.routes.config {
-        if api_routes.as_slice().iter().any(|r| route.is_match(r)) {
-            return true;
-        }
+    if let Some(api_routes) = &api_desired_state.routes.config
+        && api_routes.as_slice().iter().any(|r| route.is_match(r))
+    {
+        return true;
     }
 
     for iface in api_desired_state.ifaces.iter() {

@@ -5,3 +5,4 @@ __pycache__
 tags
 docs/book
 AGENTS.md
+*.swp

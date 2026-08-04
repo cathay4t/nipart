@@ -19,7 +19,7 @@ use serde::{
 
 use crate::{
     ErrorKind, Interface, InterfaceIdentifier, InterfaceType,
-    JsonDisplayHideSecrets, NipartError, NipartInterface,
+    JsonDisplayHideSecrets, NipartError, NipartInterface, schema::IfaceSearch,
 };
 
 /// Represent a list of [Interface].
@@ -206,7 +206,7 @@ impl Interfaces {
         &mut self,
         current: &Self,
     ) -> Result<(), NipartError> {
-        // Track (old_name_in_desired, new_interface) for replacement
+        let search = IfaceSearch::new(&Interfaces::default(), current);
         let mut changed_ifaces: Vec<(String, Interface)> = Vec::new();
         for iface in self.iter().filter(|i| {
             (!i.is_absent())
@@ -220,7 +220,6 @@ impl Interfaces {
                 if iface.base_iface().profile_name.is_some()
                     && !iface.base_iface().kernel_iface_name.is_empty()
                 {
-                    // Already resolved, skip
                     continue;
                 }
                 return Err(NipartError::new(
@@ -232,84 +231,41 @@ impl Interfaces {
                     ),
                 ));
             };
-            let mac_address = mac_address.to_ascii_uppercase();
             let logical_name = iface.base_iface().name.clone();
-            let mut has_match = false;
-            // Try permanent_mac_address first, fallback to mac_address
-            for use_permanent_addr in [true, false] {
-                for cur_iface in current.kernel_ifaces.values() {
-                    if !iface.iface_type().is_unknown()
-                        && iface.iface_type() != cur_iface.iface_type()
-                    {
-                        continue;
-                    }
-                    let cur_mac_addr = if use_permanent_addr {
-                        cur_iface
-                            .base_iface()
-                            .permanent_mac_address
-                            .as_deref()
-                            .map(|m| m.to_ascii_uppercase())
-                    } else {
-                        cur_iface
-                            .base_iface()
-                            .mac_address
-                            .as_deref()
-                            .map(|m| m.to_ascii_uppercase())
-                    };
-                    if cur_mac_addr.as_deref() == Some(&mac_address) {
-                        let kernel_name = cur_iface.name();
-                        if iface.base_iface().name == kernel_name
-                            && iface.base_iface().profile_name.is_some()
-                            && !iface.base_iface().kernel_iface_name.is_empty()
-                        {
-                            // Already resolved correctly, skip
-                            has_match = true;
-                            break;
-                        }
-                        let mut new_iface = if iface.iface_type().is_unknown() {
-                            let mut new_iface_value =
-                                serde_json::to_value(iface)?;
-                            if let Some(obj) = new_iface_value.as_object_mut() {
-                                obj.insert(
-                                    "type".to_string(),
-                                    serde_json::Value::String(
-                                        cur_iface.iface_type().to_string(),
-                                    ),
-                                );
-                            }
-                            Interface::deserialize(new_iface_value)?
-                        } else {
-                            iface.clone()
-                        };
-                        if new_iface.base_iface().profile_name.is_none() {
-                            new_iface.base_iface_mut().profile_name =
-                                Some(logical_name.clone());
-                        }
-                        new_iface.base_iface_mut().name =
-                            kernel_name.to_string();
-                        new_iface.base_iface_mut().kernel_iface_name =
-                            kernel_name.to_string();
-                        changed_ifaces.push((logical_name.clone(), new_iface));
-                        has_match = true;
-                        break;
-                    }
-                }
-                if has_match {
-                    break;
-                }
+            let kernel_name = search
+                .search_iface(InterfaceIdentifier::MacAddress, mac_address)?;
+            let kernel_name = kernel_name.to_string();
+
+            if iface.base_iface().name == kernel_name
+                && iface.base_iface().profile_name.is_some()
+                && !iface.base_iface().kernel_iface_name.is_empty()
+            {
+                continue;
             }
 
-            if !has_match {
-                return Err(NipartError::new(
-                    ErrorKind::InvalidArgument,
-                    format!(
-                        "Desired interface {} has `identifier: mac-address` \
-                         with MAC address {mac_address}, but no interface is \
-                         holding that MAC address",
-                        logical_name
-                    ),
-                ));
+            let cur_iface = current.kernel_ifaces.get(&kernel_name).unwrap();
+
+            let mut new_iface = if iface.iface_type().is_unknown() {
+                let mut new_iface_value = serde_json::to_value(iface)?;
+                if let Some(obj) = new_iface_value.as_object_mut() {
+                    obj.insert(
+                        "type".to_string(),
+                        serde_json::Value::String(
+                            cur_iface.iface_type().to_string(),
+                        ),
+                    );
+                }
+                Interface::deserialize(new_iface_value)?
+            } else {
+                iface.clone()
+            };
+            if new_iface.base_iface().profile_name.is_none() {
+                new_iface.base_iface_mut().profile_name =
+                    Some(logical_name.clone());
             }
+            new_iface.base_iface_mut().name = kernel_name.clone();
+            new_iface.base_iface_mut().kernel_iface_name = kernel_name;
+            changed_ifaces.push((logical_name.clone(), new_iface));
         }
         for (old_name, new_iface) in changed_ifaces {
             self.kernel_ifaces.remove(&old_name);
@@ -327,6 +283,7 @@ impl Interfaces {
         &mut self,
         current: &Self,
     ) -> Result<(), NipartError> {
+        let search = IfaceSearch::new(&Interfaces::default(), current);
         let mut changed_ifaces: Vec<Interface> = Vec::new();
         for iface in self.iter().filter(|i| {
             (!i.is_absent())
@@ -335,7 +292,7 @@ impl Interfaces {
                 && i.base_iface().profile_name.is_none()
         }) {
             let mac_address = match iface.base_iface().mac_address.as_deref() {
-                Some(m) => m.to_ascii_uppercase(),
+                Some(m) => m,
                 None => {
                     return Err(NipartError::new(
                         ErrorKind::InvalidArgument,
@@ -347,69 +304,29 @@ impl Interfaces {
                     ));
                 }
             };
-            let mut has_match = false;
-            // Try permanent_mac_address first, fallback to mac_address
-            for use_permanent_addr in [true, false] {
-                for cur_iface in current.kernel_ifaces.values() {
-                    if !iface.iface_type().is_unknown()
-                        && iface.iface_type() != cur_iface.iface_type()
-                    {
-                        continue;
-                    }
-                    let cur_mac_addr = if use_permanent_addr {
-                        cur_iface
-                            .base_iface()
-                            .permanent_mac_address
-                            .as_deref()
-                            .map(|m| m.to_ascii_uppercase())
-                    } else {
-                        cur_iface
-                            .base_iface()
-                            .mac_address
-                            .as_deref()
-                            .map(|m| m.to_ascii_uppercase())
-                    };
-                    if cur_mac_addr.as_deref() == Some(&mac_address) {
-                        let mut new_iface = if iface.iface_type().is_unknown() {
-                            let mut new_iface_value =
-                                serde_json::to_value(iface)?;
-                            if let Some(obj) = new_iface_value.as_object_mut() {
-                                obj.insert(
-                                    "type".to_string(),
-                                    serde_json::Value::String(
-                                        cur_iface.iface_type().to_string(),
-                                    ),
-                                );
-                            }
-                            Interface::deserialize(new_iface_value)?
-                        } else {
-                            iface.clone()
-                        };
-                        new_iface.base_iface_mut().profile_name =
-                            Some(iface.base_iface().name.clone());
-                        new_iface.base_iface_mut().name =
-                            cur_iface.name().to_string();
-                        changed_ifaces.push(new_iface);
-                        has_match = true;
-                        break;
-                    }
-                }
-                if has_match {
-                    break;
-                }
-            }
+            let kernel_name = search
+                .search_iface(InterfaceIdentifier::MacAddress, mac_address)?;
+            let kernel_name = kernel_name.to_string();
+            let cur_iface = current.kernel_ifaces.get(&kernel_name).unwrap();
 
-            if !has_match {
-                return Err(NipartError::new(
-                    ErrorKind::InvalidArgument,
-                    format!(
-                        "Desired interface {} has `identifier: mac-address` \
-                         with MAC address {mac_address}, but no interface is \
-                         holding that MAC address",
-                        iface.name()
-                    ),
-                ));
-            }
+            let mut new_iface = if iface.iface_type().is_unknown() {
+                let mut new_iface_value = serde_json::to_value(iface)?;
+                if let Some(obj) = new_iface_value.as_object_mut() {
+                    obj.insert(
+                        "type".to_string(),
+                        serde_json::Value::String(
+                            cur_iface.iface_type().to_string(),
+                        ),
+                    );
+                }
+                Interface::deserialize(new_iface_value)?
+            } else {
+                iface.clone()
+            };
+            new_iface.base_iface_mut().profile_name =
+                Some(iface.base_iface().name.clone());
+            new_iface.base_iface_mut().name = kernel_name;
+            changed_ifaces.push(new_iface);
         }
         for changed_iface in changed_ifaces {
             if let Some(profile_name) =
