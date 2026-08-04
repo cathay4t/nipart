@@ -101,3 +101,33 @@ def test_ovs_bridge_query(ovs_bridge):
     ), f"ovs-interface entry mismatch: {iface_entry}"
 
 
+def test_ovs_bridge_create_and_remove():
+    exec_cmd(["ovs-vsctl", "add-br", TEST_OVS_BR], check=False)
+    try:
+        assert _wait_for_ovs_bridge(
+            TEST_OVS_BR, RETRY_TIMEOUT
+        ), f"Timed out waiting for {TEST_OVS_BR} after creation"
+        br_ifaces = _get_ifaces_by_name(TEST_OVS_BR)
+        assert len(br_ifaces) == 2
+    finally:
+        exec_cmd(["ovs-vsctl", "del-br", TEST_OVS_BR], check=False)
+
+    assert _wait_for_ovs_bridge_gone(
+        TEST_OVS_BR, RETRY_TIMEOUT
+    ), f"Timed out waiting for {TEST_OVS_BR} to be removed"
+
+
+@pytest.fixture
+def no_nipart_ovs_plugin():
+    exec_cmd(["mount", "-o", "bind", "/dev/null", OVS_PLUGIN_BIN])
+    yield
+    exec_cmd(["umount", OVS_PLUGIN_BIN], check=False)
+
+
+@pytest.fixture
+def no_ovs_db_socket():
+    exec_cmd(["mount", "-o", "bind", "/dev/null", OVS_DB_SOCK])
+    yield
+    exec_cmd(["umount", OVS_DB_SOCK], check=False)
+
+
