@@ -400,3 +400,34 @@ fn test_resolve_mac_identifier_duplicate_mac_across_nics() {
 }
 
 /// Test re-resolution when NIC renamed (eth0 -> eth1).
+#[test]
+fn test_resolve_mac_identifier_re_resolve_type_change() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:23:45:67:89:1a
+          profile-name: wan0
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth1
+          type: ethernet
+          mac-address: 00:23:45:67:89:1a
+        "#,
+    )
+    .unwrap();
+
+    desired.resolve_mac_identifier(&current).unwrap();
+
+    let resolved = desired.kernel_ifaces.get("eth1").unwrap();
+    assert_eq!(resolved.base_iface().name, "eth1");
+    assert_eq!(resolved.base_iface().kernel_iface_name.as_str(), "eth1");
+    assert_eq!(resolved.base_iface().profile_name.as_deref(), Some("wan0"));
+}
+
+/// Test full merge flow with MAC identifier via MergedNetworkState.
