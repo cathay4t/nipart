@@ -60,3 +60,22 @@ def test_create_and_remove_bond(bond_over_dummy):
     )
 
 
+def test_bond_change_mode(bond_over_dummy):
+    state = load_yaml(f"""---
+        interfaces:
+          - name: {TEST_BOND_NIC}
+            type: bond
+            state: up
+            bond:
+              mode: 0
+        """)
+    nipart.apply(state)
+    bond_iface = show_only(TEST_BOND_NIC)
+    assert bond_iface["state"] == "up"
+    assert bond_iface["bond"]["mode"] == "balance-rr"
+    assert state_match(
+        [{"name": TEST_PORT1}, {"name": TEST_PORT2}],
+        bond_iface["bond"]["ports"],
+    )
+
+
