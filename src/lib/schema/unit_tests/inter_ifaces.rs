@@ -1980,3 +1980,121 @@ fn test_saved_mac_identifier_ifaces_kept_when_not_desired() {
         );
     }
 }
+
+/// A partial apply (e.g. a link event) must not remove the routes of
+/// interfaces it does not touch, even when those interfaces are currently
+/// IP-disabled (e.g. a DHCP interface whose lease has not been re-acquired
+/// after daemon restart). Regression test for routes dropped on boot.
+#[test]
+fn test_partial_apply_keeps_routes_of_untouched_iface() {
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              address:
+                - ip: 192.0.2.2
+                  prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              address:
+                - ip: 192.0.2.2
+                  prefix-length: 24
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: false
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth1
+              next-hop-address: 198.51.100.254
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let merged =
+        MergedNetworkState::new(desired, current, None, Default::default())
+            .unwrap();
+
+    assert!(
+        merged
+            .routes
+            .changed_routes
+            .iter()
+            .filter(|rt| rt.is_absent())
+            .all(|rt| rt.next_hop_iface.as_deref() != Some("eth1")),
+        "Partial apply must not mark routes of untouched interface eth1 \
+         absent, got changed routes: {:?}",
+        merged.routes.changed_routes
+    );
+}
+
+/// When the apply itself disables IP on a desired interface, its current
+/// routes must still be removed (intended behavior kept).
+#[test]
+fn test_apply_ip_disabled_iface_removes_its_routes() {
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: false
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              address:
+                - ip: 198.51.100.2
+                  prefix-length: 24
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth1
+              next-hop-address: 198.51.100.254
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let merged =
+        MergedNetworkState::new(desired, current, None, Default::default())
+            .unwrap();
+
+    assert!(
+        merged
+            .routes
+            .changed_routes
+            .iter()
+            .filter(|rt| rt.is_absent())
+            .any(|rt| rt.next_hop_iface.as_deref() == Some("eth1")),
+        "Apply disabling IP on eth1 must remove eth1 routes, got changed \
+         routes: {:?}",
+        merged.routes.changed_routes
+    );
+}

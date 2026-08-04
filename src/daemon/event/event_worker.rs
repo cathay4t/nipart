@@ -3,9 +3,10 @@
 use futures_channel::{mpsc::UnboundedReceiver, oneshot::Sender};
 use nipart::{
     BaseInterface, ErrorKind, Interface, InterfaceAutoConnect, InterfaceIpv4,
-    InterfaceIpv6, InterfaceLinkEvent, InterfaceState, InterfaceType,
-    MergedNetworkState, NetworkState, NipartApplyOption, NipartError,
-    NipartInterface, NipartNoDaemon, NipartQueryOption, RouteEntry, RouteState,
+    InterfaceIpv6, InterfaceLinkEvent, InterfaceLinkState, InterfaceState,
+    InterfaceType, MergedNetworkState, NetworkState, NipartApplyOption,
+    NipartError, NipartInterface, NipartNoDaemon, NipartQueryOption,
+    RouteEntry, RouteState,
 };
 
 use super::super::{commander::NipartCommander, task::TaskWorker};
@@ -102,6 +103,23 @@ impl NipartEventWorker {
 
         // Kernel event is always for kernel interface
         let cur_iface = cur_state.ifaces.kernel_ifaces.get(&event.iface_name);
+
+        // Skip stale link-down events: when the interface's current link
+        // state is already up, a queued down event is a leftover of an
+        // earlier transient state (e.g. the device driver initialization
+        // burst at boot, or the monitor emitting the link dump on resume).
+        // Processing it would purge the IP and routes that the boot apply
+        // has just configured, and the later up event does not reliably
+        // restore them (the partial merge may drop routes of interfaces
+        // that are temporarily IP-disabled).
+        if is_stale_link_down_event(&event, cur_iface) {
+            log::trace!(
+                "Ignoring stale link-down event {event}: current link state \
+                 is up"
+            );
+            return Ok(());
+        }
+
         if let Some(cur_iface) = cur_iface {
             log::trace!("Current interface state: {cur_iface}");
 
@@ -138,23 +156,16 @@ impl NipartEventWorker {
         }
 
         for saved_iface in saved_state.ifaces.iter() {
-            if event.iface_type == InterfaceType::WifiPhy {
-                if let Some(new_iface) =
+            if event.iface_type == InterfaceType::WifiPhy
+                && let Some(new_iface) =
                     handle_wifi_phy_event(&event, saved_iface)
-                {
-                    log::trace!("Pending apply config: {new_iface}");
-                    desired_state.ifaces.push(new_iface);
-                }
-            } else if cur_iface
-                .map(|cur_iface| saved_iface.is_match(cur_iface))
-                .unwrap_or(false)
-                && saved_iface.base_iface().auto_connect.is_none()
-                && !event.is_delete
             {
-                log::trace!("Pending apply config for {saved_iface}");
-                desired_state.ifaces.push(saved_iface.clone());
+                log::trace!("Pending apply config: {new_iface}");
+                desired_state.ifaces.push(new_iface);
             }
 
+            // `auto-connect` defaults to `true` when not defined, hence
+            // interfaces without `auto-connect` are handled here as well.
             if let Some((new_iface, routes)) = handle_event_auto_connect(
                 &event,
                 saved_iface,
@@ -201,17 +212,33 @@ fn is_route_matching_iface(rt: &RouteEntry, iface: &Interface) -> bool {
     }
 }
 
-fn gen_desired_iface_up(
+/// Whether a link-down event is stale, i.e. the interface's current kernel
+/// link state is already up so the down event can only be a leftover of an
+/// earlier transient state (e.g. the boot-time device initialization burst
+/// or the monitor link dump emitted on resume).
+///
+/// Stale down events must not be processed: doing so purges the IP and
+/// routes that the boot apply has just configured, and the subsequent up
+/// event does not reliably restore them.
+fn is_stale_link_down_event(
+    event: &InterfaceLinkEvent,
+    cur_iface: Option<&Interface>,
+) -> bool {
+    !event.is_up
+        && !event.is_delete
+        && cur_iface.is_some_and(|iface| {
+            iface.base_iface().link_state == Some(InterfaceLinkState::Up)
+        })
+}
+
+/// Gather saved routes whose next-hop is the given saved interface.
+fn gen_routes_for_iface_up(
     saved_iface: &Interface,
     saved_state: &NetworkState,
-) -> (Interface, Vec<RouteEntry>) {
+) -> Vec<RouteEntry> {
     let mut ret_routes: Vec<RouteEntry> = Vec::new();
-    let mut new_iface = saved_iface.clone();
-    new_iface.base_iface_mut().state = InterfaceState::Up;
-    new_iface.base_iface_mut().auto_connect = None;
-
     // Include routes to this interface also
-    if !new_iface.is_userspace()
+    if !saved_iface.is_userspace()
         && let Some(config_rts) = saved_state.routes.config.as_ref()
     {
         for rt in config_rts
@@ -221,6 +248,18 @@ fn gen_desired_iface_up(
             ret_routes.push(rt.clone());
         }
     }
+    ret_routes
+}
+
+fn gen_desired_iface_up(
+    saved_iface: &Interface,
+    saved_state: &NetworkState,
+) -> (Interface, Vec<RouteEntry>) {
+    let mut new_iface = saved_iface.clone();
+    new_iface.base_iface_mut().state = InterfaceState::Up;
+    new_iface.base_iface_mut().auto_connect = None;
+
+    let ret_routes = gen_routes_for_iface_up(saved_iface, saved_state);
 
     (new_iface, ret_routes)
 }
@@ -282,7 +321,14 @@ fn handle_event_auto_connect(
     saved_state: &NetworkState,
     cur_state: &NetworkState,
 ) -> Option<(Interface, Vec<RouteEntry>)> {
-    let auto_connect = saved_iface.base_iface().auto_connect.as_ref()?;
+    // `auto-connect` defaults to `true` when not defined.
+    let auto_connect = saved_iface
+        .base_iface()
+        .auto_connect
+        .clone()
+        .unwrap_or_default();
+    let mut saved_iface = saved_iface.clone();
+    saved_iface.base_iface_mut().auto_connect = Some(auto_connect.clone());
 
     match saved_iface.process_auto_connect(event, &cur_state.ifaces) {
         None => {
@@ -290,8 +336,11 @@ fn handle_event_auto_connect(
             None
         }
         Some(false) => {
-            let (new_iface, routes) =
-                gen_desired_iface_down(auto_connect, saved_iface, saved_state);
+            let (new_iface, routes) = gen_desired_iface_down(
+                &auto_connect,
+                &saved_iface,
+                saved_state,
+            );
             log::trace!(
                 "Pending apply action to bring {} down",
                 event.iface_name
@@ -303,7 +352,7 @@ fn handle_event_auto_connect(
         }
         Some(true) => {
             let (new_iface, routes) =
-                gen_desired_iface_up(saved_iface, saved_state);
+                gen_desired_iface_up(&saved_iface, saved_state);
             log::trace!(
                 "Pending apply action to bring {} up",
                 event.iface_name
@@ -366,5 +415,259 @@ fn handle_wifi_phy_event(
         }
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::SystemTime;
+
+    use nipart::{
+        Interface, InterfaceIpv4, InterfaceLinkEvent, InterfaceState,
+        InterfaceType, NetworkState, NipartInterface,
+    };
+
+    use super::{
+        gen_routes_for_iface_up, handle_event_auto_connect,
+        is_route_matching_iface, is_stale_link_down_event,
+    };
+
+    fn gen_saved_state() -> NetworkState {
+        serde_yaml::from_str(
+            r#"---
+version: 1
+routes:
+  config:
+  - destination: 0.0.0.0/0
+    next-hop-interface: cunet
+    next-hop-address: 10.3.221.254
+    metric: 100
+    table-id: 254
+  - destination: 172.25.80.0/24
+    next-hop-interface: enp3s0u2u1u2
+    next-hop-address: 10.255.0.254
+    metric: 103
+    table-id: 254
+  - destination: 172.25.75.0/24
+    next-hop-interface: yellow
+    next-hop-address: 10.255.20.254
+    metric: 102
+    table-id: 254
+  - destination: 172.25.81.0/24
+    next-hop-interface: yellow
+    next-hop-address: 10.255.20.254
+    metric: 104
+    table-id: 254
+  - destination: 172.17.0.0/16
+    next-hop-interface: cn
+    next-hop-address: 172.17.7.1
+    metric: 100
+    table-id: 254
+interfaces:
+- name: cunet
+  type: ethernet
+  kernel-iface-name: enp3s0u2u1u3c2
+  state: up
+  profile-name: cunet
+  identifier: mac-address
+  mac-address: 9C:69:D3:73:03:AC
+- name: red
+  type: ethernet
+  kernel-iface-name: enp3s0u2u1u2
+  state: up
+  profile-name: red
+  identifier: mac-address
+  mac-address: 3C:E1:A1:BF:D8:4D
+- name: yellow
+  type: ethernet
+  kernel-iface-name: enp3s0u2u1u4
+  state: up
+  profile-name: yellow
+  identifier: mac-address
+  mac-address: F8:C9:03:00:1E:FC
+"#,
+        )
+        .unwrap()
+    }
+
+    fn find_iface<'a>(state: &'a NetworkState, name: &str) -> &'a Interface {
+        state.ifaces.iter().find(|i| i.name() == name).unwrap()
+    }
+
+    #[test]
+    fn test_route_matching_by_profile_name() {
+        let state = gen_saved_state();
+        let cunet = find_iface(&state, "cunet");
+        let routes = gen_routes_for_iface_up(cunet, &state);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].destination.as_deref(), Some("0.0.0.0/0"));
+    }
+
+    #[test]
+    fn test_route_matching_by_kernel_iface_name() {
+        let state = gen_saved_state();
+        let red = find_iface(&state, "red");
+        let routes = gen_routes_for_iface_up(red, &state);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].destination.as_deref(), Some("172.25.80.0/24"));
+    }
+
+    #[test]
+    fn test_route_matching_by_iface_name() {
+        let state = gen_saved_state();
+        let yellow = find_iface(&state, "yellow");
+        let routes = gen_routes_for_iface_up(yellow, &state);
+        let mut dests: Vec<_> = routes
+            .iter()
+            .filter_map(|rt| rt.destination.as_deref())
+            .collect();
+        dests.sort_unstable();
+        assert_eq!(dests, vec!["172.25.75.0/24", "172.25.81.0/24"]);
+    }
+
+    #[test]
+    fn test_route_not_matching_iface_excluded() {
+        let state = gen_saved_state();
+        for name in ["cunet", "red", "yellow"] {
+            let iface = find_iface(&state, name);
+            assert!(
+                !gen_routes_for_iface_up(iface, &state)
+                    .iter()
+                    .any(
+                        |rt| rt.destination.as_deref() == Some("172.17.0.0/16")
+                    ),
+                "{name} should not pick up the cn route"
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_route_matching_iface() {
+        let state = gen_saved_state();
+        let cunet = find_iface(&state, "cunet");
+        let cn_rt = state
+            .routes
+            .config
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|rt| rt.destination.as_deref() == Some("172.17.0.0/16"))
+            .unwrap();
+        assert!(!is_route_matching_iface(cn_rt, cunet));
+    }
+
+    fn gen_link_event(iface_name: &str, is_up: bool) -> InterfaceLinkEvent {
+        InterfaceLinkEvent {
+            iface_name: iface_name.to_string(),
+            iface_index: 18,
+            iface_type: InterfaceType::Ethernet,
+            is_up,
+            is_delete: false,
+            time_stamp: SystemTime::now(),
+            ssid: None,
+        }
+    }
+
+    #[test]
+    fn test_stale_link_down_event_skipped_when_current_up() {
+        // A down event processed while the interface is already up is a
+        // leftover of the boot-time transient state: it must be skipped so
+        // the boot apply result (IP + routes) is not torn down.
+        let saved_state = gen_saved_state();
+        let cunet = find_iface(&saved_state, "cunet");
+        let mut cur_iface = cunet.clone();
+        cur_iface.base_iface_mut().link_state =
+            Some(nipart::InterfaceLinkState::Up);
+
+        assert!(is_stale_link_down_event(
+            &gen_link_event("enp3s0u2u1u3c2", false),
+            Some(&cur_iface)
+        ));
+    }
+
+    #[test]
+    fn test_link_down_event_processed_when_current_down() {
+        // A real link-down event: the current kernel link state is down, so
+        // the event reflects a genuine state change and must be processed
+        // (purge IP and routes).
+        let saved_state = gen_saved_state();
+        let cunet = find_iface(&saved_state, "cunet");
+        let mut cur_iface = cunet.clone();
+        cur_iface.base_iface_mut().link_state =
+            Some(nipart::InterfaceLinkState::Down);
+
+        assert!(!is_stale_link_down_event(
+            &gen_link_event("enp3s0u2u1u3c2", false),
+            Some(&cur_iface)
+        ));
+    }
+
+    #[test]
+    fn test_up_event_never_stale() {
+        // Up events always go through: they are the mechanism to (re)apply
+        // the saved config, and skipping them would break hotplug (e.g.
+        // wifi association or veth re-plug).
+        let saved_state = gen_saved_state();
+        let cunet = find_iface(&saved_state, "cunet");
+        let mut cur_iface = cunet.clone();
+        cur_iface.base_iface_mut().link_state =
+            Some(nipart::InterfaceLinkState::Up);
+
+        assert!(!is_stale_link_down_event(
+            &gen_link_event("enp3s0u2u1u3c2", true),
+            Some(&cur_iface)
+        ));
+        // Interface already gone: delete event is handled separately.
+        assert!(!is_stale_link_down_event(
+            &gen_link_event("enp3s0u2u1u3c2", false),
+            None
+        ));
+    }
+
+    #[test]
+    fn test_auto_connect_defaults_to_true_on_link_up() {
+        // Interface without `auto-connect` defaults to `auto-connect: true`,
+        // hence link up should apply the interface along with its routes.
+        let saved_state = gen_saved_state();
+        let cunet = find_iface(&saved_state, "cunet");
+        let event = gen_link_event("enp3s0u2u1u3c2", true);
+
+        let (new_iface, routes) = handle_event_auto_connect(
+            &event,
+            cunet,
+            &saved_state,
+            &NetworkState::default(),
+        )
+        .expect("auto-connect defaults to true");
+
+        assert_eq!(new_iface.name(), "cunet");
+        assert_eq!(new_iface.base_iface().state, InterfaceState::Up);
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].destination.as_deref(), Some("0.0.0.0/0"));
+    }
+
+    #[test]
+    fn test_auto_connect_defaults_to_true_on_link_down() {
+        // On link down, the default auto-connect purges IP and marks routes
+        // absent, but does not bring the interface down.
+        let saved_state = gen_saved_state();
+        let cunet = find_iface(&saved_state, "cunet");
+        let event = gen_link_event("enp3s0u2u1u3c2", false);
+
+        let (new_iface, routes) = handle_event_auto_connect(
+            &event,
+            cunet,
+            &saved_state,
+            &NetworkState::default(),
+        )
+        .expect("auto-connect defaults to true");
+
+        assert_eq!(new_iface.base_iface().state, InterfaceState::Up);
+        assert_eq!(
+            new_iface.base_iface().ipv4,
+            Some(InterfaceIpv4::new_disabled())
+        );
+        assert_eq!(routes.len(), 1);
+        assert!(routes[0].is_absent());
     }
 }

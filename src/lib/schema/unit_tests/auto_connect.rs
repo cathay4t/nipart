@@ -242,3 +242,106 @@ fn test_old_trigger_property_rejected() {
     );
     assert!(result.is_err());
 }
+
+#[test]
+fn test_process_auto_connect_match_by_mac_when_name_changed() {
+    // A MAC-identified interface should still match the link event via MAC
+    // address even when the kernel interface name changed after replug.
+    let saved = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: red
+            type: ethernet
+            state: up
+            identifier: mac-address
+            mac-address: 3C:E1:A1:BF:D8:4D
+            auto-connect: true
+        "#,
+    )
+    .unwrap();
+    let iface = saved.ifaces.kernel_ifaces.get("red").unwrap();
+
+    let current = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: enp3s0u2u1u2
+            type: ethernet
+            state: up
+            mac-address: 3C:E1:A1:BF:D8:4D
+        "#,
+    )
+    .unwrap();
+
+    let event = crate::InterfaceLinkEvent::new(
+        "enp3s0u2u1u2".to_string(),
+        18,
+        crate::InterfaceType::Ethernet,
+        true,
+        None,
+    );
+    assert_eq!(
+        iface.process_auto_connect(&event, &current.ifaces),
+        Some(true)
+    );
+}
+
+#[test]
+fn test_process_auto_connect_no_match_when_mac_differs() {
+    let saved = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: red
+            type: ethernet
+            state: up
+            identifier: mac-address
+            mac-address: 3C:E1:A1:BF:D8:4D
+            auto-connect: true
+        "#,
+    )
+    .unwrap();
+    let iface = saved.ifaces.kernel_ifaces.get("red").unwrap();
+
+    let current = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: enp3s0u2u1u2
+            type: ethernet
+            state: up
+            mac-address: 00:11:22:33:44:55
+        "#,
+    )
+    .unwrap();
+
+    let event = crate::InterfaceLinkEvent::new(
+        "enp3s0u2u1u2".to_string(),
+        18,
+        crate::InterfaceType::Ethernet,
+        true,
+        None,
+    );
+    assert_eq!(iface.process_auto_connect(&event, &current.ifaces), None);
+}
+
+#[test]
+fn test_process_auto_connect_manual_ignores_event() {
+    let saved = NetworkState::new_from_yaml(
+        r#"---
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            auto-connect: false
+        "#,
+    )
+    .unwrap();
+    let iface = saved.ifaces.kernel_ifaces.get("eth1").unwrap();
+
+    let event = crate::InterfaceLinkEvent::new(
+        "eth1".to_string(),
+        18,
+        crate::InterfaceType::Ethernet,
+        true,
+        None,
+    );
+    assert_eq!(iface.process_auto_connect(&event, &saved.ifaces), None);
+}
