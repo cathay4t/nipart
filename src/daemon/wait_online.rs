@@ -6,7 +6,7 @@ use nipart::{
 
 use super::{commander::NipartCommander, daemon::DAEMON_IS_ONLINE};
 
-const MAX_RETRY_WAIT: u64 = 32;
+const MAX_RETRY_WAIT: u64 = 8;
 
 impl NipartCommander {
     pub(crate) async fn try_set_daemon_online(
@@ -57,7 +57,7 @@ impl NipartCommander {
             .timeout_sec;
         match tokio::time::timeout(
             std::time::Duration::from_secs(timeout_sec.into()),
-            self._wait_online(Some(&saved_state)),
+            self._wait_online(Some(&saved_state), timeout_sec),
         )
         .await
         {
@@ -72,22 +72,116 @@ impl NipartCommander {
     async fn _wait_online(
         &mut self,
         saved_state: Option<&NetworkState>,
+        timeout_sec: u32,
     ) -> Result<(), NipartError> {
         let mut retry_count = 0;
-        // We retry with interval 1 seconds for first 5 seconds for quick boot
-        // support, afterwards we wait with exponential increasing time with
-        // max 32 seconds.
+        let started = std::time::Instant::now();
+        let budget = std::time::Duration::from_secs(timeout_sec.into());
+        // Retry every 1 second for the first 5 seconds for quick boot
+        // support, afterwards back off exponentially, but never sleep past
+        // the timeout budget: the network may only become online late in
+        // the window (e.g. wifi scan + connect + DHCP), so keep polling
+        // until the deadline instead of scheduling the next poll beyond it
+        // and giving up without ever observing the online state.
         while !DAEMON_IS_ONLINE.initialized() {
             self.try_set_daemon_online(saved_state, None).await?;
-            let retry_wait = if retry_count > 5 {
-                2u64.pow(retry_count - 5).clamp(1, MAX_RETRY_WAIT)
-            } else {
-                1
-            };
-            tokio::time::sleep(std::time::Duration::from_secs(retry_wait))
-                .await;
+            let wait = next_retry_wait(retry_count, budget, started.elapsed());
+            tokio::time::sleep(wait).await;
             retry_count += 1;
         }
         Ok(())
+    }
+}
+
+/// Compute how long to wait before the next online-state poll.
+///
+/// Polls every 1 second for the first 5 retries, then backs off
+/// exponentially up to [MAX_RETRY_WAIT], but never schedules a poll beyond
+/// the remaining `budget` so the loop keeps polling until the deadline.
+fn next_retry_wait(
+    retry_count: u64,
+    budget: std::time::Duration,
+    elapsed: std::time::Duration,
+) -> std::time::Duration {
+    let retry_wait = if retry_count > 5 {
+        // `ilog2()` bounds the exponent so the shift can never overflow,
+        // and anything >= MAX_RETRY_WAIT is clamped anyway.
+        let exp = (retry_count - 5).min(MAX_RETRY_WAIT.ilog2() as u64) as u32;
+        2u64.pow(exp).clamp(1, MAX_RETRY_WAIT)
+    } else {
+        1
+    };
+    let remain = budget.saturating_sub(elapsed);
+    std::time::Duration::from_secs(retry_wait).min(remain)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::next_retry_wait;
+
+    const BUDGET: Duration = Duration::from_secs(30);
+
+    #[test]
+    fn test_quick_phase_waits_one_second() {
+        assert_eq!(
+            next_retry_wait(0, BUDGET, Duration::ZERO),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            next_retry_wait(5, BUDGET, Duration::from_secs(5)),
+            Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn test_backoff_capped_by_max_retry_wait() {
+        // 2^(6-5)=2, 2^(7-5)=4, 2^(8-5)=8, then capped at 8 forever.
+        assert_eq!(
+            next_retry_wait(6, BUDGET, Duration::from_secs(6)),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            next_retry_wait(7, BUDGET, Duration::from_secs(8)),
+            Duration::from_secs(4)
+        );
+        assert_eq!(
+            next_retry_wait(8, BUDGET, Duration::from_secs(12)),
+            Duration::from_secs(8)
+        );
+        // A huge retry count must not overflow or exceed the cap.
+        assert_eq!(
+            next_retry_wait(100, BUDGET, Duration::ZERO),
+            Duration::from_secs(8)
+        );
+    }
+
+    #[test]
+    fn test_wait_never_passes_budget_deadline() {
+        // Remaining budget is smaller than the backoff: sleep only what is
+        // left.
+        assert_eq!(
+            next_retry_wait(9, BUDGET, Duration::from_secs(25)),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            next_retry_wait(9, BUDGET, Duration::from_secs(29)),
+            Duration::from_secs(1)
+        );
+        // Budget exhausted: poll again immediately (outer timer gives up).
+        assert_eq!(
+            next_retry_wait(9, BUDGET, Duration::from_secs(30)),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn test_long_budget_allows_full_backoff() {
+        let long_budget = Duration::from_secs(300);
+        assert_eq!(
+            next_retry_wait(9, long_budget, Duration::from_secs(20)),
+            Duration::from_secs(8)
+        );
     }
 }
