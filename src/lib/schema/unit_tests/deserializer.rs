@@ -324,3 +324,9 @@ fn test_de_u8_or_string_valid() {
     assert_eq!(t.v, 200);
 }
 
+#[test]
+fn test_de_u8_or_string_missing_field() {
+    let result: Result<TestRequiredU8, _> = serde_yaml::from_str("{}");
+    assert!(result.is_err());
+}
+
