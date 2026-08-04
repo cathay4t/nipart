@@ -140,3 +140,9 @@ fn test_de_option_bool_integer() {
     assert_eq!(t.v, Some(false));
 }
 
+#[test]
+fn test_de_option_bool_absent_is_none() {
+    let t: TestOptionBool = serde_yaml::from_str("{}").unwrap();
+    assert_eq!(t.v, None);
+}
+
