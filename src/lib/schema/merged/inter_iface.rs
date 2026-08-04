@@ -57,6 +57,38 @@ impl MergedInterfaces {
     }
 
     pub fn push(&mut self, merged_iface: MergedInterface) {
+        // Saved-only interfaces (not defined in desired state nor present
+        // in current state) have an empty `merged` (Unknown default), so
+        // the merged-based accessors below carry no identity and all of
+        // them would collide on one key, leaving only the last one and
+        // purging the rest of the stored config on save. Use the saved
+        // config from `for_save` to determine the correct map and key,
+        // falling back to `profile-name` (then `name`) when the stored
+        // `kernel-iface-name` is empty (e.g. `identifier: mac-address`).
+        if merged_iface.name().is_empty()
+            && let Some(saved) = merged_iface.for_save.as_ref()
+        {
+            if saved.is_userspace() {
+                let key =
+                    (saved.name().to_string(), saved.iface_type().clone());
+                self.insert_order.push(key.clone());
+                self.user_ifaces.insert(key, merged_iface);
+            } else {
+                let base = saved.base_iface();
+                let iface_name = if !base.kernel_iface_name.is_empty() {
+                    base.kernel_iface_name.clone()
+                } else if let Some(profile_name) = base.profile_name.as_ref() {
+                    profile_name.clone()
+                } else {
+                    base.name.clone()
+                };
+                let iface_type = saved.iface_type().clone();
+                self.insert_order.push((iface_name.clone(), iface_type));
+                self.kernel_ifaces.insert(iface_name, merged_iface);
+            }
+            return;
+        }
+
         if merged_iface.is_userspace() {
             self.insert_order.push((
                 merged_iface.name().to_string(),
