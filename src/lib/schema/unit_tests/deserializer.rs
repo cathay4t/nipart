@@ -263,3 +263,11 @@ fn test_de_option_i64_native_integer() {
     assert_eq!(t.v, Some(-42));
 }
 
+#[test]
+fn test_de_option_i64_unsigned_overflow() {
+    // i64::MAX + 1, parsed as u64 by YAML, cannot fit into i64
+    let result: Result<TestOptionI64, _> =
+        serde_yaml::from_str("v: 9223372036854775808");
+    assert!(result.is_err());
+}
+
