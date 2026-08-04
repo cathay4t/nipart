@@ -18,9 +18,7 @@ use crate::{
 const MAX_SCAN_RETRY: usize = 5;
 
 impl NipartWpaConn {
-    pub(crate) async fn apply(
-        ifaces: &[&Interface],
-    ) -> Result<(), NipartError> {
+    pub(crate) async fn apply(ifaces: &[Interface]) -> Result<(), NipartError> {
         let dbus = NipartWpaSupDbus::new().await?;
 
         let mut ssids_to_delete: HashSet<&str> = HashSet::new();
