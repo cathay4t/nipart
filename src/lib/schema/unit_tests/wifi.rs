@@ -264,3 +264,74 @@ fn test_wifi_cfg_password_in_gen_diff() {
         .unwrap();
     assert_eq!(diff_wifi.password.as_deref(), Some("12345678"));
 }
+
+#[test]
+fn test_extract_secrets_only_includes_changed_secrets() {
+    let plain_yaml = r"---
+        interfaces:
+          - name: wlan0
+            type: wifi-phy
+            wifi:
+              ssid: Test-WIFI
+              password: '12345678'
+            ipv4:
+              enabled: true
+              dhcp: false
+              address:
+                - ip: 192.0.2.99
+                  prefix-length: 24
+          - name: red
+            type: ethernet
+            state: up
+            mac-address: 3C:E1:A1:BF:D8:4D
+            mtu: 1500
+            ipv4:
+              enabled: true
+              dhcp: true
+              auto-gateway: false";
+    let mut state = NetworkState::new_from_yaml(plain_yaml).unwrap();
+    let secrets = state.extract_secrets().unwrap();
+
+    // Ethernet interface should NOT be in secrets (no secrets to extract)
+    assert!(
+        secrets.ifaces.kernel_ifaces.get("red").is_none(),
+        "Ethernet interface 'red' should not be in secrets, but found: {:?}",
+        secrets.ifaces.kernel_ifaces.get("red")
+    );
+
+    // WiFi should have password in secrets
+    let secrets_wifi = secrets
+        .ifaces
+        .kernel_ifaces
+        .get("wlan0")
+        .and_then(|i| {
+            if let Interface::WifiPhy(w) = i {
+                w.wifi.as_ref()
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(secrets_wifi.password.as_deref(), Some("12345678"));
+
+    // Original state should have hidden password
+    let hidden_wifi = state
+        .ifaces
+        .kernel_ifaces
+        .get("wlan0")
+        .and_then(|i| {
+            if let Interface::WifiPhy(w) = i {
+                w.wifi.as_ref()
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        hidden_wifi.password.as_deref(),
+        Some(NetworkState::HIDE_SECRET_STR)
+    );
+
+    // Ethernet interface should still be in original state
+    assert!(state.ifaces.kernel_ifaces.get("red").is_some());
+}

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    BaseInterface, InterfaceIdentifier, InterfaceIpv4, InterfaceState,
-    InterfaceType, Interfaces, MergedInterfaces, MergedNetworkState,
-    NetworkState, NipartInterface,
+    BaseInterface, InterfaceIdentifier, InterfaceIpv4, InterfaceIpv6,
+    InterfaceState, InterfaceType, Interfaces, MergedInterfaces,
+    MergedNetworkState, NetworkState, NipartInterface,
 };
 
 /// Test basic MAC address matching with MAC provided.
@@ -1114,4 +1114,97 @@ fn test_bond_gen_state_for_apply_and_save() {
         eth2_saved.base_iface().profile_name.as_deref(),
         Some("port2")
     );
+}
+
+/// Test that BaseInterface::sanitize preserves for_save IP config when
+/// for_apply has no IP changes (the diff omitted ipv4/ipv6 because the
+/// current kernel state already matches).
+#[test]
+fn test_sanitize_preserves_ip_when_for_apply_has_no_ip() {
+    let mut base =
+        BaseInterface::new("eth0".to_string(), InterfaceType::Ethernet);
+    base.ipv4 = Some(InterfaceIpv4 {
+        enabled: Some(true),
+        dhcp: Some(true),
+        auto_gateway: Some(false),
+        ..Default::default()
+    });
+    base.ipv6 = Some(InterfaceIpv6 {
+        enabled: Some(true),
+        dhcp: Some(true),
+        autoconf: Some(false),
+        ..Default::default()
+    });
+
+    // for_save has the full desired IP config
+    let mut for_save = base.clone();
+    let mut for_verify = base.clone();
+    let mut merged = base.clone();
+
+    // for_apply has NO ipv4/ipv6 (diff produced no IP changes)
+    let mut for_apply = base.clone();
+    for_apply.ipv4 = None;
+    for_apply.ipv6 = None;
+
+    base.sanitize(
+        None,
+        &mut for_save,
+        &mut for_apply,
+        &mut for_verify,
+        &mut merged,
+    )
+    .unwrap();
+
+    // for_save should still have the original IP config
+    let ipv4 = for_save.ipv4.as_ref().expect("ipv4 should be preserved");
+    assert_eq!(ipv4.enabled, Some(true));
+    assert_eq!(ipv4.dhcp, Some(true));
+    assert_eq!(ipv4.auto_gateway, Some(false));
+
+    let ipv6 = for_save.ipv6.as_ref().expect("ipv6 should be preserved");
+    assert_eq!(ipv6.enabled, Some(true));
+    assert_eq!(ipv6.dhcp, Some(true));
+    assert_eq!(ipv6.autoconf, Some(false));
+}
+
+/// Test that BaseInterface::sanitize still copies sanitized IP from for_apply
+/// to for_save when for_apply has IP changes.
+#[test]
+fn test_sanitize_copies_ip_when_for_apply_has_ip_changes() {
+    let mut base =
+        BaseInterface::new("eth0".to_string(), InterfaceType::Ethernet);
+    base.ipv4 = Some(InterfaceIpv4 {
+        enabled: Some(true),
+        dhcp: Some(true),
+        auto_gateway: Some(false),
+        ..Default::default()
+    });
+
+    // for_apply has ipv4 with a different config (e.g. dhcp changed to false)
+    let mut for_save = base.clone();
+    let mut for_verify = base.clone();
+    let mut merged = base.clone();
+    let mut for_apply = base.clone();
+    for_apply.ipv4 = Some(InterfaceIpv4 {
+        enabled: Some(true),
+        dhcp: Some(false),
+        ..Default::default()
+    });
+
+    base.sanitize(
+        None,
+        &mut for_save,
+        &mut for_apply,
+        &mut for_verify,
+        &mut merged,
+    )
+    .unwrap();
+
+    // for_save should have the sanitized ipv4 from for_apply
+    // dhcp: false → after sanitize, auto_gateway is set to None
+    let ipv4 = for_save.ipv4.as_ref().expect("ipv4 should be present");
+    assert_eq!(ipv4.enabled, Some(true));
+    assert_eq!(ipv4.dhcp, Some(false));
+    // auto_gateway should be None because dhcp != Some(true)
+    assert_eq!(ipv4.auto_gateway, None);
 }
