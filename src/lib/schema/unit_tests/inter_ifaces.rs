@@ -479,10 +479,8 @@ fn test_merge_flow_with_mac_identifier() {
 /// Test that sanitize converts MAC addresses to uppercase.
 #[test]
 fn test_sanitize_mac_address_to_uppercase() {
-    let mut base = BaseInterface::new(
-        "eth0".to_string(),
-        InterfaceType::Ethernet,
-    );
+    let mut base =
+        BaseInterface::new("eth0".to_string(), InterfaceType::Ethernet);
     base.identifier = Some(InterfaceIdentifier::MacAddress);
     base.mac_address = Some("00:23:45:67:89:1b".to_string());
     base.permanent_mac_address = Some("aa:bb:cc:dd:ee:ff".to_string());
@@ -501,22 +499,10 @@ fn test_sanitize_mac_address_to_uppercase() {
     )
     .unwrap();
 
-    assert_eq!(
-        for_apply.mac_address.as_deref(),
-        Some("00:23:45:67:89:1B")
-    );
-    assert_eq!(
-        for_verify.mac_address.as_deref(),
-        Some("00:23:45:67:89:1B")
-    );
-    assert_eq!(
-        for_save.mac_address.as_deref(),
-        Some("00:23:45:67:89:1B")
-    );
-    assert_eq!(
-        merged.mac_address.as_deref(),
-        Some("00:23:45:67:89:1B")
-    );
+    assert_eq!(for_apply.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
+    assert_eq!(for_verify.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
+    assert_eq!(for_save.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
+    assert_eq!(merged.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
     assert_eq!(
         for_apply.permanent_mac_address.as_deref(),
         Some("AA:BB:CC:DD:EE:FF")
