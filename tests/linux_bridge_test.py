@@ -174,3 +174,39 @@ def test_modify_linux_bridge_stp_options(linux_bridge_over_dummy):
     )
 
 
+def test_modify_linux_bridge_port_options(linux_bridge_over_dummy):
+    nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_BRIDGE_NIC}
+                type: linux-bridge
+                bridge:
+                  ports:
+                    - name: {TEST_PORT2}
+                      stp-hairpin-mode: false
+                      stp-priority: 2
+                      stp-path-cost: 20
+                    - name: {TEST_PORT1}
+                      stp-hairpin-mode: false
+                      stp-priority: 1
+                      stp-path-cost: 10
+            """))
+    linux_bridge_iface = show_only(TEST_BRIDGE_NIC)
+    assert state_match(
+        [
+            {
+                "name": TEST_PORT1,
+                "stp-priority": 1,
+                "stp-path-cost": 10,
+                "stp-hairpin-mode": False,
+            },
+            {
+                "name": TEST_PORT2,
+                "stp-priority": 2,
+                "stp-path-cost": 20,
+                "stp-hairpin-mode": False,
+            },
+        ],
+        linux_bridge_iface["bridge"]["ports"],
+    )
+
+
