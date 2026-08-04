@@ -392,3 +392,9 @@ fn test_de_option_number_as_string_unsigned() {
     assert_eq!(t.v, Some("42".to_string()));
 }
 
+#[test]
+fn test_de_option_number_as_string_signed() {
+    let t: TestOptionNumberAsString = serde_yaml::from_str("v: -5").unwrap();
+    assert_eq!(t.v, Some("-5".to_string()));
+}
+
