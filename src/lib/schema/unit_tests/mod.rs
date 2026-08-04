@@ -5,5 +5,6 @@ mod deserializer;
 mod inter_ifaces;
 mod ip;
 mod loopback;
+mod serializer;
 mod vxlan;
 mod wifi;
