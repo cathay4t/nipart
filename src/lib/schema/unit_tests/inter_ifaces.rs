@@ -320,3 +320,40 @@ fn test_resolve_mac_identifier_multiple_ifaces() {
 }
 
 /// Test that permanent_mac_address is preferred over mac_address when matching.
+#[test]
+fn test_resolve_mac_identifier_perm_mac_preferred() {
+    let mut desired: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: wan0
+          type: ethernet
+          identifier: mac-address
+          mac-address: 00:11:22:33:44:55
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = serde_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          mac-address: ff:ff:ff:ff:ff:ff
+          permanent-mac-address: 00:11:22:33:44:55
+        - name: eth1
+          type: ethernet
+          mac-address: 00:11:22:33:44:55
+        "#,
+    )
+    .unwrap();
+
+    desired.resolve_mac_identifier(&current).unwrap();
+
+    // Should match eth0 (permanent_mac_address match) not eth1
+    assert!(desired.kernel_ifaces.contains_key("eth0"));
+    assert!(!desired.kernel_ifaces.contains_key("eth1"));
+    let resolved = desired.kernel_ifaces.get("eth0").unwrap();
+    assert_eq!(resolved.base_iface().name, "eth0");
+    assert_eq!(resolved.base_iface().kernel_iface_name.as_str(), "eth0");
+    assert_eq!(resolved.base_iface().profile_name.as_deref(), Some("wan0"));
+}
+
+/// Test when multiple NICs hold the same MAC address (first match wins).
