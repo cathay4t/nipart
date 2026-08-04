@@ -503,18 +503,10 @@ fn test_sanitize_mac_address_to_uppercase() {
     assert_eq!(for_verify.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
     assert_eq!(for_save.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
     assert_eq!(merged.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
-    assert_eq!(
-        for_apply.permanent_mac_address.as_deref(),
-        Some("AA:BB:CC:DD:EE:FF")
-    );
-    assert_eq!(
-        for_verify.permanent_mac_address.as_deref(),
-        Some("AA:BB:CC:DD:EE:FF")
-    );
-    assert_eq!(
-        for_save.permanent_mac_address.as_deref(),
-        Some("AA:BB:CC:DD:EE:FF")
-    );
+    // permanent_mac_address is query-only, only merged should hold it
+    assert_eq!(for_apply.permanent_mac_address.as_deref(), None);
+    assert_eq!(for_save.permanent_mac_address.as_deref(), None);
+    assert_eq!(for_verify.permanent_mac_address.as_deref(), None);
     assert_eq!(
         merged.permanent_mac_address.as_deref(),
         Some("AA:BB:CC:DD:EE:FF")
