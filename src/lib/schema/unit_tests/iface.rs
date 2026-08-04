@@ -50,3 +50,15 @@ fn test_iface_de_ovs_bridge() {
     assert!(matches!(iface, Interface::OvsBridge(_)));
 }
 
+#[test]
+fn test_iface_de_ovs_interface() {
+    let iface: Interface = serde_yaml::from_str(
+        r#"---
+        name: ovs0
+        type: ovs-interface
+        "#,
+    )
+    .unwrap();
+    assert!(matches!(iface, Interface::OvsInterface(_)));
+}
+
