@@ -404,3 +404,9 @@ fn test_de_option_number_as_string_float() {
     assert_eq!(t.v, Some("1.5".to_string()));
 }
 
+#[test]
+fn test_de_option_number_as_string_absent_is_none() {
+    let t: TestOptionNumberAsString = serde_yaml::from_str("{}").unwrap();
+    assert_eq!(t.v, None);
+}
+
