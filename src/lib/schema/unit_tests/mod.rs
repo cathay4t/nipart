@@ -2,6 +2,7 @@
 
 mod absent;
 mod deserializer;
+mod iface;
 mod inter_ifaces;
 mod ip;
 mod loopback;
