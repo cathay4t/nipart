@@ -232,3 +232,12 @@ fn test_de_option_u16_absent_is_none() {
     assert_eq!(t.v, None);
 }
 
+#[test]
+fn test_de_option_u32_valid() {
+    let t: TestOptionU32 = serde_yaml::from_str("v: 4294967295").unwrap();
+    assert_eq!(t.v, Some(u32::MAX));
+
+    let t: TestOptionU32 = serde_yaml::from_str("v: \"4096\"").unwrap();
+    assert_eq!(t.v, Some(4096));
+}
+
