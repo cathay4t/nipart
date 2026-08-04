@@ -165,3 +165,9 @@ fn test_de_option_u64_native_integer() {
     assert_eq!(t.v, Some(42));
 }
 
+#[test]
+fn test_de_option_u64_decimal_string() {
+    let t: TestOptionU64 = serde_yaml::from_str("v: \"42\"").unwrap();
+    assert_eq!(t.v, Some(42));
+}
+
