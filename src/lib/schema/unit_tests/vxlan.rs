@@ -86,3 +86,15 @@ fn test_sanitize_vxlan_invalid_local() {
     }
 }
 
+#[test]
+fn test_sanitize_vxlan_valid_ips() {
+    let mut iface = vxlan_iface_with_config(VxlanConfig {
+        id: Some(100),
+        base_iface: Some("eth0".to_string()),
+        remote: Some("192.0.2.1".to_string()),
+        local: Some("192.0.2.2".to_string()),
+        ..Default::default()
+    });
+    assert!(iface.sanitize(None).is_ok());
+}
+
