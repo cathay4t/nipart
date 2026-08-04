@@ -226,3 +226,9 @@ fn test_de_option_u16_overflow() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_de_option_u16_absent_is_none() {
+    let t: TestOptionU16 = serde_yaml::from_str("{}").unwrap();
+    assert_eq!(t.v, None);
+}
+
