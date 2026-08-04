@@ -49,6 +49,16 @@ impl MergedRoutes {
         desired.remove_ignored_routes();
         desired.validate()?;
 
+        let ifaces_with_dhcpv4_enabled: Vec<&str> = merged_ifaces
+            .kernel_ifaces
+            .values()
+            .filter(|i| {
+                i.merged.base_iface().ipv4.as_ref().and_then(|ip| ip.dhcp)
+                    == Some(true)
+            })
+            .map(|i| i.merged.kernel_iface_name())
+            .collect();
+
         let mut desired_routes = Vec::new();
         if let Some(rts) = desired.config.as_ref() {
             for rt in rts {
@@ -58,6 +68,23 @@ impl MergedRoutes {
                     rt.next_hop_iface = Some(
                         merged_ifaces.resolve_route_next_hop_iface(iface)?,
                     );
+                }
+                // Kernel rejects IPv4 route with gateway defined before
+                // DHCPv4 lease acquired on next hop interface, hence we
+                // set onlink flag to bypass kernel gateway validation.
+                if rt.onlink.is_none()
+                    && !rt.is_absent()
+                    && !rt.is_ipv6()
+                    && rt.next_hop_addr.is_some()
+                    && rt.next_hop_iface.as_deref().is_some_and(|i| {
+                        ifaces_with_dhcpv4_enabled.contains(&i)
+                    })
+                {
+                    log::debug!(
+                        "Setting onlink flag for route '{rt}' as its next \
+                         hop interface is DHCPv4 enabled"
+                    );
+                    rt.onlink = Some(true);
                 }
                 desired_routes.push(rt);
             }

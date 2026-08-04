@@ -28,7 +28,7 @@ sleep 1;
 
 function build {
     cd $PROJECT_PATH
-    if [ ! -e $PROJECT_PATH/target/debug/nipartd ];then
+    if [ ! -e $PROJECT_PATH/target/debug/nipart ];then
         cargo build
     fi
 }

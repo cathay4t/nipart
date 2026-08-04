@@ -19,21 +19,15 @@ TEST_NET_NS = "nipart_dhcp_test"
 DEFAULT_TIMEOUT = 20
 
 IPV4_DEFAULT_GATEWAY = "0.0.0.0/0"
+STATIC_ROUTE_DST = "203.0.113.0/24"
 
 
 def _create_veth_pair(ifname, peer, peer_ns):
-    exec_cmd(
-        f"ip link add {ifname} type veth peer name {peer}".split()
-    )
+    exec_cmd(f"ip link add {ifname} type veth peer name {peer}".split())
     exec_cmd(f"ip link set {ifname} up".split())
     exec_cmd(f"ip link set {peer} netns {peer_ns}".split())
-    exec_cmd(
-        f"ip netns exec {peer_ns} ip link set {peer} up".split()
-    )
-    exec_cmd(
-        f"ip netns exec {peer_ns} "
-        f"ip link set lo up".split()
-    )
+    exec_cmd(f"ip netns exec {peer_ns} ip link set {peer} up".split())
+    exec_cmd(f"ip netns exec {peer_ns} " f"ip link set lo up".split())
 
 
 def _remove_veth_pair(ifname, peer_ns):
@@ -70,13 +64,15 @@ def dhcp_cli_cleanup():
           type: ethernet
           state: up
           ipv4:
-            enabled: false"""))
+            enabled: false
+        routes:
+          config:
+          - next-hop-interface: {DHCP_CLI_NIC}
+            state: absent"""))
 
 
 def _get_routes(nic=DHCP_CLI_NIC):
-    rc, out, _ = exec_cmd(
-        ["ip", "route", "show", "dev", nic]
-    )
+    rc, out, _ = exec_cmd(["ip", "route", "show", "dev", nic])
     return out
 
 
@@ -101,68 +97,57 @@ def _has_dhcp_addr():
 
 def _ping_dhcp_server():
     try:
-        exec_cmd(
-            f"ping {DHCP_SRV_IP4} -c 1 -w 5".split()
-        )
+        exec_cmd(f"ping {DHCP_SRV_IP4} -c 1 -w 5".split())
         return True
     except Exception:
         return False
 
 
-class TestDhcpDefault:
-    def test_default_behavior(self, dhcp_env, dhcp_cli_cleanup):
-        nipart.apply(load_yaml(f"""---
-            interfaces:
-            - name: {DHCP_CLI_NIC}
-              type: ethernet
-              state: up
-              ipv4:
-                enabled: true
-                dhcp: true"""))
-        assert retry_till_true_or_timeout(
-            DEFAULT_TIMEOUT, _has_dhcp_addr
-        )
-        assert retry_till_true_or_timeout(
-            DEFAULT_TIMEOUT, _ping_dhcp_server
-        )
-        assert _has_gateway_route()
+def test_dhcpv4_default_behavior(dhcp_env, dhcp_cli_cleanup):
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+        - name: {DHCP_CLI_NIC}
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true"""))
+    assert retry_till_true_or_timeout(DEFAULT_TIMEOUT, _has_dhcp_addr)
+    assert retry_till_true_or_timeout(DEFAULT_TIMEOUT, _ping_dhcp_server)
+    assert _has_gateway_route()
 
 
-class TestAutoGatewayFalse:
-    def test_auto_gateway_false(self, dhcp_env, dhcp_cli_cleanup):
-        nipart.apply(load_yaml(f"""---
-            interfaces:
-            - name: {DHCP_CLI_NIC}
-              type: ethernet
-              state: up
-              ipv4:
-                enabled: true
-                dhcp: true
-                auto-gateway: false"""))
-        assert retry_till_true_or_timeout(
-            DEFAULT_TIMEOUT, _has_dhcp_addr
-        )
-        assert retry_till_true_or_timeout(
-            DEFAULT_TIMEOUT, _ping_dhcp_server
-        )
-        assert not _has_gateway_route()
+def test_dhcpv4_auto_gateway_false(dhcp_env, dhcp_cli_cleanup):
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+        - name: {DHCP_CLI_NIC}
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+            auto-gateway: false
+        routes:
+          config:
+          - destination: {STATIC_ROUTE_DST}
+            next-hop-interface: {DHCP_CLI_NIC}
+            next-hop-address: {DHCP_SRV_IP4}"""))
+    assert retry_till_true_or_timeout(DEFAULT_TIMEOUT, _has_dhcp_addr)
+    assert retry_till_true_or_timeout(DEFAULT_TIMEOUT, _ping_dhcp_server)
+    assert not _has_gateway_route()
+    assert STATIC_ROUTE_DST in _get_routes()
 
 
-class TestAutoGatewayTrue:
-    def test_auto_gateway_true(self, dhcp_env, dhcp_cli_cleanup):
-        nipart.apply(load_yaml(f"""---
-            interfaces:
-            - name: {DHCP_CLI_NIC}
-              type: ethernet
-              state: up
-              ipv4:
-                enabled: true
-                dhcp: true
-                auto-gateway: true"""))
-        assert retry_till_true_or_timeout(
-            DEFAULT_TIMEOUT, _has_dhcp_addr
-        )
-        assert retry_till_true_or_timeout(
-            DEFAULT_TIMEOUT, _ping_dhcp_server
-        )
-        assert _has_gateway_route()
+def test_dhcpv4_auto_gateway_true(dhcp_env, dhcp_cli_cleanup):
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+        - name: {DHCP_CLI_NIC}
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+            auto-gateway: true"""))
+    assert retry_till_true_or_timeout(DEFAULT_TIMEOUT, _has_dhcp_addr)
+    assert retry_till_true_or_timeout(DEFAULT_TIMEOUT, _ping_dhcp_server)
+    assert _has_gateway_route()
