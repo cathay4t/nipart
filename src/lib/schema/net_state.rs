@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: Apache-2.0
+
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    CUR_SCHEMA_VERSION, ErrorKind, Interfaces, JsonDisplayHideSecrets,
+    NipartError, NipartWaitOnline, Routes,
+};
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonDisplayHideSecrets,
+)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct NetworkState {
+    /// Please set it to 1 explicitly
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Description for the whole desire state.
+    pub description: Option<String>,
+    /// Daemon wait-online configuration, if undefined, wait IPv4 or IPv6
+    /// gateway been set or previous saved configuration. If defined, override
+    /// previous saved configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_online: Option<NipartWaitOnline>,
+    /// Routes
+    #[serde(default)]
+    pub routes: Routes,
+    /// Network interfaces
+    #[serde(default, rename = "interfaces")]
+    pub ifaces: Interfaces,
+}
+
+impl Default for NetworkState {
+    fn default() -> Self {
+        Self {
+            version: Some(CUR_SCHEMA_VERSION),
+            description: None,
+            wait_online: None,
+            ifaces: Default::default(),
+            routes: Default::default(),
+        }
+    }
+}
+
+impl NetworkState {
+    /// Secret hidden by nipart
+    pub const HIDE_SECRET_STR: &str = "<_hidden_>";
+    /// Nipart cannot retrieve secret
+    pub const UNKNOWN_SECRET_STR: &str = "<_unknown_>";
+
+    /// Ensure `kernel_iface_name` is populated for all interfaces using
+    /// `InterfaceIdentifier::Name` or no identifier.
+    pub fn resolve_name_identifier(&mut self) {
+        self.ifaces.resolve_name_identifier();
+    }
+
+    /// Resolve interfaces with `InterfaceIdentifier::MacAddress` by matching
+    /// against current interfaces by MAC address.
+    // TODO:
+    //  * refer port by MAC address
+    //  * refer parent by MAC address
+    //  * refer route next-hop-interface by MAC address
+    pub fn resolve_mac_identifier(
+        &mut self,
+        current: &Self,
+    ) -> Result<(), NipartError> {
+        self.ifaces.resolve_mac_identifier(&current.ifaces)
+    }
+
+    /// Resolve the `kernel_iface_name` for all interfaces by first applying
+    /// `resolve_name_identifier()` for Name-based interfaces, then
+    /// `resolve_mac_identifier()` for MAC-based interfaces.
+    pub fn resolve_kernel_iface_name(
+        &mut self,
+        current: &Self,
+    ) -> Result<(), NipartError> {
+        self.resolve_name_identifier();
+        self.resolve_mac_identifier(current)
+    }
+
+    /// Return a network state with secrets only leaving self without any
+    /// secrets.
+    pub fn hide_secrets(&mut self) -> Self {
+        let old = self.clone();
+        self.ifaces.hide_secrets();
+        old.gen_diff_no_sanitize(self.clone()).unwrap_or_default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self == &Self {
+            version: self.version,
+            ..Default::default()
+        } || (self.ifaces.is_empty()
+            && self.routes.is_empty()
+            && self.wait_online.is_none())
+    }
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    // TODO(Gris): Use `rmsd-yml` to show error location in YAML.
+    /// Wrapping function of [serde_yaml::from_str()] with error mapped to
+    /// [NipartError].
+    pub fn new_from_yaml(net_state_yaml: &str) -> Result<Self, NipartError> {
+        match serde_yaml::from_str(net_state_yaml) {
+            Ok(s) => Ok(s),
+            Err(e) => Err(NipartError::new(
+                ErrorKind::InvalidArgument,
+                format!("Invalid YAML string: {e}"),
+            )),
+        }
+    }
+}

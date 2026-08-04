@@ -1,0 +1,247 @@
+// SPDX-License-Identifier: Apache-2.0
+
+use std::collections::{HashMap, HashSet};
+
+use nipart::{
+    ErrorKind, Interface, InterfaceType, NipartError, NipartInterface,
+    WifiConfig,
+};
+
+use crate::{
+    NipartWpaConn,
+    bss::{WpaSupBss, mac_to_string},
+    dbus::NipartWpaSupDbus,
+    network::WpaSupNetwork,
+    scan::bss_active_scan,
+};
+
+const MAX_SCAN_RETRY: usize = 5;
+
+impl NipartWpaConn {
+    pub(crate) async fn apply(
+        ifaces: &[&Interface],
+    ) -> Result<(), NipartError> {
+        let dbus = NipartWpaSupDbus::new().await?;
+
+        let mut ssids_to_delete: HashSet<&str> = HashSet::new();
+        let mut iface_names_to_delete: HashSet<&str> = HashSet::new();
+        let mut wifi_cfg_to_add: Vec<(&str, &WifiConfig)> = Vec::new();
+
+        // Query available wifi phys for auto-binding WifiCfg without base_iface
+        let avaiable_wifi_phys: Vec<String> = {
+            let mut filter = nispor::NetStateFilter::minimum();
+            filter.iface = Some(nispor::NetStateIfaceFilter::minimum());
+            let mut ret = Vec::new();
+            if let Ok(np_state) =
+                nispor::NetState::retrieve_with_filter_async(&filter).await
+            {
+                for np_iface in np_state.ifaces.values() {
+                    if np_iface.iface_type == nispor::IfaceType::Wifi {
+                        ret.push(np_iface.name.to_string());
+                    }
+                }
+            }
+            ret
+        };
+
+        for iface in ifaces {
+            let wifi_cfg = match iface {
+                Interface::WifiCfg(iface) => iface.wifi.as_ref(),
+                Interface::WifiPhy(iface) => iface.wifi.as_ref(),
+                _ => {
+                    continue;
+                }
+            };
+            if iface.is_absent() || iface.is_down() {
+                if iface.iface_type() == &InterfaceType::WifiPhy {
+                    iface_names_to_delete.insert(iface.kernel_iface_name());
+                } else {
+                    let ssid = if let Some(s) =
+                        wifi_cfg.as_ref().map(|w| w.ssid.as_str())
+                    {
+                        s
+                    } else {
+                        iface.name()
+                    };
+                    ssids_to_delete.insert(ssid);
+                }
+            } else if iface.is_up() {
+                let Some(wifi_cfg) = wifi_cfg else {
+                    continue;
+                };
+                log::trace!("Applying {wifi_cfg}");
+                if iface.iface_type() == &InterfaceType::WifiPhy {
+                    wifi_cfg_to_add.push((iface.kernel_iface_name(), wifi_cfg));
+                } else if let Some(iface_name) = wifi_cfg.base_iface.as_ref() {
+                    wifi_cfg_to_add.push((iface_name, wifi_cfg));
+                } else if let Some(iface_name) = avaiable_wifi_phys.first() {
+                    wifi_cfg_to_add.push((iface_name, wifi_cfg));
+                } else {
+                    log::warn!(
+                        "WifiCfg interface {} has no base_iface specified, no \
+                         wifi-phy available to bind to",
+                        iface.name()
+                    );
+                }
+            } else {
+                return Err(NipartError::new(
+                    ErrorKind::Bug,
+                    format!(
+                        "NipartWpaConn::apply(): Got invalid interface state: \
+                         {iface}"
+                    ),
+                ));
+            }
+        }
+
+        del_interfaces(&dbus, &iface_names_to_delete).await?;
+        del_networks(&dbus, &ssids_to_delete).await?;
+        add_networks(&dbus, &wifi_cfg_to_add).await?;
+
+        Ok(())
+    }
+}
+
+async fn add_networks(
+    dbus: &NipartWpaSupDbus<'_>,
+    wifi_cfg_to_add: &[(&str, &WifiConfig)],
+) -> Result<(), NipartError> {
+    let ifaces_to_scan: Vec<&str> = wifi_cfg_to_add
+        .iter()
+        .map(|(iface_name, _)| *iface_name)
+        .collect();
+
+    let interested_ssids: Vec<&str> = wifi_cfg_to_add
+        .iter()
+        .map(|(_, wifi_cfg)| wifi_cfg.ssid.as_str())
+        .collect();
+
+    if ifaces_to_scan.is_empty() {
+        return Ok(());
+    }
+    log::trace!("Adding WIFI network {:?}", wifi_cfg_to_add);
+
+    let mut existing_bsses: HashMap<(String, String), WpaSupBss> =
+        HashMap::new();
+    for i in 1..(MAX_SCAN_RETRY + 1) {
+        match bss_active_scan(
+            dbus,
+            &ifaces_to_scan,
+            i != 1,
+            interested_ssids.as_slice(),
+        )
+        .await
+        {
+            Ok(s) => {
+                if !s.is_empty() {
+                    existing_bsses = s;
+                    break;
+                } else {
+                    log::trace!("No BSS found, retry {i}/{MAX_SCAN_RETRY}");
+                }
+            }
+            Err(e) => {
+                log::trace!("Scan failure: {e}, retry {i}/{MAX_SCAN_RETRY}");
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    }
+    log::trace!("Got WIFI scan result: {existing_bsses:?}");
+
+    for (iface_name, wifi_cfg) in wifi_cfg_to_add {
+        let best_bss = existing_bsses
+            .get(&(iface_name.to_string(), wifi_cfg.ssid.to_string()));
+        add_wifi_cfg(iface_name, wifi_cfg, dbus, best_bss).await?;
+    }
+    Ok(())
+}
+
+async fn del_interfaces(
+    dbus: &NipartWpaSupDbus<'_>,
+    iface_names: &HashSet<&str>,
+) -> Result<(), NipartError> {
+    let ifaces = dbus.get_ifaces().await?;
+    let existing_ifaces: Vec<&str> =
+        ifaces.iter().map(|i| i.iface_name.as_str()).collect();
+
+    for iface_name in iface_names {
+        if existing_ifaces.contains(iface_name) {
+            dbus.del_iface(iface_name).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn del_networks(
+    dbus: &NipartWpaSupDbus<'_>,
+    ssids: &HashSet<&str>,
+) -> Result<(), NipartError> {
+    let wpa_ifaces = dbus.get_ifaces().await?;
+    for wpa_iface in wpa_ifaces {
+        let networks = dbus.get_networks(wpa_iface.obj_path.as_str()).await?;
+        for network in networks {
+            if ssids.contains(network.ssid.as_str()) {
+                dbus.del_network(
+                    wpa_iface.obj_path.as_str(),
+                    network.obj_path.as_str(),
+                )
+                .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn add_wifi_cfg(
+    iface_name: &str,
+    wifi_cfg: &WifiConfig,
+    dbus: &NipartWpaSupDbus<'_>,
+    bss: Option<&WpaSupBss>,
+) -> Result<(), NipartError> {
+    let ssid = wifi_cfg.ssid.as_str();
+    let iface_obj_path = match dbus.get_iface_obj_path(iface_name).await? {
+        None => dbus.add_iface(iface_name).await?,
+        Some(iface_obj_path) => {
+            let networks = dbus.get_networks(&iface_obj_path).await?;
+            for network in networks {
+                if network.ssid == ssid {
+                    log::debug!(
+                        "Deactivating existing WIFI network {ssid} on \
+                         interface {}: {}",
+                        iface_name,
+                        network.obj_path.as_str(),
+                    );
+                    dbus.del_network(
+                        iface_obj_path.as_str(),
+                        network.obj_path.as_str(),
+                    )
+                    .await?;
+                }
+            }
+            iface_obj_path
+        }
+    };
+
+    let selected_bssid = wifi_cfg.bssid.clone().or_else(|| {
+        bss.and_then(|b| b.bssid.as_ref().map(|v| mac_to_string(v.as_slice())))
+    });
+
+    let mut wpa_network = WpaSupNetwork {
+        ssid: ssid.to_string(),
+        psk: wifi_cfg.password.clone(),
+        bssid: selected_bssid,
+        ..Default::default()
+    };
+    if let Some(bss) = bss
+        && bss.is_wpa3_psk()
+    {
+        wpa_network.change_to_wpa3_psk();
+    }
+    log::debug!("Adding WIFI network {ssid} to interface {}", iface_name);
+    let network_obj_path = dbus
+        .add_network(iface_obj_path.as_str(), &wpa_network)
+        .await?;
+    dbus.enable_network(network_obj_path.as_str()).await?;
+
+    Ok(())
+}
