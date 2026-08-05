@@ -788,11 +788,11 @@ fn test_route_next_hop_iface_duplicate_logical_name() {
         - name: eth0
           type: ethernet
           state: up
-          profile-name: cunet
+          profile-name: eth1
         - name: eth1
           type: ethernet
           state: up
-          profile-name: cunet
+          profile-name: eth1
         "#,
     )
     .unwrap();
@@ -810,7 +810,7 @@ fn test_route_next_hop_iface_duplicate_logical_name() {
     let merged_ifaces = MergedInterfaces::new(desired, current, None).unwrap();
 
     // IfaceSearch stores last inserted profile mapping
-    let result = merged_ifaces.resolve_route_next_hop_iface("cunet");
+    let result = merged_ifaces.resolve_route_next_hop_iface("eth1");
     assert!(result.is_some());
 }
 
@@ -833,7 +833,7 @@ fn test_route_next_hop_iface_single_profile_match() {
         - name: eth0
           type: ethernet
           state: up
-          profile-name: cunet
+          profile-name: eth1
         "#,
     )
     .unwrap();
@@ -848,7 +848,7 @@ fn test_route_next_hop_iface_single_profile_match() {
 
     let merged_ifaces = MergedInterfaces::new(desired, current, None).unwrap();
 
-    let result = merged_ifaces.resolve_route_next_hop_iface("cunet");
+    let result = merged_ifaces.resolve_route_next_hop_iface("eth1");
     assert_eq!(result, Some("eth0".to_string()));
 }
 
@@ -2096,5 +2096,604 @@ fn test_apply_ip_disabled_iface_removes_its_routes() {
         "Apply disabling IP on eth1 must remove eth1 routes, got changed \
          routes: {:?}",
         merged.routes.changed_routes
+    );
+}
+
+/// The desired `routes.config` is additive: applying a desired state with
+/// static routes must not drop the previously saved routes of interfaces not
+/// mentioned in the desired state. `gen_state_for_save()` must persist both
+/// the new routes and the surviving saved ones.
+#[test]
+fn test_gen_state_for_save_keeps_saved_routes_of_untouched_iface() {
+    let saved: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              address:
+                - ip: 192.0.2.3
+                  prefix-length: 24
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+            - destination: 203.0.113.0/24
+              next-hop-interface: eth0
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              address:
+                - ip: 192.0.2.3
+                  prefix-length: 24
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              address:
+                - ip: 192.0.2.10
+                  prefix-length: 24
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+            - destination: 203.0.113.0/24
+              next-hop-interface: eth0
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              address:
+                - ip: 192.0.2.10
+                  prefix-length: 24
+        routes:
+          config:
+            - destination: 0.0.0.0/0
+              next-hop-interface: eth1
+              next-hop-address: 192.0.2.254
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+
+    let saved_routes = merged.gen_state_for_save().routes.config.unwrap();
+    // The new default route plus the two saved routes of the untouched
+    // interface `eth0` must all be persisted.
+    let mut destinations: Vec<&str> = saved_routes
+        .iter()
+        .filter_map(|r| r.destination.as_deref())
+        .collect();
+    destinations.sort_unstable();
+    assert_eq!(
+        destinations,
+        vec!["0.0.0.0/0", "198.51.100.0/24", "203.0.113.0/24"]
+    );
+}
+
+/// A saved route explicitly matched by an `absent` route in the desired
+/// state is dropped from the persisted state.
+#[test]
+fn test_gen_state_for_save_drops_explicitly_absent_route() {
+    let saved: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+            - destination: 203.0.113.0/24
+              next-hop-interface: eth0
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+            - destination: 203.0.113.0/24
+              next-hop-interface: eth0
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"---
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              state: absent
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+
+    let saved_routes = merged.gen_state_for_save().routes.config.unwrap();
+    assert_eq!(saved_routes.len(), 1);
+    assert_eq!(
+        saved_routes[0].destination.as_deref(),
+        Some("203.0.113.0/24")
+    );
+}
+
+/// Saved routes whose next hop interface is marked `absent` in the desired
+/// state are dropped from the persisted state.
+#[test]
+fn test_gen_state_for_save_drops_routes_of_absent_iface() {
+    let saved: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: absent
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+
+    let saved_routes = merged.gen_state_for_save().routes.config.unwrap();
+    assert!(
+        saved_routes.is_empty(),
+        "Routes of the deleted interface eth0 must not be persisted, got \
+         {saved_routes:?}"
+    );
+}
+
+/// Saved routes of an interface whose IPv4 is disabled by the desired state
+/// are dropped, while its IPv6 routes are kept.
+#[test]
+fn test_gen_state_for_save_drops_routes_of_ip_disabled_iface() {
+    let saved: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            ipv6:
+              enabled: true
+              autoconf: false
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+            - destination: 2001:db8::/64
+              next-hop-interface: eth0
+              next-hop-address: 2001:db8::1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            ipv6:
+              enabled: true
+              autoconf: false
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+            - destination: 2001:db8::/64
+              next-hop-interface: eth0
+              next-hop-address: 2001:db8::1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: false
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+
+    let saved_routes = merged.gen_state_for_save().routes.config.unwrap();
+    assert_eq!(saved_routes.len(), 1);
+    assert_eq!(
+        saved_routes[0].destination.as_deref(),
+        Some("2001:db8::/64")
+    );
+}
+
+/// When the desired state does not mention routes at all, the saved routes
+/// are preserved as-is.
+#[test]
+fn test_gen_state_for_save_preserves_saved_routes_without_route_section() {
+    let saved: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"---
+        routes: {}
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+
+    let saved_routes = merged.gen_state_for_save().routes.config.unwrap();
+    assert_eq!(saved_routes.len(), 1);
+    assert_eq!(
+        saved_routes[0].destination.as_deref(),
+        Some("198.51.100.0/24")
+    );
+}
+
+/// An empty desired `config` route list is additive too: it adds nothing, so
+/// the saved routes must be preserved.
+#[test]
+fn test_gen_state_for_save_preserves_saved_routes_with_empty_config() {
+    let saved: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"---
+        routes:
+          config: []
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+
+    let saved_routes = merged.gen_state_for_save().routes.config.unwrap();
+    assert_eq!(saved_routes.len(), 1);
+    assert_eq!(
+        saved_routes[0].destination.as_deref(),
+        Some("198.51.100.0/24")
+    );
+}
+
+/// Saved routes reference a MAC-identified interface by its logical (profile)
+/// name, but the interface-change lists are keyed by kernel interface name.
+/// Marking that interface `absent` in the desired state must still drop its
+/// saved routes from the persisted state.
+#[test]
+fn test_gen_state_for_save_drops_routes_of_absent_mac_identified_iface() {
+    let saved: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: wan0
+            type: ethernet
+            state: up
+            identifier: mac-address
+            mac-address: 02:00:00:00:00:0A
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: wan0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            mac-address: 02:00:00:00:00:0A
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: wan0
+            type: ethernet
+            state: absent
+            identifier: mac-address
+            mac-address: 02:00:00:00:00:0A
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+
+    let saved_routes = merged.gen_state_for_save().routes.config.unwrap();
+    assert!(
+        saved_routes.is_empty(),
+        "Routes of the deleted MAC-identified interface wan0 must not be \
+         persisted, got {saved_routes:?}"
+    );
+}
+
+/// An `absent` route in the desired state referencing a MAC-identified
+/// interface by its profile name must also drop the saved route persisted
+/// with the same profile name (the absent desired route is resolved to the
+/// kernel interface name before matching).
+#[test]
+fn test_gen_state_for_save_drops_explicitly_absent_profile_named_route() {
+    let saved: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: wan0
+            type: ethernet
+            state: up
+            identifier: mac-address
+            mac-address: 02:00:00:00:00:0B
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: wan0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            mac-address: 02:00:00:00:00:0B
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let desired: NetworkState = serde_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: wan0
+            type: ethernet
+            state: up
+            identifier: mac-address
+            mac-address: 02:00:00:00:00:0B
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: wan0
+              state: absent
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+
+    let saved_routes = merged.gen_state_for_save().routes.config.unwrap();
+    assert!(
+        saved_routes.is_empty(),
+        "The explicitly absent route must not be persisted, got \
+         {saved_routes:?}"
     );
 }

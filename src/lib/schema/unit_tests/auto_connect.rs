@@ -250,30 +250,30 @@ fn test_process_auto_connect_match_by_mac_when_name_changed() {
     let saved = NetworkState::new_from_yaml(
         r#"---
         interfaces:
-          - name: red
+          - name: lan0
             type: ethernet
             state: up
             identifier: mac-address
-            mac-address: 3C:E1:A1:BF:D8:4D
+            mac-address: 02:00:00:00:00:02
             auto-connect: true
         "#,
     )
     .unwrap();
-    let iface = saved.ifaces.kernel_ifaces.get("red").unwrap();
+    let iface = saved.ifaces.kernel_ifaces.get("lan0").unwrap();
 
     let current = NetworkState::new_from_yaml(
         r#"---
         interfaces:
-          - name: enp3s0u2u1u2
+          - name: eth1
             type: ethernet
             state: up
-            mac-address: 3C:E1:A1:BF:D8:4D
+            mac-address: 02:00:00:00:00:02
         "#,
     )
     .unwrap();
 
     let event = crate::InterfaceLinkEvent::new(
-        "enp3s0u2u1u2".to_string(),
+        "eth1".to_string(),
         18,
         crate::InterfaceType::Ethernet,
         true,
@@ -290,21 +290,21 @@ fn test_process_auto_connect_no_match_when_mac_differs() {
     let saved = NetworkState::new_from_yaml(
         r#"---
         interfaces:
-          - name: red
+          - name: lan0
             type: ethernet
             state: up
             identifier: mac-address
-            mac-address: 3C:E1:A1:BF:D8:4D
+            mac-address: 02:00:00:00:00:02
             auto-connect: true
         "#,
     )
     .unwrap();
-    let iface = saved.ifaces.kernel_ifaces.get("red").unwrap();
+    let iface = saved.ifaces.kernel_ifaces.get("lan0").unwrap();
 
     let current = NetworkState::new_from_yaml(
         r#"---
         interfaces:
-          - name: enp3s0u2u1u2
+          - name: eth1
             type: ethernet
             state: up
             mac-address: 00:11:22:33:44:55
@@ -313,7 +313,7 @@ fn test_process_auto_connect_no_match_when_mac_differs() {
     .unwrap();
 
     let event = crate::InterfaceLinkEvent::new(
-        "enp3s0u2u1u2".to_string(),
+        "eth1".to_string(),
         18,
         crate::InterfaceType::Ethernet,
         true,

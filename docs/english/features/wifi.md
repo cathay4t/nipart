@@ -35,7 +35,7 @@ routes:
   config:
   - destination: 0.0.0.0/0
     next-hop-interface: wlan0
-    next-hop-address: 172.17.2.1
+    next-hop-address: 192.0.2.1
     metric: 100
 interfaces:
 - name: wlan0
@@ -46,7 +46,7 @@ interfaces:
     enabled: true
     dhcp: false
     address:
-    - ip: 172.17.2.6
+    - ip: 192.0.2.6
       prefix-length: 24
   wifi:
     ssid: SweatHome5G

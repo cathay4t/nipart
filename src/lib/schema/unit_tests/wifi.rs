@@ -280,10 +280,10 @@ fn test_extract_secrets_only_includes_changed_secrets() {
               address:
                 - ip: 192.0.2.99
                   prefix-length: 24
-          - name: red
+          - name: lan0
             type: ethernet
             state: up
-            mac-address: 3C:E1:A1:BF:D8:4D
+            mac-address: 02:00:00:00:00:02
             mtu: 1500
             ipv4:
               enabled: true
@@ -294,9 +294,9 @@ fn test_extract_secrets_only_includes_changed_secrets() {
 
     // Ethernet interface should NOT be in secrets (no secrets to extract)
     assert!(
-        !secrets.ifaces.kernel_ifaces.contains_key("red"),
-        "Ethernet interface 'red' should not be in secrets, but found: {:?}",
-        secrets.ifaces.kernel_ifaces.get("red")
+        !secrets.ifaces.kernel_ifaces.contains_key("lan0"),
+        "Ethernet interface 'lan0' should not be in secrets, but found: {:?}",
+        secrets.ifaces.kernel_ifaces.get("lan0")
     );
 
     // WiFi should have password in secrets
@@ -333,5 +333,5 @@ fn test_extract_secrets_only_includes_changed_secrets() {
     );
 
     // Ethernet interface should still be in original state
-    assert!(state.ifaces.kernel_ifaces.contains_key("red"));
+    assert!(state.ifaces.kernel_ifaces.contains_key("lan0"));
 }
