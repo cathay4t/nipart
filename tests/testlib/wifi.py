@@ -19,6 +19,7 @@ TEST_NET_NS = "wifi-test"
 TEST_WIFI_SSID = "Test-WIFI"
 TEST_WIFI_PSK = "12345678"
 TEST_WIFI_SSID_OPEN = "Test-WIFI-NOPASS"
+TEST_WIFI_SSID_WPA3 = "Test-WIFI3"
 HOSTAPD_PID_PATH = "/tmp/nipart_test_hostapd.pid"
 HOSTAPD_CONF_PATH = "/tmp/nipart_test_hostapd.conf"
 HOSTAPD_CONF = f"""
@@ -44,6 +45,23 @@ ssid={TEST_WIFI_SSID_OPEN}
 
 wpa=0
 auth_algs=1
+"""
+# WPA3-Personal: SAE only, PMF required.  shuli performs the SAE
+# handshake with Hash-to-Element, so H2E is enabled on the AP side.
+HOSTAPD_CONF_WPA3 = f"""
+interface={DHCP_SRV_NIC}
+driver=nl80211
+
+hw_mode=g
+channel=1
+ssid={TEST_WIFI_SSID_WPA3}
+
+wpa=2
+wpa_key_mgmt=SAE
+rsn_pairwise=CCMP
+wpa_passphrase={TEST_WIFI_PSK}
+ieee80211w=2
+sae_pwe=1
 """
 TIMEOUT_SECS_SIM_WIFI_NICS = 30
 WIFI_TEST_NIC = "test-wlan0"
@@ -72,6 +90,39 @@ def wifi_env():
     start_hostapd()
     yield
     os.remove(HOSTAPD_CONF_PATH)
+    if os.path.exists(HOSTAPD_PID_PATH):
+        with open(HOSTAPD_PID_PATH) as fd:
+            pid = fd.read()
+        os.kill(int(pid), signal.SIGTERM)
+    stop_dhcp_server()
+    exec_cmd(f"ip netns del {TEST_NET_NS}".split())
+    retry_till_true_or_timeout(10, unload_wifi_sim_kernel_module)
+
+
+def create_sim_wifi_nics():
+    """Create the mac80211_hwsim based wifi test environment: two
+    simulated NICs renamed to `WIFI_TEST_NIC` and `DHCP_SRV_NIC`, plus
+    the `TEST_NET_NS` netns for the AP side."""
+    exec_cmd("modprobe -r mac80211_hwsim".split(), check=False)
+    exec_cmd(f"ip netns del {TEST_NET_NS}".split(), check=False)
+    exec_cmd(f"ip netns add {TEST_NET_NS}".split())
+
+    exec_cmd("modprobe mac80211_hwsim radios=2".split())
+    assert retry_till_true_or_timeout(
+        TIMEOUT_SECS_SIM_WIFI_NICS, has_sim_wifi_nics
+    )
+
+    state = nipart.show()
+    wlan1 = get_nic_name_by_perm_mac(state, HWSIM0_PERM_MAC)
+    exec_cmd(f"ip link set {wlan1} name {WIFI_TEST_NIC}".split())
+    wlan2 = get_nic_name_by_perm_mac(state, HWSIM1_PERM_MAC)
+    exec_cmd(f"ip link set {wlan2} name {DHCP_SRV_NIC}".split())
+
+
+def destroy_sim_wifi_nics():
+    """Teardown the environment created by `create_sim_wifi_nics()`."""
+    if os.path.exists(HOSTAPD_CONF_PATH):
+        os.remove(HOSTAPD_CONF_PATH)
     if os.path.exists(HOSTAPD_PID_PATH):
         with open(HOSTAPD_PID_PATH) as fd:
             pid = fd.read()
@@ -161,5 +212,31 @@ def start_hostapd_open(net_ns):
     )
 
     assert retry_till_true_or_timeout(2, hostapd_is_up_open)
+
+    start_dhcp_server(net_ns)
+
+
+def hostapd_is_up_wpa3():
+    output = exec_cmd(f"iw {WIFI_TEST_NIC} scan".split(), check=False)[1]
+    return TEST_WIFI_SSID_WPA3 in output
+
+
+def start_hostapd_wpa3(net_ns):
+    phy_id = get_wifi_phy_name(DHCP_SRV_NIC)
+    assert phy_id
+    exec_cmd(f"iw phy#{phy_id} set netns name {net_ns}".split())
+    exec_cmd(f"ip link set {WIFI_TEST_NIC} up".split())
+    exec_cmd(
+        f"ip netns exec {net_ns} ip link set {DHCP_SRV_NIC} up".split()
+    )
+    with open(HOSTAPD_CONF_PATH, "w") as fd:
+        fd.write(HOSTAPD_CONF_WPA3)
+
+    exec_cmd(
+        f"ip netns exec {net_ns} "
+        f"hostapd -B -d {HOSTAPD_CONF_PATH} -P {HOSTAPD_PID_PATH}".split(),
+    )
+
+    assert retry_till_true_or_timeout(2, hostapd_is_up_wpa3)
 
     start_dhcp_server(net_ns)

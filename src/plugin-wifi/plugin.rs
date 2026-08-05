@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use nipart::{
     ErrorKind, Interface, InterfaceType, NetworkState, NipartApplyOption,
@@ -9,7 +9,7 @@ use nipart::{
 };
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
-use crate::NipartWpaConn;
+use crate::{NipartWpaConn, apply::WifiConn};
 
 #[derive(Debug)]
 pub(crate) struct NipartPluginWifi {
@@ -17,15 +17,24 @@ pub(crate) struct NipartPluginWifi {
 }
 
 /// Dedicated worker processing wifi apply requests serially in arrival
-/// order. Slow operations (wpa_supplicant config change, active scan) are
+/// order. Slow operations (connecting via shuli) are
 /// performed here so that `apply_network_state()` never blocks the daemon
 /// connection handling, and `query_network_state()` is never stalled by an
-/// on-going apply.
+/// on-going apply.  The worker also owns every live wifi connection
+/// ([`WifiConn`]): when the daemon connection is gone it tears them all
+/// down.
 async fn apply_worker(mut rx: UnboundedReceiver<Vec<Interface>>) {
+    let mut wifi_conns: HashMap<String, WifiConn> = HashMap::new();
     while let Some(ifaces) = rx.recv().await {
-        if let Err(e) = NipartWpaConn::apply(ifaces.as_slice()).await {
+        if let Err(e) =
+            NipartWpaConn::apply(ifaces.as_slice(), &mut wifi_conns).await
+        {
             log::error!("WIFI plugin failed to apply state: {e}");
         }
+    }
+    // Daemon connection gone: tear down all managed connections.
+    for (_, conn) in wifi_conns.drain() {
+        conn.disconnect().await;
     }
 }
 
@@ -56,8 +65,8 @@ impl NipartPlugin for NipartPluginWifi {
     ) -> Result<NetworkState, NipartError> {
         conn.log_trace("WIFI plugin query_network_state".to_string())
             .await;
-        // Query only reads the live wpa_supplicant configuration and its
-        // saved scan results, it never triggers a scan.
+        // Query only reads the live connection state, it never
+        // triggers a scan.
         NipartWpaConn::query_network_state().await
     }
 
