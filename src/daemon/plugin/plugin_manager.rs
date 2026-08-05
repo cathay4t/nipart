@@ -2,7 +2,7 @@
 
 use nipart::{
     ErrorKind, NetworkState, NipartApplyOption, NipartError, NipartQueryOption,
-    NipartWifiScanOption, WifiConfig,
+    NipartWifiScanOption, WifiScanResult,
 };
 
 use super::{NipartPluginCmd, NipartPluginReply, NipartPluginWorker};
@@ -28,7 +28,7 @@ impl NipartPluginManager {
     pub(crate) async fn wifi_scan(
         &mut self,
         opt: NipartWifiScanOption,
-    ) -> Result<Vec<WifiConfig>, NipartError> {
+    ) -> Result<Vec<WifiScanResult>, NipartError> {
         let reply = self
             .mgr
             .exec(NipartPluginCmd::WifiScan(Box::new(opt)))

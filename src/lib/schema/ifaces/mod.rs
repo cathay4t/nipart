@@ -44,7 +44,8 @@ pub use self::{
     },
     vxlan::{VxlanConfig, VxlanInterface},
     wifi::{
-        WifiAuthType, WifiCfgInterface, WifiConfig, WifiPhyInterface, WifiState,
+        WifiAuthType, WifiAuthTypeDetailed, WifiCfgInterface, WifiConfig,
+        WifiPhyInterface, WifiScanResult, WifiState,
     },
     wireguard::{
         WireguardConfig, WireguardInterface, WireguardIpAddress,

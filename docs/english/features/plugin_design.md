@@ -58,7 +58,7 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
     fn plugin_info(plugin: &Arc<Self>) -> impl Future<Output = Result<NipartPluginInfo, NipartError>> + Send;
     fn query_network_state(...) -> impl Future<Output = Result<NetworkState, NipartError>> + Send;
     fn apply_network_state(...) -> impl Future<Output = Result<(), NipartError>> + Send;
-    fn wifi_scan(...) -> impl Future<Output = Result<Vec<WifiConfig>, NipartError>> + Send;
+    fn wifi_scan(...) -> impl Future<Output = Result<Vec<WifiScanResult>, NipartError>> + Send;
     fn quit(plugin: &Arc<Self>) -> impl Future<Output = ()> + Send;
 }
 ```
@@ -99,7 +99,7 @@ The `NipartPluginCmd` enum defines all commands the daemon can send:
 | `QueryPluginInfo` | None | `NipartPluginInfo` |
 | `QueryNetworkState` | `(NipartQueryOption, NetworkState)` | `NetworkState` |
 | `ApplyNetworkState` | `(NetworkState, NipartApplyOption)` | `()` |
-| `WifiScan` | `NipartWifiScanOption` | `Vec<WifiConfig>` |
+| `WifiScan` | `NipartWifiScanOption` | `Vec<WifiScanResult>` |
 | `Quit` | None | None (process exits) |
 
 ### Plugin Info

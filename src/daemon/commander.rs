@@ -6,7 +6,7 @@ use futures_channel::mpsc::UnboundedSender;
 use nipart::{
     InterfaceType, NetworkState, NipartApplyOption, NipartError,
     NipartInterface, NipartNoDaemon, NipartQueryOption, NipartWifiScanOption,
-    WifiConfig,
+    WifiScanResult,
 };
 
 use super::{
@@ -165,7 +165,7 @@ impl NipartCommander {
     pub(crate) async fn wifi_scan(
         &mut self,
         opt: NipartWifiScanOption,
-    ) -> Result<Vec<WifiConfig>, NipartError> {
+    ) -> Result<Vec<WifiScanResult>, NipartError> {
         self.plugin_manager.wifi_scan(opt).await
     }
 }

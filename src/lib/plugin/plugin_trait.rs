@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{
     ErrorKind, NetworkState, NipartApplyOption, NipartError,
     NipartIpcConnection, NipartIpcListener, NipartPluginCmd, NipartPluginInfo,
-    NipartQueryOption, NipartWifiScanOption, WifiConfig,
+    NipartQueryOption, NipartWifiScanOption, WifiScanResult,
 };
 
 pub trait NipartPlugin: Send + Sync + Sized + 'static {
@@ -168,7 +168,8 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
         _plugin: &Arc<Self>,
         _opt: NipartWifiScanOption,
         _conn: &mut NipartIpcConnection,
-    ) -> impl Future<Output = Result<Vec<WifiConfig>, NipartError>> + Send {
+    ) -> impl Future<Output = Result<Vec<WifiScanResult>, NipartError>> + Send
+    {
         async {
             Err(NipartError::new(
                 ErrorKind::NoSupport,

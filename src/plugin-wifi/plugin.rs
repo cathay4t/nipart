@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Arc};
 use nipart::{
     ErrorKind, Interface, InterfaceType, NetworkState, NipartApplyOption,
     NipartError, NipartIpcConnection, NipartPlugin, NipartPluginInfo,
-    NipartQueryOption, NipartWifiScanOption, WifiConfig,
+    NipartQueryOption, NipartWifiScanOption, WifiScanResult,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
@@ -96,7 +96,7 @@ impl NipartPlugin for NipartPluginWifi {
         _plugin: &Arc<Self>,
         opt: NipartWifiScanOption,
         conn: &mut NipartIpcConnection,
-    ) -> Result<Vec<WifiConfig>, NipartError> {
+    ) -> Result<Vec<WifiScanResult>, NipartError> {
         conn.log_trace(format!("WIFI plugin wifi_scan with option {opt}"))
             .await;
         NipartWpaConn::wifi_scan(opt.iface_name.as_deref()).await

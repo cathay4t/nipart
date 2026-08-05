@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use nipart::{ErrorKind, NipartError, WifiAuthType, WifiConfig};
+use std::collections::HashMap;
+
+use nipart::{
+    ErrorKind, NipartError, WifiAuthType, WifiAuthTypeDetailed, WifiConfig,
+    WifiScanResult,
+};
 use rtnetlink::packet_core::Parseable;
-use wl_nl80211::{Nl80211Element, Nl80211Elements};
+use wl_nl80211::{
+    Nl80211AkmSuite, Nl80211CipherSuite, Nl80211Element, Nl80211Elements,
+};
 
 use crate::NipartWpaConn;
 
 impl NipartWpaConn {
     pub(crate) async fn wifi_scan(
         iface_name: Option<&str>,
-    ) -> Result<Vec<WifiConfig>, NipartError> {
+    ) -> Result<Vec<WifiScanResult>, NipartError> {
         if let Ok(r) = _wifi_scan(iface_name).await
             && !r.is_empty()
         {
@@ -22,8 +29,10 @@ impl NipartWpaConn {
 
 async fn _wifi_scan(
     iface_name: Option<&str>,
-) -> Result<Vec<WifiConfig>, NipartError> {
-    let mut ret = Vec::new();
+) -> Result<Vec<WifiScanResult>, NipartError> {
+    // Keep one entry per SSID, merging auth types from all BSSes of the
+    // same SSID and keeping the strongest signal.
+    let mut ret: HashMap<String, WifiScanResult> = HashMap::new();
 
     let mut filter = nispor::NetStateFilter::minimum();
     filter.iface = Some(nispor::NetStateIfaceFilter::minimum());
@@ -69,31 +78,47 @@ async fn _wifi_scan(
                 continue;
             };
 
-            let wifi_cfg = WifiConfig {
-                ssid,
-                base_iface: Some(iface_name.to_string()),
-                bssid: Some(mac_to_string(&bss_info.bssid)),
-                frequency_mhz: Some(bss_info.freq_mhz),
-                signal_dbm: Some(bss_info.signal_dbm as i16),
-                auth_types: Some(security_to_auth_types(bss_info.security)),
-                generation: detect_generation(ies),
-                ..Default::default()
-            };
+            let scan_res = WifiScanResult::new(
+                ssid.clone(),
+                Some(iface_name.to_string()),
+                Some(mac_to_string(&bss_info.bssid)),
+                Some(bss_info.freq_mhz),
+                Some(bss_info.signal_dbm as i16),
+                Some(WifiConfig::signal_dbm_to_percent(
+                    bss_info.signal_dbm as i16,
+                )),
+                detect_generation(ies),
+                vec![detect_auth_type(ies)],
+            );
 
-            // Keep strongest signal per SSID.
-            if let Some(existing) = ret
-                .iter_mut()
-                .find(|w: &&mut WifiConfig| w.ssid == wifi_cfg.ssid)
-            {
-                if existing.signal_dbm < wifi_cfg.signal_dbm {
-                    *existing = wifi_cfg;
+            if let Some(existing) = ret.get_mut(&ssid) {
+                // Merge auth types advertised by different BSSes.
+                if !existing.auth_types.contains(&scan_res.auth_types[0]) {
+                    existing.auth_types.push(scan_res.auth_types[0].clone());
+                }
+                // Keep the strongest signal per SSID.
+                if existing.signal_dbm < scan_res.signal_dbm {
+                    existing.base_iface = scan_res.base_iface;
+                    existing.bssid = scan_res.bssid;
+                    existing.frequency_mhz = scan_res.frequency_mhz;
+                    existing.signal_dbm = scan_res.signal_dbm;
+                    existing.signal_percent = scan_res.signal_percent;
+                    existing.generation = scan_res.generation;
                 }
             } else {
-                ret.push(wifi_cfg);
+                ret.insert(ssid, scan_res);
             }
         }
     }
 
+    let mut ret: Vec<WifiScanResult> = ret.into_values().collect();
+    // Sort by signal strength (strongest first), then SSID for a
+    // deterministic output order.
+    ret.sort_unstable_by(|a, b| {
+        b.signal_percent
+            .cmp(&a.signal_percent)
+            .then_with(|| a.ssid.cmp(&b.ssid))
+    });
     Ok(ret)
 }
 
@@ -111,12 +136,147 @@ fn extract_ssid(ies: &[u8]) -> Option<String> {
     None
 }
 
-fn security_to_auth_types(security: shuli::SecurityType) -> Vec<WifiAuthType> {
-    match security {
-        shuli::SecurityType::Open => vec![WifiAuthType::Open],
-        shuli::SecurityType::Wpa2Psk => vec![WifiAuthType::Wpa2Personal],
-        shuli::SecurityType::Owe => vec![WifiAuthType::Wpa3Open],
-        shuli::SecurityType::Sae => vec![WifiAuthType::Wpa3Personal],
+/// Detect the detailed auth type of the AP from its RSNE(Robust Security
+/// Network Element). Returns `OPEN` when the network has no RSNE.
+fn detect_auth_type(ies: &[u8]) -> WifiAuthTypeDetailed {
+    let Ok(parsed) = Nl80211Elements::parse(ies) else {
+        return open_auth_type();
+    };
+    let elems = parsed.0;
+    let rsn = elems.iter().find_map(|ie| match ie {
+        Nl80211Element::Rsn(rsn) => Some(rsn),
+        _ => None,
+    });
+    let Some(rsn) = rsn else {
+        // No RSNE: either an open network, or legacy security(WPA1/WEP)
+        // which has no simplified `WifiAuthType`. Detect the WPA1 vendor
+        // IE so such networks are not mislabeled as `OPEN`.
+        if elems.iter().any(|ie| match ie {
+            Nl80211Element::Vendor(payload) => is_wpa1_vendor_ie(payload),
+            _ => false,
+        }) {
+            // WPA1 is deprecated and has no simplified `WifiAuthType`.
+            return WifiAuthTypeDetailed::default();
+        }
+        return open_auth_type();
+    };
+
+    let mut cipher = Vec::new();
+    if let Some(group_cipher) = rsn.group_cipher {
+        cipher.push(cipher_to_string(group_cipher));
+    }
+    for pairwise_cipher in &rsn.pairwise_ciphers {
+        let c = cipher_to_string(*pairwise_cipher);
+        if !cipher.contains(&c) {
+            cipher.push(c);
+        }
+    }
+
+    WifiAuthTypeDetailed::new(
+        auth_type_from_akm(&rsn.akm_suits),
+        rsn.akm_suits
+            .iter()
+            .map(|akm| akm_to_string(*akm))
+            .collect(),
+        cipher,
+    )
+}
+
+fn open_auth_type() -> WifiAuthTypeDetailed {
+    WifiAuthTypeDetailed::new(WifiAuthType::Open, Vec::new(), Vec::new())
+}
+
+/// WPA IE: vendor-specific element with OUI 00:50:F2 (Microsoft) and
+/// OUI type 1 (WPA). Used by WPA1, which has no RSNE.
+fn is_wpa1_vendor_ie(payload: &[u8]) -> bool {
+    payload.len() >= 4
+        && payload[0] == 0x00
+        && payload[1] == 0x50
+        && payload[2] == 0xf2
+        && payload[3] == 0x01
+}
+
+/// Map the AKM suites advertised by the AP to the simplified auth type.
+fn auth_type_from_akm(akm_suits: &[Nl80211AkmSuite]) -> WifiAuthType {
+    if akm_suits.iter().any(|akm| {
+        matches!(
+            akm,
+            Nl80211AkmSuite::Sae
+                | Nl80211AkmSuite::FtSae
+                | Nl80211AkmSuite::SaeGroupDependentHash
+                | Nl80211AkmSuite::FtSaeGroupDependentHash
+        )
+    }) {
+        WifiAuthType::Wpa3Personal
+    } else if akm_suits.iter().any(|akm| {
+        matches!(
+            akm,
+            Nl80211AkmSuite::Psk
+                | Nl80211AkmSuite::FtPsk
+                | Nl80211AkmSuite::PskSha256
+                | Nl80211AkmSuite::PskSha384
+                | Nl80211AkmSuite::FtPskSha384
+        )
+    }) {
+        WifiAuthType::Wpa2Personal
+    } else {
+        // EAP(Enterprise) networks are not supported yet, report as Unknown.
+        WifiAuthType::Unknown
+    }
+}
+
+fn akm_to_string(akm: Nl80211AkmSuite) -> String {
+    match akm {
+        Nl80211AkmSuite::Ieee8021x => "802.1X".into(),
+        Nl80211AkmSuite::Psk => "PSK".into(),
+        Nl80211AkmSuite::FtIeee8021x => "FT-802.1X".into(),
+        Nl80211AkmSuite::FtPsk => "FT-PSK".into(),
+        Nl80211AkmSuite::Ieee8021xSha256 => "802.1X-SHA256".into(),
+        Nl80211AkmSuite::PskSha256 => "PSK-SHA256".into(),
+        Nl80211AkmSuite::Tdls => "TDLS".into(),
+        Nl80211AkmSuite::Sae => "SAE".into(),
+        Nl80211AkmSuite::FtSae => "FT-SAE".into(),
+        Nl80211AkmSuite::ApPeerKey => "AP-PEER-KEY".into(),
+        Nl80211AkmSuite::Ieee8021xSuiteB => "802.1X-SUITE-B".into(),
+        Nl80211AkmSuite::Ieee8021xCnsa => "802.1X-CNSA".into(),
+        Nl80211AkmSuite::FtIeee8021xSha384 => "FT-802.1X-SHA384".into(),
+        Nl80211AkmSuite::FilsSha256AesSiv256OrIeee8021x => "FILS-SHA256".into(),
+        Nl80211AkmSuite::FilsSha384AesSiv512OrIeee8021x => "FILS-SHA384".into(),
+        Nl80211AkmSuite::FtFilsSha256AesSiv256OrIeee8021x => {
+            "FT-FILS-SHA256".into()
+        }
+        Nl80211AkmSuite::FtFilsSha384AesSiv512OrIeee8021x => {
+            "FT-FILS-SHA384".into()
+        }
+        Nl80211AkmSuite::Owe => "OWE".into(),
+        Nl80211AkmSuite::FtPskSha384 => "FT-PSK-SHA384".into(),
+        Nl80211AkmSuite::PskSha384 => "PSK-SHA384".into(),
+        Nl80211AkmSuite::SaeGroupDependentHash => "SAE-GROUP-HASH".into(),
+        Nl80211AkmSuite::FtSaeGroupDependentHash => "FT-SAE-GROUP-HASH".into(),
+        Nl80211AkmSuite::Other(d) => format!("0x{d:08x}"),
+        _ => "UNKNOWN".into(),
+    }
+}
+
+fn cipher_to_string(cipher: Nl80211CipherSuite) -> String {
+    match cipher {
+        Nl80211CipherSuite::UseGroup => "USE-GROUP".into(),
+        Nl80211CipherSuite::Wep40 => "WEP-40".into(),
+        Nl80211CipherSuite::Tkip => "TKIP".into(),
+        Nl80211CipherSuite::Ccmp128 => "CCMP".into(),
+        Nl80211CipherSuite::Wep104 => "WEP-104".into(),
+        Nl80211CipherSuite::BipCmac128 => "BIP-CMAC-128".into(),
+        Nl80211CipherSuite::GroupAddressedTrafficNotAllowed => {
+            "GAT-NOT-ALLOWED".into()
+        }
+        Nl80211CipherSuite::Gcmp128 => "GCMP".into(),
+        Nl80211CipherSuite::Gcmp256 => "GCMP-256".into(),
+        Nl80211CipherSuite::Ccmp256 => "CCMP-256".into(),
+        Nl80211CipherSuite::BipGmac128 => "BIP-GMAC-128".into(),
+        Nl80211CipherSuite::BipGmac256 => "BIP-GMAC-256".into(),
+        Nl80211CipherSuite::BipCmac256 => "BIP-CMAC-256".into(),
+        Nl80211CipherSuite::Other(d) => format!("0x{d:08x}"),
+        _ => "UNKNOWN".into(),
     }
 }
 
@@ -148,4 +308,82 @@ fn mac_to_string(mac: &[u8; 6]) -> String {
         .map(|b| format!("{b:02x}"))
         .collect::<Vec<_>>()
         .join(":")
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// Build a valid RSNE(Robust Security Network Element) with group/pairwise
+    /// cipher CCMP and the given AKM suites.
+    fn rsn_ie(akm: &[u8]) -> Vec<u8> {
+        let mut payload = vec![0x01, 0x00]; // version
+        payload.extend_from_slice(&[0x00, 0x0f, 0xac, 0x04]); // group CCMP
+        payload.extend_from_slice(&[0x01, 0x00]); // pairwise count
+        payload.extend_from_slice(&[0x00, 0x0f, 0xac, 0x04]); // pairwise CCMP
+        payload.extend_from_slice(&[(akm.len() / 4) as u8, 0x00]); // akm count
+        payload.extend_from_slice(akm);
+        payload.extend_from_slice(&[0x00, 0x00]); // rsn capabilities
+        let mut ret = vec![0x30, payload.len() as u8];
+        ret.extend_from_slice(&payload);
+        ret
+    }
+
+    #[test]
+    fn test_detect_auth_type_wpa2_psk() {
+        let auth = detect_auth_type(&rsn_ie(&[0x00, 0x0f, 0xac, 0x02]));
+        assert_eq!(auth.auth_type, WifiAuthType::Wpa2Personal);
+        assert_eq!(auth.akm, vec!["PSK"]);
+        assert_eq!(auth.cipher, vec!["CCMP"]);
+    }
+
+    #[test]
+    fn test_detect_auth_type_wpa3_sae() {
+        let auth = detect_auth_type(&rsn_ie(&[0x00, 0x0f, 0xac, 0x08]));
+        assert_eq!(auth.auth_type, WifiAuthType::Wpa3Personal);
+        assert_eq!(auth.akm, vec!["SAE"]);
+        assert_eq!(auth.cipher, vec!["CCMP"]);
+    }
+
+    #[test]
+    fn test_detect_auth_type_transition_mode_prefers_sae() {
+        // WPA2/WPA3 transition mode: PSK + SAE.
+        let auth = detect_auth_type(&rsn_ie(&[
+            0x00, 0x0f, 0xac, 0x02, 0x00, 0x0f, 0xac, 0x08,
+        ]));
+        assert_eq!(auth.auth_type, WifiAuthType::Wpa3Personal);
+        assert_eq!(auth.akm, vec!["PSK", "SAE"]);
+    }
+
+    #[test]
+    fn test_detect_auth_type_eap_is_unknown() {
+        // EAP(Enterprise) is not supported yet, report as Unknown. The AKM
+        // details are still listed in the detailed result.
+        let auth = detect_auth_type(&rsn_ie(&[0x00, 0x0f, 0xac, 0x01]));
+        assert_eq!(auth.auth_type, WifiAuthType::Unknown);
+        assert_eq!(auth.akm, vec!["802.1X"]);
+        // Suite B(802.1X-SHA384) too.
+        let auth = detect_auth_type(&rsn_ie(&[0x00, 0x0f, 0xac, 0x0b]));
+        assert_eq!(auth.auth_type, WifiAuthType::Unknown);
+        assert_eq!(auth.akm, vec!["802.1X-SUITE-B"]);
+    }
+
+    #[test]
+    fn test_detect_auth_type_open_without_rsne() {
+        // SSID element only: open network.
+        let auth =
+            detect_auth_type(&[0x00, 0x05, b'h', b'e', b'l', b'l', b'o']);
+        assert_eq!(auth.auth_type, WifiAuthType::Open);
+        assert!(auth.akm.is_empty());
+        assert!(auth.cipher.is_empty());
+    }
+
+    #[test]
+    fn test_detect_auth_type_wpa1_vendor_ie() {
+        // WPA IE: vendor element with OUI 00:50:F2 and OUI type 1.
+        let wpa_ie =
+            [0xdd, 0x08, 0x00, 0x50, 0xf2, 0x01, 0x01, 0x00, 0x00, 0x50];
+        let auth = detect_auth_type(&wpa_ie);
+        assert_eq!(auth.auth_type, WifiAuthType::Unknown);
+    }
 }

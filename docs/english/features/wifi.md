@@ -6,7 +6,7 @@
     * [`bssid`: BSSID](#bssid-bssid)
     * [`password`: Password](#password-password)
     * [`base-iface`: Base interface](#base-iface-base-interface)
-    * [`auth-types`: Authentication types](#auth-types-authentication-types)
+    * [`auth-type`: Authentication type](#auth-type-authentication-type)
     * [`generation`: Wifi generation](#generation-wifi-generation)
     * [`frequency-mhz`: Frequency](#frequency-mhz-frequency)
     * [`rx-bitrate-mb`: Receive bitrate](#rx-bitrate-mb-receive-bitrate)
@@ -89,24 +89,37 @@ When using `wifi-cfg` type with `base-iface: <name>`, the config binds to that
 physical interface. When undefined (unbound), the config applies to any eligible
 `wifi-phy` interface.
 
-## `auth-types`: Authentication types
+## `auth-type`: Authentication type
 
-Query only property. It contains the current authentication type. When showing
-wifi scan results, it contains the authentication types supported by the AP.
-Ignored when applying.
+Query only property. The simplified authentication type of the current
+connection. Ignored when applying.
 
 Supported authentication types:
 
 - `OPEN`: No authentication (open network)
-- `WEP`: WEP (deprecated)
-- `WPA1`: WPA 1 (deprecated)
-- `WPS`: WPS (deprecated)
 - `WPA2-PSK`: WPA 2 Pre-shared Key
-- `EAP`: WPA 2/3 EAP / Enterprise (including OSEN)
 - `WPA3-PSK`: WPA 3 Pre-shared Key using SAE
-- `WPA3-OPEN`: WPA 3 open network using OWE
-- `FILS`: IEEE 802.11ai Fast Initial Link Setup
-- `DPP`: Device Provisioning Protocol (Easy Connect)
+- `unknown`: Could not be determined
+
+`npt wifi scan` reports `auth-types` on each `WifiScanResult` entry instead:
+a list of detailed authentication types, each containing the simplified
+`auth-type` plus the AKM (Authentication and Key Management) and cipher suites
+advertised by the access point, e.g.:
+
+```yaml
+- ssid: SweatHome5G
+  base-iface: wlan0
+  bssid: d0:21:f9:49:b3:52
+  frequency-mhz: 5180
+  signal-dbm: -45
+  signal-percent: 78
+  auth-types:
+  - auth-type: WPA2-PSK
+    akm:
+    - PSK
+    cipher:
+    - CCMP
+```
 
 ## `generation`: Wifi generation
 
