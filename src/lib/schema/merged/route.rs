@@ -55,6 +55,11 @@ pub struct MergedRoutes {
     pub current: Routes,
     #[serde(default)]
     pub saved: Option<Routes>,
+    // Routes to persist, computed in `new()` where the interface changes
+    // are known: desired routes plus previously saved routes that survive
+    // this apply (see `gen_routes_for_save()`).
+    #[serde(default)]
+    pub(crate) for_save: Routes,
 }
 
 impl MergedRoutes {
@@ -126,9 +131,18 @@ impl MergedRoutes {
             saved,
             route_changed_ifaces,
             changed_routes: changed_routes.drain().collect(),
+            for_save: Routes::default(),
         };
 
-        ret.remove_routes_to_ignored_ifaces(merged_ifaces);
+        let ignored_ifaces = ret.remove_routes_to_ignored_ifaces(merged_ifaces);
+
+        ret.for_save = gen_routes_for_save(
+            &ret.desired,
+            ret.saved.as_ref(),
+            &iface_lists,
+            &ignored_ifaces,
+            merged_ifaces,
+        );
 
         Ok(ret)
     }
@@ -136,24 +150,25 @@ impl MergedRoutes {
     fn remove_routes_to_ignored_ifaces(
         &mut self,
         merged_ifaces: &MergedInterfaces,
-    ) {
-        let ignored_ifaces: Vec<&str> = merged_ifaces
+    ) -> Vec<String> {
+        let ignored_ifaces: Vec<String> = merged_ifaces
             .kernel_ifaces
             .values()
             .filter_map(|merged_iface| {
                 if merged_iface.merged.is_ignore() {
-                    Some(merged_iface.merged.kernel_iface_name())
+                    Some(merged_iface.merged.kernel_iface_name().to_string())
                 } else {
                     None
                 }
             })
             .collect();
 
-        for iface in ignored_ifaces.as_slice() {
-            self.merged.remove(*iface);
+        for iface in &ignored_ifaces {
+            self.merged.remove(iface);
         }
         self.route_changed_ifaces
-            .retain(|n| !ignored_ifaces.contains(&n.as_str()));
+            .retain(|n| !ignored_ifaces.contains(n));
+        ignored_ifaces
     }
 
     pub(crate) fn is_changed(&self) -> bool {
@@ -168,22 +183,112 @@ impl MergedRoutes {
     }
 
     pub(crate) fn gen_state_for_save(&self) -> Routes {
-        if let Some(config) = self.desired.config.as_ref() {
-            Routes {
-                running: None,
-                config: Some(config.clone()),
-            }
-        } else if let Some(saved) = self.saved.as_ref()
-            && let Some(config) = saved.config.as_ref()
-        {
-            Routes {
-                running: None,
-                config: Some(config.clone()),
-            }
-        } else {
-            Routes::default()
+        // The desired `routes.config` is additive (documented): it adds
+        // routes to the existing ones instead of replacing them. Hence
+        // persist the desired routes plus the previously saved routes that
+        // survive this apply, otherwise a partial apply would silently drop
+        // the saved routes of interfaces not touched by it (or keep stale
+        // routes of interfaces this apply deletes or disables). The
+        // surviving set was precomputed in `new()` as `for_save`.
+        Routes {
+            running: None,
+            config: self.for_save.config.clone(),
         }
     }
+}
+
+/// Compute the routes to persist: the desired routes plus every previously
+/// saved route that survives this apply. A saved route survives unless it is
+/// explicitly marked `absent` in the desired state, or its next hop
+/// interface is being deleted (`absent`) or has its IP stack disabled by
+/// this apply, or is marked as `ignore`.
+fn gen_routes_for_save(
+    desired: &Routes,
+    saved: Option<&Routes>,
+    iface_lists: &IfaceLists,
+    ignored_ifaces: &[String],
+    merged_ifaces: &MergedInterfaces,
+) -> Routes {
+    let mut routes: HashSet<RouteEntry> = HashSet::new();
+    if let Some(rts) = desired.config.as_ref() {
+        for rt in rts.iter().filter(|rt| !rt.is_absent()) {
+            routes.insert(rt.clone());
+        }
+    }
+    if let Some(saved) = saved
+        && let Some(saved_rts) = saved.config.as_ref()
+    {
+        for rt in saved_rts.iter().filter(|rt| !rt.is_absent()) {
+            if saved_route_is_removed(
+                rt,
+                desired,
+                iface_lists,
+                ignored_ifaces,
+                merged_ifaces,
+            ) {
+                continue;
+            }
+            routes.insert(rt.clone());
+        }
+    }
+    let mut rts: Vec<RouteEntry> = routes.into_iter().collect();
+    rts.sort_unstable();
+    Routes {
+        running: None,
+        config: Some(rts),
+        ..Default::default()
+    }
+}
+
+/// Whether a previously saved route should be dropped from the persisted
+/// state by this apply: it is explicitly marked `absent` in the desired
+/// state, or its next hop interface is marked `absent`, has its IP stack
+/// disabled by this apply, or is marked as `ignore`.
+fn saved_route_is_removed(
+    rt: &RouteEntry,
+    desired: &Routes,
+    iface_lists: &IfaceLists,
+    ignored_ifaces: &[String],
+    merged_ifaces: &MergedInterfaces,
+) -> bool {
+    // Saved routes may reference their next hop interface by profile or
+    // logical name (the persisted format preserves them), while desired
+    // absent routes and the interface change lists are keyed by kernel
+    // interface name, so resolve before comparing.
+    let kernel_name: Option<String> = rt.next_hop_iface.as_ref().map(|via| {
+        merged_ifaces
+            .resolve_route_next_hop_iface(via)
+            .unwrap_or_else(|| via.clone())
+    });
+    let mut resolved_rt = rt.clone();
+    if let Some(kernel_name) = kernel_name.as_ref() {
+        resolved_rt.next_hop_iface = Some(kernel_name.clone());
+    }
+
+    if let Some(desired_rts) = desired.config.as_ref()
+        && desired_rts
+            .iter()
+            .filter(|r| r.is_absent())
+            .any(|absent_rt| absent_rt.is_match(&resolved_rt))
+    {
+        return true;
+    }
+    let Some(via) = kernel_name.as_ref() else {
+        // Routes without next hop interface (e.g. blackhole) can only be
+        // removed by an explicit absent match handled above.
+        return false;
+    };
+    if ignored_ifaces.iter().any(|i| i == via)
+        || iface_lists.absent.contains(&via.as_str())
+        || (iface_lists.desired_ifaces.contains(&via.as_str())
+            && ((rt.is_ipv6()
+                && iface_lists.ipv6_disabled.contains(&via.as_str()))
+                || (!rt.is_ipv6()
+                    && iface_lists.ipv4_disabled.contains(&via.as_str()))))
+    {
+        return true;
+    }
+    false
 }
 
 fn collect_iface_lists(merged_ifaces: &MergedInterfaces) -> IfaceLists<'_> {

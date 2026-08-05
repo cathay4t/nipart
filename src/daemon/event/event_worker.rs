@@ -439,52 +439,52 @@ version: 1
 routes:
   config:
   - destination: 0.0.0.0/0
-    next-hop-interface: cunet
-    next-hop-address: 10.3.221.254
+    next-hop-interface: wan0
+    next-hop-address: 192.0.2.254
     metric: 100
     table-id: 254
-  - destination: 172.25.80.0/24
-    next-hop-interface: enp3s0u2u1u2
-    next-hop-address: 10.255.0.254
+  - destination: 198.51.100.0/24
+    next-hop-interface: eth2
+    next-hop-address: 198.51.100.254
     metric: 103
     table-id: 254
-  - destination: 172.25.75.0/24
-    next-hop-interface: yellow
-    next-hop-address: 10.255.20.254
+  - destination: 203.0.113.0/24
+    next-hop-interface: wifi0
+    next-hop-address: 203.0.113.254
     metric: 102
     table-id: 254
-  - destination: 172.25.81.0/24
-    next-hop-interface: yellow
-    next-hop-address: 10.255.20.254
+  - destination: 203.0.113.128/25
+    next-hop-interface: wifi0
+    next-hop-address: 203.0.113.254
     metric: 104
     table-id: 254
-  - destination: 172.17.0.0/16
-    next-hop-interface: cn
-    next-hop-address: 172.17.7.1
+  - destination: 192.0.2.0/24
+    next-hop-interface: vpn0
+    next-hop-address: 192.0.2.1
     metric: 100
     table-id: 254
 interfaces:
-- name: cunet
+- name: wan0
   type: ethernet
-  kernel-iface-name: enp3s0u2u1u3c2
+  kernel-iface-name: eth0
   state: up
-  profile-name: cunet
+  profile-name: wan0
   identifier: mac-address
-  mac-address: 9C:69:D3:73:03:AC
-- name: red
+  mac-address: 02:00:00:00:00:01
+- name: lan0
   type: ethernet
-  kernel-iface-name: enp3s0u2u1u2
+  kernel-iface-name: eth2
   state: up
-  profile-name: red
+  profile-name: lan0
   identifier: mac-address
-  mac-address: 3C:E1:A1:BF:D8:4D
-- name: yellow
+  mac-address: 02:00:00:00:00:02
+- name: wifi0
   type: ethernet
-  kernel-iface-name: enp3s0u2u1u4
+  kernel-iface-name: wlan0
   state: up
-  profile-name: yellow
+  profile-name: wifi0
   identifier: mac-address
-  mac-address: F8:C9:03:00:1E:FC
+  mac-address: 02:00:00:00:00:03
 "#,
         )
         .unwrap()
@@ -497,8 +497,8 @@ interfaces:
     #[test]
     fn test_route_matching_by_profile_name() {
         let state = gen_saved_state();
-        let cunet = find_iface(&state, "cunet");
-        let routes = gen_routes_for_iface_up(cunet, &state);
+        let wan0 = find_iface(&state, "wan0");
+        let routes = gen_routes_for_iface_up(wan0, &state);
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].destination.as_deref(), Some("0.0.0.0/0"));
     }
@@ -506,37 +506,37 @@ interfaces:
     #[test]
     fn test_route_matching_by_kernel_iface_name() {
         let state = gen_saved_state();
-        let red = find_iface(&state, "red");
+        let red = find_iface(&state, "lan0");
         let routes = gen_routes_for_iface_up(red, &state);
         assert_eq!(routes.len(), 1);
-        assert_eq!(routes[0].destination.as_deref(), Some("172.25.80.0/24"));
+        assert_eq!(routes[0].destination.as_deref(), Some("198.51.100.0/24"));
     }
 
     #[test]
     fn test_route_matching_by_iface_name() {
         let state = gen_saved_state();
-        let yellow = find_iface(&state, "yellow");
-        let routes = gen_routes_for_iface_up(yellow, &state);
+        let wifi0 = find_iface(&state, "wifi0");
+        let routes = gen_routes_for_iface_up(wifi0, &state);
         let mut dests: Vec<_> = routes
             .iter()
             .filter_map(|rt| rt.destination.as_deref())
             .collect();
         dests.sort_unstable();
-        assert_eq!(dests, vec!["172.25.75.0/24", "172.25.81.0/24"]);
+        assert_eq!(dests, vec!["203.0.113.0/24", "203.0.113.128/25"]);
     }
 
     #[test]
     fn test_route_not_matching_iface_excluded() {
         let state = gen_saved_state();
-        for name in ["cunet", "red", "yellow"] {
+        for name in ["wan0", "lan0", "wifi0"] {
             let iface = find_iface(&state, name);
             assert!(
                 !gen_routes_for_iface_up(iface, &state)
                     .iter()
                     .any(
-                        |rt| rt.destination.as_deref() == Some("172.17.0.0/16")
+                        |rt| rt.destination.as_deref() == Some("192.0.2.0/24")
                     ),
-                "{name} should not pick up the cn route"
+                "{name} should not pick up the vpn0 route"
             );
         }
     }
@@ -544,16 +544,16 @@ interfaces:
     #[test]
     fn test_is_route_matching_iface() {
         let state = gen_saved_state();
-        let cunet = find_iface(&state, "cunet");
-        let cn_rt = state
+        let wan0 = find_iface(&state, "wan0");
+        let vpn0_rt = state
             .routes
             .config
             .as_ref()
             .unwrap()
             .iter()
-            .find(|rt| rt.destination.as_deref() == Some("172.17.0.0/16"))
+            .find(|rt| rt.destination.as_deref() == Some("192.0.2.0/24"))
             .unwrap();
-        assert!(!is_route_matching_iface(cn_rt, cunet));
+        assert!(!is_route_matching_iface(vpn0_rt, wan0));
     }
 
     fn gen_link_event(iface_name: &str, is_up: bool) -> InterfaceLinkEvent {
@@ -574,13 +574,13 @@ interfaces:
         // leftover of the boot-time transient state: it must be skipped so
         // the boot apply result (IP + routes) is not torn down.
         let saved_state = gen_saved_state();
-        let cunet = find_iface(&saved_state, "cunet");
-        let mut cur_iface = cunet.clone();
+        let wan0 = find_iface(&saved_state, "wan0");
+        let mut cur_iface = wan0.clone();
         cur_iface.base_iface_mut().link_state =
             Some(nipart::InterfaceLinkState::Up);
 
         assert!(is_stale_link_down_event(
-            &gen_link_event("enp3s0u2u1u3c2", false),
+            &gen_link_event("eth0", false),
             Some(&cur_iface)
         ));
     }
@@ -591,13 +591,13 @@ interfaces:
         // the event reflects a genuine state change and must be processed
         // (purge IP and routes).
         let saved_state = gen_saved_state();
-        let cunet = find_iface(&saved_state, "cunet");
-        let mut cur_iface = cunet.clone();
+        let wan0 = find_iface(&saved_state, "wan0");
+        let mut cur_iface = wan0.clone();
         cur_iface.base_iface_mut().link_state =
             Some(nipart::InterfaceLinkState::Down);
 
         assert!(!is_stale_link_down_event(
-            &gen_link_event("enp3s0u2u1u3c2", false),
+            &gen_link_event("eth0", false),
             Some(&cur_iface)
         ));
     }
@@ -608,18 +608,18 @@ interfaces:
         // the saved config, and skipping them would break hotplug (e.g.
         // wifi association or veth re-plug).
         let saved_state = gen_saved_state();
-        let cunet = find_iface(&saved_state, "cunet");
-        let mut cur_iface = cunet.clone();
+        let wan0 = find_iface(&saved_state, "wan0");
+        let mut cur_iface = wan0.clone();
         cur_iface.base_iface_mut().link_state =
             Some(nipart::InterfaceLinkState::Up);
 
         assert!(!is_stale_link_down_event(
-            &gen_link_event("enp3s0u2u1u3c2", true),
+            &gen_link_event("eth0", true),
             Some(&cur_iface)
         ));
         // Interface already gone: delete event is handled separately.
         assert!(!is_stale_link_down_event(
-            &gen_link_event("enp3s0u2u1u3c2", false),
+            &gen_link_event("eth0", false),
             None
         ));
     }
@@ -629,18 +629,18 @@ interfaces:
         // Interface without `auto-connect` defaults to `auto-connect: true`,
         // hence link up should apply the interface along with its routes.
         let saved_state = gen_saved_state();
-        let cunet = find_iface(&saved_state, "cunet");
-        let event = gen_link_event("enp3s0u2u1u3c2", true);
+        let wan0 = find_iface(&saved_state, "wan0");
+        let event = gen_link_event("eth0", true);
 
         let (new_iface, routes) = handle_event_auto_connect(
             &event,
-            cunet,
+            wan0,
             &saved_state,
             &NetworkState::default(),
         )
         .expect("auto-connect defaults to true");
 
-        assert_eq!(new_iface.name(), "cunet");
+        assert_eq!(new_iface.name(), "wan0");
         assert_eq!(new_iface.base_iface().state, InterfaceState::Up);
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].destination.as_deref(), Some("0.0.0.0/0"));
@@ -651,12 +651,12 @@ interfaces:
         // On link down, the default auto-connect purges IP and marks routes
         // absent, but does not bring the interface down.
         let saved_state = gen_saved_state();
-        let cunet = find_iface(&saved_state, "cunet");
-        let event = gen_link_event("enp3s0u2u1u3c2", false);
+        let wan0 = find_iface(&saved_state, "wan0");
+        let event = gen_link_event("eth0", false);
 
         let (new_iface, routes) = handle_event_auto_connect(
             &event,
-            cunet,
+            wan0,
             &saved_state,
             &NetworkState::default(),
         )

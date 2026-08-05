@@ -398,11 +398,11 @@ mod tests {
         let mut state: NetworkState = serde_yaml::from_str(
             r#"---
             interfaces:
-              - name: HUAZHU-Hanting
+              - name: MyWiFi
                 type: wifi-cfg
                 state: up
                 wifi:
-                  ssid: HUAZHU-Hanting
+                  ssid: MyWiFi
             "#,
         )
         .unwrap();
@@ -415,7 +415,7 @@ mod tests {
             .filter(|i| i.iface_type() == &InterfaceType::WifiCfg)
             .collect();
         assert_eq!(wifi_cfgs.len(), 1);
-        assert_eq!(wifi_cfgs[0].name(), "HUAZHU-Hanting");
+        assert_eq!(wifi_cfgs[0].name(), "MyWiFi");
         assert!(state.ifaces.is_empty());
     }
 
@@ -430,11 +430,11 @@ mod tests {
               - name: eth0
                 type: ethernet
                 state: up
-              - name: HUAZHU-Hanting
+              - name: MyWiFi
                 type: wifi-cfg
                 state: up
                 wifi:
-                  ssid: HUAZHU-Hanting
+                  ssid: MyWiFi
             "#,
         )
         .unwrap();
