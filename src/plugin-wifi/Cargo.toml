@@ -18,8 +18,7 @@ serde_json = { workspace = true }
 nispor = { workspace = true }
 rtnetlink = { workspace = true }
 wl-nl80211 = { workspace = true }
-zbus = { workspace = true }
-zvariant = { workspace = true }
+shuli = "0.1"
 nipart = { path = "../lib" }
 
 [[bin]]
