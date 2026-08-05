@@ -6,7 +6,7 @@
     * [`bssid`：BSSID](#bssidbssid)
     * [`password`：密码](#password密码)
     * [`base-iface`：基础接口](#base-iface基础接口)
-    * [`auth-types`：认证类型](#auth-types认证类型)
+    * [`auth-type`：认证类型](#auth-type认证类型)
     * [`generation`：Wifi 代际](#generationwifi-代际)
     * [`frequency-mhz`：频率](#frequency-mhz频率)
     * [`rx-bitrate-mb`：接收比特率](#rx-bitrate-mb接收比特率)
@@ -84,23 +84,35 @@ interfaces:
 使用 `wifi-cfg` 类型并设置 `base-iface: <name>` 时，配置将绑定到该物理接口。
 未定义（未绑定）时，配置适用于任何符合条件的 `wifi-phy` 接口。
 
-## `auth-types`：认证类型
+## `auth-type`：认证类型
 
-仅查询属性。包含当前的认证类型。显示 WiFi 扫描结果时，包含 AP 支持的
-认证类型。应用时忽略。
+仅查询属性。当前连接的简化认证类型，供用户应用和查询。应用时忽略。
 
 支持的认证类型：
 
 - `OPEN`：无认证（开放网络）
-- `WEP`：WEP（已弃用）
-- `WPA1`：WPA 1（已弃用）
-- `WPS`：WPS（已弃用）
 - `WPA2-PSK`：WPA 2 预共享密钥
-- `EAP`：WPA 2/3 EAP / 企业级（包括 OSEN）
 - `WPA3-PSK`：使用 SAE 的 WPA 3 预共享密钥
-- `WPA3-OPEN`：使用 OWE 的 WPA 3 开放网络
-- `FILS`：IEEE 802.11ai 快速初始链路建立
-- `DPP`：设备配置协议（Easy Connect）
+- `unknown`：无法确定
+
+`npt wifi scan` 的每个 `WifiScanResult` 条目使用 `auth-types` 报告详细认证
+类型列表。每个条目包含简化的 `auth-type`，以及接入点通告的 AKM（认证与
+密钥管理）套件和密码套件，例如：
+
+```yaml
+- ssid: SweatHome5G
+  base-iface: wlan0
+  bssid: d0:21:f9:49:b3:52
+  frequency-mhz: 5180
+  signal-dbm: -45
+  signal-percent: 78
+  auth-types:
+  - auth-type: WPA2-PSK
+    akm:
+    - PSK
+    cipher:
+    - CCMP
+```
 
 ## `generation`：Wifi 代际
 

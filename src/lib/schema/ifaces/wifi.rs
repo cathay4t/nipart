@@ -175,6 +175,7 @@ pub enum WifiState {
     Unknown,
 }
 
+/// Simplified authentication type, for user to apply and query.
 #[derive(
     Debug,
     Copy,
@@ -195,36 +196,96 @@ pub enum WifiAuthType {
     /// No authentication
     #[serde(rename = "OPEN")]
     Open,
-    /// WEP (depreacated)
-    #[serde(rename = "WEP")]
-    Wep,
-    /// WPA 1(deprecated)
-    #[serde(rename = "WPA1")]
-    Wpa1,
-    /// WPS(deprecated)
-    #[serde(rename = "WPS")]
-    Wps,
-    /// WPA 2 Pre-share Key
+    /// WPA 2 Pre-shared Key
     #[serde(rename = "WPA2-PSK")]
     Wpa2Personal,
-    /// WPA 2/3 EAP(Extensible Authentication Protocol)
-    /// Including OSEN(OSU Server-Only Authenticated L2 Encryption Network)
-    #[serde(rename = "EAP")]
-    Enterprise,
-    /// WPA 3 Pre-share key using SAE(Simultaneous Authentication of Equals)
+    /// WPA 3 Pre-shared Key using SAE(Simultaneous Authentication of Equals)
     #[serde(rename = "WPA3-PSK")]
     Wpa3Personal,
-    /// WPA 3 open network using OWE(Opportunistic Wireless Encryption)
-    #[serde(rename = "WPA3-OPEN")]
-    Wpa3Open,
-    /// IEEE 802.11ai -- Fast Initial Link Setup
-    #[serde(rename = "FILS")]
-    Fils,
-    /// Device Provisioning Protoco, also known as Easy Connect.
-    #[serde(rename = "DPP")]
-    Dpp,
     #[default]
     Unknown,
+}
+
+/// Detailed authentication type with AKM and cipher suite details, used in
+/// wifi scan results.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonDisplay,
+)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[non_exhaustive]
+pub struct WifiAuthTypeDetailed {
+    /// Simplified authentication type
+    pub auth_type: WifiAuthType,
+    /// AKM (Authentication and Key Management) suites advertised by the AP,
+    /// e.g. `PSK`, `SAE`, `802.1X`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub akm: Vec<String>,
+    /// Cipher suites advertised by the AP, e.g. `CCMP`, `GCMP`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cipher: Vec<String>,
+}
+
+impl WifiAuthTypeDetailed {
+    pub fn new(
+        auth_type: WifiAuthType,
+        akm: Vec<String>,
+        cipher: Vec<String>,
+    ) -> Self {
+        Self {
+            auth_type,
+            akm,
+            cipher,
+        }
+    }
+}
+
+/// WiFi active scan result of a single scanned network.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonDisplay,
+)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[non_exhaustive]
+pub struct WifiScanResult {
+    pub ssid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_iface: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bssid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frequency_mhz: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signal_dbm: Option<i16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signal_percent: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u32>,
+    /// Authentication types supported by the scanned network.
+    pub auth_types: Vec<WifiAuthTypeDetailed>,
+}
+
+impl WifiScanResult {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        ssid: String,
+        base_iface: Option<String>,
+        bssid: Option<String>,
+        frequency_mhz: Option<u32>,
+        signal_dbm: Option<i16>,
+        signal_percent: Option<u8>,
+        generation: Option<u32>,
+        auth_types: Vec<WifiAuthTypeDetailed>,
+    ) -> Self {
+        Self {
+            ssid,
+            base_iface,
+            bssid,
+            frequency_mhz,
+            signal_dbm,
+            signal_percent,
+            generation,
+            auth_types,
+        }
+    }
 }
 
 #[derive(
@@ -381,13 +442,11 @@ pub struct WifiConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<WifiState>,
     /// Authentication type
-    /// When querying network state, it only contains single value for current
-    /// authentication type.
-    /// When showing WIFI scan results, it contains the authentication types
-    /// supported by AP.
+    /// When querying network state, it contains the current authentication
+    /// type.
     /// Ignored when applying.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub auth_types: Option<Vec<WifiAuthType>>,
+    pub auth_type: Option<WifiAuthType>,
     /// WiFi generation, e.g. 6 for WiFi-6. For query only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generation: Option<u32>,
@@ -447,6 +506,7 @@ impl WifiConfig {
     pub(crate) fn sanitize(&mut self) {
         self.state = None;
         self.generation = None;
+        self.auth_type = None;
         self.frequency_mhz = None;
         self.tx_bitrate_mb = None;
         self.rx_bitrate_mb = None;
@@ -503,7 +563,7 @@ struct WifiConfigHideSecrets {
     ssid: String,
     bssid: Option<String>,
     password: Option<String>,
-    auth_types: Option<Vec<WifiAuthType>>,
+    auth_type: Option<WifiAuthType>,
     base_iface: Option<String>,
     frequency_mhz: Option<u32>,
     rx_bitrate_mb: Option<u32>,
@@ -518,7 +578,7 @@ impl From<&WifiConfig> for WifiConfigHideSecrets {
             ssid,
             bssid,
             password,
-            auth_types,
+            auth_type,
             base_iface,
             state,
             generation,
@@ -537,7 +597,7 @@ impl From<&WifiConfig> for WifiConfigHideSecrets {
             ssid,
             bssid,
             base_iface,
-            auth_types,
+            auth_type,
             state,
             generation,
             frequency_mhz,

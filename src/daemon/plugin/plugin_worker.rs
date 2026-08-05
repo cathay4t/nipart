@@ -11,7 +11,7 @@ use futures_util::{StreamExt, stream::FuturesUnordered};
 use nipart::{
     ErrorKind, InterfaceType, NetworkState, NipartApplyOption, NipartError,
     NipartInterface, NipartNoDaemon, NipartPluginClient, NipartQueryOption,
-    NipartWifiScanOption, WifiConfig,
+    NipartWifiScanOption, WifiScanResult,
 };
 
 const NPT_PLUGIN_SOCK_DIR: &str = "/var/run/nipart/sockets/plugin";
@@ -50,7 +50,7 @@ impl std::fmt::Display for NipartPluginCmd {
 pub(crate) enum NipartPluginReply {
     None,
     States(Vec<NetworkState>),
-    WifiScanResult(Vec<WifiConfig>),
+    WifiScanResult(Vec<WifiScanResult>),
 }
 
 type FromManager = (

@@ -3,7 +3,7 @@
 use nipart::{
     NetworkState, NipartApplyOption, NipartError, NipartInterface,
     NipartPluginClient, NipartPluginInfo, NipartQueryOption,
-    NipartWifiScanOption, WifiConfig,
+    NipartWifiScanOption, WifiScanResult,
 };
 
 #[derive(Debug, Clone)]
@@ -70,7 +70,7 @@ impl NipartDaemonPlugin {
     pub(crate) async fn wifi_scan(
         &self,
         opt: &NipartWifiScanOption,
-    ) -> Result<Vec<WifiConfig>, NipartError> {
+    ) -> Result<Vec<WifiScanResult>, NipartError> {
         let mut cli = NipartPluginClient::new(&self.socket_path).await?;
         cli.wifi_scan(opt.clone()).await
     }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     JsonDisplayHideSecrets, NetworkState, NipartApplyOption, NipartCanIpc,
     NipartError, NipartIpcConnection, NipartPluginInfo, NipartQueryOption,
-    NipartWifiScanOption, WifiConfig,
+    NipartWifiScanOption, WifiScanResult,
 };
 
 #[derive(Debug)]
@@ -106,11 +106,11 @@ impl NipartPluginClient {
     pub async fn wifi_scan(
         &mut self,
         option: NipartWifiScanOption,
-    ) -> Result<Vec<WifiConfig>, NipartError> {
+    ) -> Result<Vec<WifiScanResult>, NipartError> {
         self.ipc
             .send(Ok(NipartPluginCmd::WifiScan(Box::new(option))))
             .await?;
-        self.ipc.recv::<Vec<WifiConfig>>().await
+        self.ipc.recv::<Vec<WifiScanResult>>().await
     }
 
     pub async fn send<T>(
