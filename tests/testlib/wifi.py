@@ -163,7 +163,7 @@ def has_sim_wifi_nics():
     return wlan1 and wlan2
 
 
-def start_hostapd():
+def start_hostapd(timeout=2):
     phy_id = get_wifi_phy_name(DHCP_SRV_NIC)
     assert phy_id
     # Move phy2 to namespace with hostpad
@@ -180,7 +180,7 @@ def start_hostapd():
         f"hostapd -B -d {HOSTAPD_CONF_PATH} -P {HOSTAPD_PID_PATH}".split(),
     )
 
-    assert retry_till_true_or_timeout(2, hostapd_is_up)
+    assert retry_till_true_or_timeout(timeout, hostapd_is_up)
 
     start_dhcp_server(TEST_NET_NS)
 

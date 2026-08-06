@@ -191,10 +191,8 @@ async fn connect_wifi(
     let ssid = wifi_cfg.ssid.clone();
     log::info!("Connecting to WIFI SSID {ssid} on {iface_name}");
 
-    let mut config = shuli::WifiConfig::new(iface_name, &ssid);
-    if let Some(ref password) = wifi_cfg.password {
-        config.set_password(password);
-    }
+    let mut config = shuli::WifiConfig::new(iface_name);
+    config.add_network(&ssid, wifi_cfg.password.as_deref());
 
     let mut client = shuli::WifiClient::init(config).await.map_err(|e| {
         NipartError::new(ErrorKind::PluginFailure, format!("shuli init: {e}"))

@@ -48,5 +48,12 @@ def start_dhcp_server(net_ns):
 
 
 def stop_dhcp_server():
+    if not os.path.exists(DNSMASQ_PID_PATH):
+        return
     with open(DNSMASQ_PID_PATH, "r") as fd:
-        os.kill(int(fd.read()), signal.SIGTERM)
+        try:
+            os.kill(int(fd.read()), signal.SIGTERM)
+        except (ProcessLookupError, ValueError):
+            # The dnsmasq process already exited (or the pid file is
+            # stale from an aborted run); nothing left to stop.
+            pass
