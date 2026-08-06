@@ -83,13 +83,13 @@ VLAN 封装协议：
 ## `ingress-qos-map`：入口 QoS 映射
 
 将入口数据包的 VLAN 头部 PCP（优先级代码点）值映射到 Linux 内部数据包
-优先级。每个条目将 `from`（VLAN PCP 值）映射到 `to`（Linux 优先级）。
-
-根据 802.1Q-2018 PCP 字段定义，最大优先级值为 7。
+优先级。每个条目将 `from`（VLAN PCP 值，0-7）映射到 `to`（Linux 内部
+数据包优先级）。
 
 ## `egress-qos-map`：出口 QoS 映射
 
 将 Linux 内部数据包优先级映射到出口数据包的 VLAN 头部 PCP 值。
-每个条目将 `from`（Linux 优先级）映射到 `to`（VLAN PCP 值）。
+每个条目将 `from`（Linux 内部数据包优先级，0-15）映射到 `to`
+（VLAN PCP 值，0-7）。
 
-根据 802.1Q-2018 PCP 字段定义，最大优先级值为 7。
+VLAN PCP 字段为 3 位，根据 802.1Q-2018 PCP 字段定义，最大 PCP 值为 7。

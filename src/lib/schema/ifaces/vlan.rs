@@ -260,15 +260,17 @@ pub struct VlanConfig {
     )]
     pub bridge_binding: Option<bool>,
     /// Mapping VLAN header priority to linux internal packet priority for
-    /// incoming packet.
-    /// The maximum of VLAN priority is 7 according to
-    /// 802.1Q-2018 PCP field definition.
+    /// incoming packet. Each entry maps `from` (VLAN PCP value, 0-7) to
+    /// `to` (Linux internal packet priority).
+    /// The maximum PCP value is 7 according to 802.1Q-2018 PCP field
+    /// definition.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ingress_qos_map: Option<Vec<VlanQosMapping>>,
     /// Mapping linux internal packet priority to VLAN header priority for
-    /// outgoing packet.
-    /// The maximum of VLAN priority is 7 according to
-    /// 802.1Q-2018 PCP field definition.
+    /// outgoing packet. Each entry maps `from` (Linux internal packet
+    /// priority, 0-15) to `to` (VLAN PCP value, 0-7).
+    /// The maximum PCP value is 7 according to 802.1Q-2018 PCP field
+    /// definition.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub egress_qos_map: Option<Vec<VlanQosMapping>>,
 }
