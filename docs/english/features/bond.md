@@ -239,7 +239,8 @@ the kernel rejects any multicast MAC address.
 
 ### `ad_user_port_key`: User port key
 
-The 802.3ad user-defined port key.
+The 802.3ad user-defined port key. Valid range is 0 to 1023, default is 0.
+Only valid in `802.3ad` mode.
 
 ### `all_slaves_active`: All slaves active
 
