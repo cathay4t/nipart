@@ -24,7 +24,7 @@
         * [`ad_user_port_key`：用户端口密钥](#ad_user_port_key用户端口密钥)
         * [`all_slaves_active`：所有从端口活跃](#all_slaves_active所有从端口活跃)
         * [`min_links`：最小链路数](#min_links最小链路数)
-        * [`lp_interval`：LACP PDU 间隔](#lp_intervallacp-pdu-间隔)
+        * [`lp_interval`：学习包间隔](#lp_interval学习包间隔)
         * [`packets_per_slave`：每个从端口的数据包数](#packets_per_slave每个从端口的数据包数)
         * [`resend_igmp`：重发 IGMP](#resend_igmp重发-igmp)
         * [`num_grat_arp`：免费 ARP 数量](#num_grat_arp免费-arp-数量)
@@ -231,9 +231,10 @@ ARP 监控的间隔（毫秒）。默认为 0（禁用）。不能与 `miimon` �
 
 Bond 被认为正常之前必须活跃的最小端口数。
 
-### `lp_interval`：LACP PDU 间隔
+### `lp_interval`：学习包间隔
 
-LACP PDU 发送之间的秒数。
+Bond 驱动向每个端口的对端交换机发送学习数据包的时间间隔（秒）。仅在
+`balance-alb` 模式下生效。默认为 1。
 
 ### `packets_per_slave`：每个从端口的数据包数
 

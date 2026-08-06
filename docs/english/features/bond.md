@@ -24,7 +24,7 @@
         * [`ad_user_port_key`: User port key](#ad_user_port_key-user-port-key)
         * [`all_slaves_active`: All slaves active](#all_slaves_active-all-slaves-active)
         * [`min_links`: Minimum links](#min_links-minimum-links)
-        * [`lp_interval`: LACP PDU interval](#lp_interval-lacp-pdu-interval)
+        * [`lp_interval`: Learning packet interval](#lp_interval-learning-packet-interval)
         * [`packets_per_slave`: Packets per slave](#packets_per_slave-packets-per-slave)
         * [`resend_igmp`: Resend IGMP](#resend_igmp-resend-igmp)
         * [`num_grat_arp`: Gratuitous ARP count](#num_grat_arp-gratuitous-arp-count)
@@ -244,9 +244,11 @@ frames on inactive ports:
 Minimum number of ports that must be active before the bond is considered
 up.
 
-### `lp_interval`: LACP PDU interval
+### `lp_interval`: Learning packet interval
 
-The number of seconds between LACP PDU transmissions.
+The interval in seconds between instances where the bonding driver sends
+learning packets to each port's peer switch. Only has effect in
+`balance-alb` mode. Default is 1.
 
 ### `packets_per_slave`: Packets per slave
 
