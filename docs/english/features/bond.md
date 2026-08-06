@@ -261,7 +261,8 @@ learning packets to each port's peer switch. Only has effect in
 ### `packets_per_slave`: Packets per slave
 
 Also deserializable as `packets_per_port`. Number of packets to transmit
-on a port before switching to the next in `balance-rr` mode.
+on a port before switching to the next in `balance-rr` mode. Only valid in
+`balance-rr` mode; maximum is 65535, default is 1.
 
 ### `resend_igmp`: Resend IGMP
 
