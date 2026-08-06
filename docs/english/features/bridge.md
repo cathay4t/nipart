@@ -103,7 +103,8 @@ with the corresponding destination MAC address.
 
 ### `hash-max`: Hash table maximum
 
-The maximum size of the multicast hash table.
+The maximum size of the multicast hash table. Must be a power of 2.
+Default is 4096.
 
 ### `mac-ageing-time`: MAC ageing time
 
