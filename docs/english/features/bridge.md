@@ -205,8 +205,10 @@ The VLAN encapsulation protocol used by the bridge:
 
 ### `vlan-default-pvid`: Default PVID
 
-The default Port VLAN ID (PVID) assigned to ports. Default is `1`. Cannot be
-changed to a value other than `1` unless VLAN filtering is enabled.
+The default Port VLAN ID (PVID) assigned to ports. Default is `1`. Setting
+it to `0` makes all ports have no default PVID (they will not accept
+VLAN-untagged traffic). Cannot be changed to a value other than `1` unless
+VLAN filtering is enabled.
 
 ## `ports`: Bridge ports
 
