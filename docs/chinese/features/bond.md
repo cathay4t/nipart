@@ -119,8 +119,9 @@ MII 链路监控的间隔（毫秒）。默认为 0（禁用）。不能与 `arp
 
 ### `use_carrier`：使用载体
 
-是否使用 MII/ETHTOOL ioctl 或 netif_carrier_ok() 进行链路检测。
-默认为 `true`。
+已过时的内核选项，以前用于在 MII/ETHTOOL ioctl 与 `netif_carrier_ok()`
+之间选择链路状态检测方式。现在所有链路状态检查均使用
+`netif_carrier_ok()`；设置此选项无效。默认为 `true`。
 
 ### `arp_interval`：ARP 监控间隔
 

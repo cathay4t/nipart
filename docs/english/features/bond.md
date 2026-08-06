@@ -124,7 +124,9 @@ Default is 0.
 
 ### `use_carrier`: Use carrier
 
-Whether to use MII/ETHTOOL ioctl or netif_carrier_ok() for link detection.
+Obsolete kernel option that previously selected between MII/ETHTOOL ioctls
+and `netif_carrier_ok()` to determine link state. All link state checks are
+now done with `netif_carrier_ok()`; setting this option has no effect.
 Default is `true`.
 
 ### `arp_interval`: ARP monitoring interval
