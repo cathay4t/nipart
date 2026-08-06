@@ -44,7 +44,7 @@ def backup_config():
 
 @pytest.fixture(scope="session")
 def run_daemon():
-    daemon_proc = subprocess.Popen(
+    subprocess.Popen(
         DAEMON_BIN_PATH,
         stdout=sys.stdout,
         stderr=open(DAEMON_LOG, "w"),
@@ -53,12 +53,10 @@ def run_daemon():
     time.sleep(1)
     retry_till_true_or_timeout(30, check_daemon_connection)
     yield
-    daemon_proc.terminate()
-    try:
-        daemon_proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        daemon_proc.kill()
-        daemon_proc.wait()
+    # Stop the actual current daemon (which `restart_daemon` may have
+    # restarted), otherwise the last restarted daemon would survive the
+    # session and keep its plugin children alive.
+    stop_daemon()
 
 
 def check_daemon_connection():
@@ -113,9 +111,19 @@ def stop_daemon():
 def _wait_daemon_exited(pid):
     for _ in range(40):
         try:
-            os.kill(int(pid), 0)
-        except ProcessLookupError:
-            return
+            # The daemon is our child (spawned via subprocess.Popen), so
+            # waitpid reaps it once it exits; kill(pid, 0) alone would treat
+            # an unreaped zombie as "still running" and stall the timeout.
+            wpid, _ = os.waitpid(int(pid), os.WNOHANG)
+        except ChildProcessError:
+            # Not our child (e.g. leftover from an earlier run).
+            try:
+                os.kill(int(pid), 0)
+            except ProcessLookupError:
+                return
+        else:
+            if wpid == pid:
+                return
         time.sleep(0.5)
     exec_cmd(["kill", "-KILL", pid], check=False)
     _wait_daemon_stopped()
