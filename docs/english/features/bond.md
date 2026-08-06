@@ -286,8 +286,8 @@ must be a multiple of `miimon`, otherwise the kernel rounds it down.
 
 ### `tlb_dynamic_lb`: TLB dynamic load balancing
 
-Enables dynamic load balancing in `balance-tlb` mode. When `true`, the
-bond rebalances traffic periodically.
+Enables dynamic load balancing. When `true`, the bond rebalances traffic
+periodically. Only valid in `balance-tlb` and `balance-alb` modes.
 
 ### `ns_ip6_target`: IPv6 neighbor solicitation targets
 
