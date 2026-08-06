@@ -214,7 +214,8 @@ ARP 监控的间隔（毫秒）。默认为 0（禁用）。不能与 `miimon` �
 
 ### `ad_actor_system`：Actor 系统 MAC
 
-802.3ad Actor 系统 MAC 地址。不能是组播地址（前缀 `01:00:5E`）。
+802.3ad Actor 系统 MAC 地址。必须是有效的单播 MAC 地址；内核拒绝任何
+组播 MAC 地址。
 
 ### `ad_user_port_key`：用户端口密钥
 

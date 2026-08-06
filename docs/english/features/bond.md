@@ -225,8 +225,8 @@ The 802.3ad actor system priority. Used in LACP negotiation.
 
 ### `ad_actor_system`: Actor system MAC
 
-The 802.3ad actor system MAC address. Cannot be a multicast address (prefix
-`01:00:5E`).
+The 802.3ad actor system MAC address. Must be a valid unicast MAC address;
+the kernel rejects any multicast MAC address.
 
 ### `ad_user_port_key`: User port key
 
