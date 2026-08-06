@@ -218,7 +218,8 @@ ARP 监控的间隔（毫秒）。默认为 0（禁用）。不能与 `miimon` �
 
 ### `ad_actor_sys_prio`：Actor 系统优先级
 
-802.3ad Actor 系统优先级。用于 LACP 协商。
+802.3ad Actor 系统优先级，用于 LACP 协商。有效范围为 1 到 65535，
+默认为 65535。仅在 `802.3ad` 模式下有效。
 
 ### `ad_actor_system`：Actor 系统 MAC
 

@@ -439,6 +439,8 @@ pub enum BondMode {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct BondOptions {
+    /// The 802.3ad actor system priority used in LACP negotiation. Valid
+    /// range is 1 to 65535, default is 65535. Only valid in `802.3ad` mode.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,

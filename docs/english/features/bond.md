@@ -229,7 +229,8 @@ Aggregation selection logic for `802.3ad` mode:
 
 ### `ad_actor_sys_prio`: Actor system priority
 
-The 802.3ad actor system priority. Used in LACP negotiation.
+The 802.3ad actor system priority used in LACP negotiation. Valid range is
+1 to 65535, default is 65535. Only valid in `802.3ad` mode.
 
 ### `ad_actor_system`: Actor system MAC
 
