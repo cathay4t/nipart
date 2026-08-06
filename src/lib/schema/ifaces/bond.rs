@@ -485,6 +485,9 @@ pub struct BondOptions {
     pub arp_interval: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arp_ip_target: Option<String>,
+    /// Specifies whether ARP probes and replies should be validated for
+    /// link monitoring. Not valid in `802.3ad`, `balance-tlb`, and
+    /// `balance-alb` modes.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,

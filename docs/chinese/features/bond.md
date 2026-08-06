@@ -155,6 +155,8 @@ ARP 监控的间隔（毫秒）。默认为 0（禁用）。不能与 `miimon` �
  * `filter_active`（5）：在所有端口上过滤，在活跃端口上验证。
  * `filter_backup`（6）：在所有端口上过滤，在备用端口上验证。
 
+在 `802.3ad`、`balance-tlb` 和 `balance-alb` 模式下无效。
+
 ### `arp_missed_max`：ARP 最大未命中数
 
 在认为链路断开之前，ARP 监控的最大未命中次数。

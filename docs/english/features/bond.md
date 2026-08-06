@@ -162,6 +162,8 @@ Specifies ARP probe and reply validation for link monitoring:
  * `filter_active` (5): Filter on all ports, validate on active port.
  * `filter_backup` (6): Filter on all ports, validate on backup ports.
 
+Not valid in `802.3ad`, `balance-tlb`, and `balance-alb` modes.
+
 ### `arp_missed_max`: ARP missed max
 
 Maximum number of ARP monitoring misses before considering a link down.
