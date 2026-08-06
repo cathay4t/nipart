@@ -445,6 +445,8 @@ pub struct BondOptions {
         deserialize_with = "crate::deserializer::option_u16_or_string"
     )]
     pub ad_actor_sys_prio: Option<u16>,
+    /// The 802.3ad actor system MAC address. Must be a valid unicast MAC
+    /// address, kernel rejects any multicast MAC address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ad_actor_system: Option<String>,
     #[serde(
@@ -615,18 +617,23 @@ impl BondOptions {
         Self::default()
     }
 
+    // Align with kernel `bond_option_ad_actor_system_set()` in
+    // drivers/net/bonding/bond_options.c: the MAC address must be a valid
+    // unicast MAC address, kernel rejects any multicast MAC address via
+    // `is_multicast_ether_addr()` (first byte LSB set).
     fn validate_ad_actor_system_mac_address(&self) -> Result<(), NipartError> {
-        if let Some(ad_actor_system) = &self.ad_actor_system
-            && ad_actor_system.to_uppercase().starts_with("01:00:5E")
-        {
-            let e = NipartError::new(
-                ErrorKind::InvalidArgument,
-                "The ad_actor_system bond option cannot be an IANA multicast \
-                 address(prefix with 01:00:5E)"
-                    .to_string(),
-            );
-            log::error!("{e}");
-            return Err(e);
+        if let Some(ad_actor_system) = &self.ad_actor_system {
+            let mac = parse_eth_mac(ad_actor_system)?;
+            if mac[0] & 0x01 != 0 {
+                let e = NipartError::new(
+                    ErrorKind::InvalidArgument,
+                    "The ad_actor_system bond option cannot be a multicast \
+                     MAC address"
+                        .to_string(),
+                );
+                log::error!("{e}");
+                return Err(e);
+            }
         }
         Ok(())
     }
@@ -720,6 +727,30 @@ impl BondOptions {
         }
         Ok(())
     }
+}
+
+fn parse_eth_mac(mac_str: &str) -> Result<[u8; 6], NipartError> {
+    let mut mac_vec: Vec<u8> = Vec::new();
+    for byte in mac_str.split(':') {
+        mac_vec.push(u8::from_str_radix(byte, 16).map_err(|_| {
+            NipartError::new(
+                ErrorKind::InvalidArgument,
+                format!(
+                    "Invalid MAC address {mac_str}, expecting format like: \
+                     02:69:4c:41:42:cd"
+                ),
+            )
+        })?);
+    }
+    mac_vec.try_into().map_err(|_| {
+        NipartError::new(
+            ErrorKind::InvalidArgument,
+            format!(
+                "Invalid MAC address {mac_str}, expecting format like: \
+                 02:69:4c:41:42:cd"
+            ),
+        )
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1086,5 +1117,58 @@ mod test {
             let serialized = serde_yaml::to_string(&opts).unwrap();
             assert_eq!(serialized, format!("ad_select: {value}\n"));
         }
+    }
+
+    #[test]
+    fn test_bond_ad_actor_system_valid_unicast_mac() {
+        let opts = BondOptions {
+            ad_actor_system: Some("00:11:22:33:44:55".to_string()),
+            ..Default::default()
+        };
+        assert!(opts.validate_ad_actor_system_mac_address().is_ok());
+    }
+
+    #[test]
+    fn test_bond_ad_actor_system_reject_iana_multicast_mac() {
+        let opts = BondOptions {
+            ad_actor_system: Some("01:00:5e:00:00:01".to_string()),
+            ..Default::default()
+        };
+        assert!(opts.validate_ad_actor_system_mac_address().is_err());
+    }
+
+    #[test]
+    fn test_bond_ad_actor_system_reject_other_multicast_mac() {
+        // Kernel rejects any multicast MAC address via
+        // is_multicast_ether_addr(), not only the 01:00:5E prefix.
+        let opts = BondOptions {
+            ad_actor_system: Some("03:00:00:00:00:01".to_string()),
+            ..Default::default()
+        };
+        assert!(opts.validate_ad_actor_system_mac_address().is_err());
+    }
+
+    #[test]
+    fn test_bond_ad_actor_system_reject_invalid_mac() {
+        for mac in [
+            "00:11:22",             // too short
+            "gg:11:22:33:44:55",    // non hex
+            "00:11:22:33:44:55:66", // too long
+        ] {
+            let opts = BondOptions {
+                ad_actor_system: Some(mac.to_string()),
+                ..Default::default()
+            };
+            assert!(
+                opts.validate_ad_actor_system_mac_address().is_err(),
+                "expect {mac} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn test_bond_ad_actor_system_undefined_is_ok() {
+        let opts = BondOptions::default();
+        assert!(opts.validate_ad_actor_system_mac_address().is_ok());
     }
 }
