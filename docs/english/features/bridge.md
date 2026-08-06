@@ -93,7 +93,9 @@ desired.
 
 ### `group-addr`: Multicast group address
 
-The multicast MAC address used by the bridge. Default is `01:80:C2:00:00:00`.
+The multicast MAC address used by the bridge for STP. Must be a link-local
+address of the form `01:80:C2:00:00:0X` (X in [0, 4..f]). Default is
+`01:80:C2:00:00:00`.
 
 ### `group-fwd-mask`: Group forward mask
 

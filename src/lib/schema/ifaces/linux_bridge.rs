@@ -493,6 +493,9 @@ impl LinuxBridgePortConfig {
 pub struct LinuxBridgeOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gc_timer: Option<u64>,
+    /// The multicast MAC address used by the bridge for STP. Must be a
+    /// link-local address of the form `01:80:C2:00:00:0X` (X in [0, 4..f]).
+    /// Default is `01:80:C2:00:00:00`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group_addr: Option<String>,
     /// Alias of [LinuxBridgeOptions.group_fwd_mask], not preferred, please
