@@ -457,9 +457,10 @@ pub struct LinuxBridgePortConfig {
         deserialize_with = "crate::deserializer::option_u32_or_string"
     )]
     pub stp_path_cost: Option<u32>,
-    /// The STP port priority. The priority value is an unsigned 8-bit quantity
-    /// (number between 0 and 255). This metric is used in the designated port
-    /// an droot port selec‐ tion algorithms.
+    /// The STP port priority. The priority value is in the range of 0 to 63
+    /// (kernel `BR_MAX_PORT_PRIORITY`, occupying the upper 6 bits of the
+    /// 16-bit port ID). This metric is used in the designated port and root
+    /// port selection algorithms.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
@@ -716,6 +717,8 @@ pub struct LinuxBridgeStpOptions {
         deserialize_with = "crate::deserializer::option_u8_or_string"
     )]
     pub max_age: Option<u8>,
+    /// The STP bridge priority. Valid range is 0 to 65535. Lower priority
+    /// increases the chance of becoming the root bridge.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
