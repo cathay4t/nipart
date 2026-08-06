@@ -551,7 +551,11 @@ pub struct BondOptions {
     pub num_unsol_na: Option<u8>,
     /// Equal to kernel bond option `packets_per_slave`.
     ///
-    /// This property deserialize from `packet_per_port` or
+    /// Number of packets to transmit on a port before switching to the next
+    /// in `balance-rr` mode. Only valid in `balance-rr` mode; maximum is
+    /// 65535, default is 1.
+    ///
+    /// This property deserialize from `packets_per_port` or
     /// `packets_per_slave`.
     #[serde(
         skip_serializing_if = "Option::is_none",
