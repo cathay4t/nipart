@@ -382,11 +382,14 @@ impl NipartMonitorWorker {
         if event.is_delete {
             // delete event, emit now.
             self.notify(event).await?;
-        } else if event.iface_type == InterfaceType::WifiPhy
+        } else if event.is_up
+            && event.iface_type == InterfaceType::WifiPhy
             && event.ssid.is_none()
         {
             // If WIFI is up but no SSID yet, we delay the event, so kernel
-            // could continue processing it.
+            // could continue processing it.  A link-down event has no SSID
+            // by definition, so it is not delayed here: delaying it stalls
+            // pending wifi applies at boot for the whole wait window.
             self.delay_notify(
                 event,
                 Duration::from_secs(WIFI_UP_NO_SSID_WAIT_SEC),
