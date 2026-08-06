@@ -2,13 +2,15 @@
 
 use serde::Deserialize;
 
-use crate::BondMode;
-use crate::deserializer::{
-    bool_or_string, number_as_string, option_bool_or_string,
-    option_enum_string_or_integer, option_i32_or_string, option_i64_or_string,
-    option_number_as_string, option_u8_or_string, option_u16_or_string,
-    option_u32_or_string, option_u64_or_string, u8_or_string, u16_or_string,
-    u32_or_string,
+use crate::{
+    BondMode,
+    deserializer::{
+        bool_or_string, number_as_string, option_bool_or_string,
+        option_enum_string_or_integer, option_i32_or_string,
+        option_i64_or_string, option_number_as_string, option_u8_or_string,
+        option_u16_or_string, option_u32_or_string, option_u64_or_string,
+        u8_or_string, u16_or_string, u32_or_string,
+    },
 };
 
 #[derive(Debug, PartialEq, Deserialize)]

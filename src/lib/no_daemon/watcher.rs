@@ -38,7 +38,7 @@ impl NipartNoDaemon {
                 ErrorKind::Bug,
                 format!(
                     "Failed to enable IPv6 on interface {iface_name} by \
-                         writing {sysctl_path}: {e}"
+                     writing {sysctl_path}: {e}"
                 ),
             )
         })?;

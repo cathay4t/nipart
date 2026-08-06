@@ -228,8 +228,7 @@ async fn apply_ifaces_ip_changes(
         {
             let iface_name = merged_iface.name();
             log::debug!(
-                "Forcing IPv6 autoconf (accept_ra=2) on interface \
-                 {iface_name}"
+                "Forcing IPv6 autoconf (accept_ra=2) on interface {iface_name}"
             );
             NipartNoDaemon::enable_ipv6(iface_name).await?;
             NipartNoDaemon::enable_autoconf(iface_name).await?;
