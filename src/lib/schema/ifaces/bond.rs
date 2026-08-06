@@ -616,6 +616,9 @@ pub struct BondOptions {
         deserialize_with = "crate::deserializer::option_enum_string_or_integer"
     )]
     pub xmit_hash_policy: Option<BondXmitHashPolicy>,
+    /// Maximum number of ARP monitoring misses before considering a link
+    /// down. Valid range is 1 to 255, default is 2. Not valid in
+    /// `802.3ad`, `balance-tlb`, and `balance-alb` modes.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,

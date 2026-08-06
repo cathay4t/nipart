@@ -167,6 +167,8 @@ Not valid in `802.3ad`, `balance-tlb`, and `balance-alb` modes.
 ### `arp_missed_max`: ARP missed max
 
 Maximum number of ARP monitoring misses before considering a link down.
+Valid range is 1 to 255, default is 2. Not valid in `802.3ad`,
+`balance-tlb`, and `balance-alb` modes.
 
 ### `fail_over_mac`: Fail over MAC
 

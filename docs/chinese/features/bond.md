@@ -159,7 +159,8 @@ ARP 监控的间隔（毫秒）。默认为 0（禁用）。不能与 `miimon` �
 
 ### `arp_missed_max`：ARP 最大未命中数
 
-在认为链路断开之前，ARP 监控的最大未命中次数。
+在认为链路断开之前，ARP 监控的最大未命中次数。有效范围为 1 到 255，
+默认为 2。在 `802.3ad`、`balance-tlb` 和 `balance-alb` 模式下无效。
 
 ### `fail_over_mac`：故障切换 MAC
 
