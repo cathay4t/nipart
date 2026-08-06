@@ -115,12 +115,14 @@ Cannot be used together with `arp_interval`.
 ### `updelay`: Up delay
 
 Delay in milliseconds before enabling a port after link up detection.
-Default is 0.
+Default is 0. Only settable when `miimon` is enabled (greater than 0); the
+value must be a multiple of `miimon`, otherwise the kernel rounds it down.
 
 ### `downdelay`: Down delay
 
 Delay in milliseconds before disabling a port after link loss detection.
-Default is 0.
+Default is 0. Only settable when `miimon` is enabled (greater than 0); the
+value must be a multiple of `miimon`, otherwise the kernel rounds it down.
 
 ### `use_carrier`: Use carrier
 
@@ -274,7 +276,8 @@ failover. Same meaning in kernel as `num_grat_arp`.
 ### `peer_notif_delay`: Peer notification delay
 
 Delay in milliseconds between gratuitous ARP/NA notifications after a
-failover.
+failover. Only settable when `miimon` is enabled (greater than 0); the value
+must be a multiple of `miimon`, otherwise the kernel rounds it down.
 
 ### `tlb_dynamic_lb`: TLB dynamic load balancing
 

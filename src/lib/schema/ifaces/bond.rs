@@ -491,6 +491,9 @@ pub struct BondOptions {
         deserialize_with = "crate::deserializer::option_enum_string_or_integer"
     )]
     pub arp_validate: Option<BondArpValidate>,
+    /// Delay before considering link down, in milliseconds. Default is 0.
+    /// Only settable when `miimon` is enabled (greater than 0); the value
+    /// must be a multiple of `miimon`, otherwise the kernel rounds it down.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
@@ -555,6 +558,10 @@ pub struct BondOptions {
         alias = "packets_per_port"
     )]
     pub packets_per_port: Option<u32>,
+    /// Delay between each peer notification on failover event, in
+    /// milliseconds. Only settable when `miimon` is enabled (greater than
+    /// 0); the value must be a multiple of `miimon`, otherwise the kernel
+    /// rounds it down.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
@@ -581,6 +588,9 @@ pub struct BondOptions {
         deserialize_with = "crate::deserializer::option_bool_or_string"
     )]
     pub tlb_dynamic_lb: Option<bool>,
+    /// Delay before considering link up, in milliseconds. Default is 0.
+    /// Only settable when `miimon` is enabled (greater than 0); the value
+    /// must be a multiple of `miimon`, otherwise the kernel rounds it down.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
