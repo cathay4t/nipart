@@ -8,7 +8,10 @@ use nipart::{
     ErrorKind, InterfaceLinkEvent, NipartClient, NipartError,
     NipartIpcConnection, NipartIpcListener,
 };
-use tokio::sync::SetOnce;
+use tokio::{
+    signal::unix::{Signal, SignalKind},
+    sync::SetOnce,
+};
 
 use super::{api::process_api_connection, commander::NipartCommander};
 
@@ -30,6 +33,8 @@ pub(crate) struct NipartDaemon {
     // forked threads.
     commander: NipartCommander,
     pid_file: String,
+    sigterm: Signal,
+    sigint: Signal,
 }
 
 impl Drop for NipartDaemon {
@@ -40,6 +45,21 @@ impl Drop for NipartDaemon {
 
 impl NipartDaemon {
     pub(crate) async fn new() -> Result<Self, NipartError> {
+        let sigterm = tokio::signal::unix::signal(SignalKind::terminate())
+            .map_err(|e| {
+                NipartError::new(
+                    ErrorKind::DaemonFailure,
+                    format!("Failed to register SIGTERM handler: {e}"),
+                )
+            })?;
+        let sigint = tokio::signal::unix::signal(SignalKind::interrupt())
+            .map_err(|e| {
+                NipartError::new(
+                    ErrorKind::DaemonFailure,
+                    format!("Failed to register SIGINT handler: {e}"),
+                )
+            })?;
+
         let api_ipc =
             NipartIpcListener::new(NipartClient::DEFAULT_SOCKET_PATH)?;
         // Make the API IPC globally read and writable for non-root user to
@@ -96,19 +116,13 @@ impl NipartDaemon {
             commander,
             managers_ipc: receiver,
             pid_file: DAEMON_PID_FILE.to_string(),
+            sigterm,
+            sigint,
         })
     }
 
     /// Please run this function in a thread
     pub(crate) async fn run(&mut self) {
-        let mut sigterm = tokio::signal::unix::signal(
-            tokio::signal::unix::SignalKind::terminate(),
-        )
-        .ok();
-        let mut sigint = tokio::signal::unix::signal(
-            tokio::signal::unix::SignalKind::interrupt(),
-        )
-        .ok();
         loop {
             tokio::select! {
                 result = self.api_ipc.accept() => {
@@ -119,23 +133,11 @@ impl NipartDaemon {
                         self.handle_manager_cmd(cmd).await;
                     }
                 },
-                _ = async {
-                    if let Some(ref mut sig) = sigterm {
-                        sig.recv().await;
-                    } else {
-                        std::future::pending().await
-                    }
-                } => {
+                _ = self.sigterm.recv() => {
                     log::info!("Received SIGTERM, shutting down");
                     break;
                 },
-                _ = async {
-                    if let Some(ref mut sig) = sigint {
-                        sig.recv().await;
-                    } else {
-                        std::future::pending().await
-                    }
-                } => {
+                _ = self.sigint.recv() => {
                     log::info!("Received SIGINT, shutting down");
                     break;
                 },
