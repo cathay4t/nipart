@@ -509,6 +509,9 @@ pub struct BondOptions {
         deserialize_with = "crate::deserializer::option_enum_string_or_integer"
     )]
     pub lacp_rate: Option<BondLacpRate>,
+    /// The number of seconds between instances where the bonding driver
+    /// sends learning packets to each slave's peer switch. Only has effect
+    /// in `balance-alb` mode. Default is 1.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
