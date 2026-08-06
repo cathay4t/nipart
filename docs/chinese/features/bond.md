@@ -270,8 +270,8 @@ Bond 驱动向每个端口的对端交换机发送学习数据包的时间间隔
 
 ### `tlb_dynamic_lb`：TLB 动态负载均衡
 
-在 `balance-tlb` 模式下启用动态负载均衡。当设置为 `true` 时，Bond 会定期
-重新平衡流量。
+启用动态负载均衡。当设置为 `true` 时，Bond 会定期重新平衡流量。
+仅在 `balance-tlb` 和 `balance-alb` 模式下有效。
 
 ### `ns_ip6_target`：IPv6 邻居请求目标
 

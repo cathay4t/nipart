@@ -589,6 +589,8 @@ pub struct BondOptions {
         deserialize_with = "crate::deserializer::option_u32_or_string"
     )]
     pub resend_igmp: Option<u32>,
+    /// Enables dynamic load balancing. Only valid in `balance-tlb` and
+    /// `balance-alb` modes.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
