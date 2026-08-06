@@ -565,6 +565,8 @@ pub struct LinuxBridgeOptions {
         deserialize_with = "crate::deserializer::option_u64_or_string"
     )]
     pub multicast_querier_interval: Option<u64>,
+    /// The interval in milliseconds between general multicast queries sent
+    /// by the querier. Minimum is 100, default is 12500.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
@@ -601,6 +603,8 @@ pub struct LinuxBridgeOptions {
         deserialize_with = "crate::deserializer::option_u32_or_string"
     )]
     pub multicast_startup_query_count: Option<u32>,
+    /// The interval in milliseconds between queries sent during the startup
+    /// phase. Minimum is 100, default is 3125.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,

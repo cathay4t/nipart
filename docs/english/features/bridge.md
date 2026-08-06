@@ -139,7 +139,8 @@ queries when no queries from other multicast queriers are seen. Default is
 
 ### `multicast-query-interval`: Query interval
 
-The interval in milliseconds between general multicast queries.
+The interval in milliseconds between general multicast queries sent by the
+querier. Minimum is 100, default is 12500.
 
 ### `multicast-query-response-interval`: Query response interval
 
@@ -168,7 +169,8 @@ The number of queries sent when the bridge starts.
 
 ### `multicast-startup-query-interval`: Startup query interval
 
-The interval in milliseconds between startup queries.
+The interval in milliseconds between queries sent during the startup phase.
+Minimum is 100, default is 3125.
 
 ### `stp`: Spanning Tree Protocol
 
