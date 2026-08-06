@@ -185,8 +185,7 @@ async fn get_lease_v6<'a>(
                     return Err(NipartError::new(
                         ErrorKind::Bug,
                         format!(
-                            "Failed to start DHCPv6 client on iface {}/{}: \
-                             {e}",
+                            "Failed to start DHCPv6 client on iface {}/{}: {e}",
                             kernel_iface_name, iface_type,
                         ),
                     ));

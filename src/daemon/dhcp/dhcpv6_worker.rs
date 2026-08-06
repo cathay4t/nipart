@@ -149,8 +149,8 @@ impl NipartDhcpV6Thread {
             Err(e) => Err(NipartError::new(
                 ErrorKind::Bug,
                 format!(
-                    "Failed to lock share data of DHCPv6 thread for \
-                     interface {}: {e}",
+                    "Failed to lock share data of DHCPv6 thread for interface \
+                     {}: {e}",
                     self.base_iface.name
                 ),
             )),
@@ -324,8 +324,7 @@ async fn init_dhcp_client(
                     return Err(NipartError::new(
                         ErrorKind::Bug,
                         format!(
-                            "Failed to start DHCPv6 client on iface {}/{}: \
-                             {e}",
+                            "Failed to start DHCPv6 client on iface {}/{}: {e}",
                             base_iface.name, base_iface.iface_type,
                         ),
                     ));

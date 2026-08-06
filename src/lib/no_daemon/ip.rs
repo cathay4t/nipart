@@ -309,9 +309,8 @@ fn is_replacing(
 mod tests {
     use std::net::{IpAddr, Ipv6Addr};
 
-    use crate::{BaseInterface, InterfaceIpAddr, InterfaceIpv6, InterfaceType};
-
     use super::apply_iface_ip_changes;
+    use crate::{BaseInterface, InterfaceIpAddr, InterfaceIpv6, InterfaceType};
 
     fn iface_with_ipv6(ipv6: InterfaceIpv6) -> BaseInterface {
         let mut iface =
