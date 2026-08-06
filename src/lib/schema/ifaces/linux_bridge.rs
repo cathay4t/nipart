@@ -509,6 +509,8 @@ pub struct LinuxBridgeOptions {
         deserialize_with = "crate::deserializer::option_u16_or_string"
     )]
     pub group_fwd_mask: Option<u16>,
+    /// The maximum size of the multicast hash table. Must be a power of 2.
+    /// Default is 4096.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
