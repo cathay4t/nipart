@@ -769,6 +769,16 @@ impl BondOptions {
 fn parse_eth_mac(mac_str: &str) -> Result<[u8; 6], NipartError> {
     let mut mac_vec: Vec<u8> = Vec::new();
     for byte in mac_str.split(':') {
+        // Kernel mac_pton() requires exactly 2 hex digits per byte.
+        if byte.len() != 2 {
+            return Err(NipartError::new(
+                ErrorKind::InvalidArgument,
+                format!(
+                    "Invalid MAC address {mac_str}, expecting format like: \
+                     02:69:4c:41:42:cd"
+                ),
+            ));
+        }
         mac_vec.push(u8::from_str_radix(byte, 16).map_err(|_| {
             NipartError::new(
                 ErrorKind::InvalidArgument,
@@ -1191,6 +1201,8 @@ mod test {
             "00:11:22",             // too short
             "gg:11:22:33:44:55",    // non hex
             "00:11:22:33:44:55:66", // too long
+            "001:11:22:33:44:55",   // more than 2 hex digits per byte
+            "0:11:22:33:44:55",     // less than 2 hex digits per byte
         ] {
             let opts = BondOptions {
                 ad_actor_system: Some(mac.to_string()),
