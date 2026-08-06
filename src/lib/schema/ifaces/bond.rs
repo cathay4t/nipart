@@ -587,6 +587,10 @@ pub struct BondOptions {
         deserialize_with = "crate::deserializer::option_u32_or_string"
     )]
     pub updelay: Option<u32>,
+    /// Obsolete kernel option that previously selected between MII/ETHTOOL
+    /// ioctls and `netif_carrier_ok()` to determine link state. All link
+    /// state checks are now done with `netif_carrier_ok()`; setting this
+    /// option has no effect. Default is `true`.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
