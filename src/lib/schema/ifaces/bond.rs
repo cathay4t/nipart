@@ -457,6 +457,8 @@ pub struct BondOptions {
         deserialize_with = "crate::deserializer::option_enum_string_or_integer"
     )]
     pub ad_select: Option<BondAdSelect>,
+    /// The 802.3ad user-defined port key. Valid range is 0 to 1023, default
+    /// is 0. Only valid in `802.3ad` mode.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
