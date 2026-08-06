@@ -87,14 +87,14 @@ that are members of the VLAN.
 ## `ingress-qos-map`: Ingress QoS mapping
 
 Maps VLAN header PCP (Priority Code Point) values to Linux internal packet
-priority for incoming packets. Each entry maps `from` (VLAN PCP value) to `to`
-(Linux priority).
-
-The maximum priority value is 7 according to 802.1Q-2018 PCP field definition.
+priority for incoming packets. Each entry maps `from` (VLAN PCP value, 0-7)
+to `to` (Linux internal packet priority).
 
 ## `egress-qos-map`: Egress QoS mapping
 
 Maps Linux internal packet priority to VLAN header PCP values for outgoing
-packets. Each entry maps `from` (Linux priority) to `to` (VLAN PCP value).
+packets. Each entry maps `from` (Linux internal packet priority, 0-15) to
+`to` (VLAN PCP value, 0-7).
 
-The maximum priority value is 7 according to 802.1Q-2018 PCP field definition.
+The VLAN PCP field is 3 bits, so the maximum PCP value is 7 according to the
+802.1Q-2018 PCP field definition.
