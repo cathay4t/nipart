@@ -63,23 +63,13 @@ interfaces:
       ad_user_port_key: 0
       min_links: 0
       lp_interval: 1
-      packets_per_slave: 1
       resend_igmp: 1
       all_slaves_active: dropped
-      arp_interval: 0
-      arp_ip_target: 192.0.2.1,192.0.2.2
-      arp_all_targets: any
-      arp_validate: none
-      arp_missed_max: 3
       fail_over_mac: none
-      primary: eth1
       primary_reselect: always
       num_grat_arp: 1
       num_unsol_na: 1
       peer_notif_delay: 0
-      tlb_dynamic_lb: true
-      ns_ip6_target:
-      - "2001:db8::1"
     ports:
     - name: eth1
       priority: 0
@@ -88,6 +78,9 @@ interfaces:
       priority: 0
       queue-id: 0
 ```
+
+注意：大多数 Bond 选项仅在特定的绑定模式下有效（请参阅下面的每个选项），
+上面的示例仅包含 `802.3ad` 模式下有效的选项。
 
 ## `mode`：Bond 模式
 
