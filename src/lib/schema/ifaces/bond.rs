@@ -773,6 +773,16 @@ impl BondPortConfig {
 }
 
 /// Specifies the 802.3ad aggregation selection logic to use.
+///
+/// Align with the kernel `ad_select` option values defined in
+/// `drivers/net/bonding/bond_options.c`:
+///  * `stable` (0): Select the aggregator with the most ports attached and
+///    reselect the active aggregator only when the previous one has no more
+///    ports related to it.
+///  * `bandwidth` (1): Select the aggregator with the highest total bandwidth.
+///  * `count` (2): Select the aggregator with the largest number of ports.
+///  * `actor_port_prio` (3): Select the aggregator with the highest total
+///    priority of ports.
 #[derive(
     Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, JsonDisplay,
 )]
@@ -788,6 +798,9 @@ pub enum BondAdSelect {
     /// Deserialize and serialize from/to `count`.
     #[serde(alias = "2")]
     Count,
+    /// Deserialize and serialize from/to `actor_port_prio`.
+    #[serde(rename = "actor_port_prio", alias = "3")]
+    ActorPortPrio,
 }
 
 #[derive(
@@ -999,4 +1012,79 @@ pub enum BondXmitHashPolicy {
     /// Serialize to `vlan+srcmac`.
     /// Deserialize from 5 or `vlan+srcmac`.
     VlanSrcMac,
+}
+
+#[cfg(test)]
+mod test {
+    use serde_json::json;
+
+    use super::*;
+
+    fn deserialize_ad_select(v: serde_json::Value) -> Option<BondAdSelect> {
+        let opts: BondOptions = serde_json::from_value(json!({
+            "ad_select": v,
+        }))
+        .unwrap();
+        opts.ad_select
+    }
+
+    #[test]
+    fn test_bond_ad_select_deserialize_strings() {
+        assert_eq!(
+            deserialize_ad_select(json!("stable")),
+            Some(BondAdSelect::Stable)
+        );
+        assert_eq!(
+            deserialize_ad_select(json!("bandwidth")),
+            Some(BondAdSelect::Bandwidth)
+        );
+        assert_eq!(
+            deserialize_ad_select(json!("count")),
+            Some(BondAdSelect::Count)
+        );
+        assert_eq!(
+            deserialize_ad_select(json!("actor_port_prio")),
+            Some(BondAdSelect::ActorPortPrio)
+        );
+    }
+
+    #[test]
+    fn test_bond_ad_select_deserialize_integers() {
+        assert_eq!(deserialize_ad_select(json!(0)), Some(BondAdSelect::Stable));
+        assert_eq!(
+            deserialize_ad_select(json!(1)),
+            Some(BondAdSelect::Bandwidth)
+        );
+        assert_eq!(deserialize_ad_select(json!(2)), Some(BondAdSelect::Count));
+        assert_eq!(
+            deserialize_ad_select(json!(3)),
+            Some(BondAdSelect::ActorPortPrio)
+        );
+    }
+
+    #[test]
+    fn test_bond_ad_select_serialize() {
+        let opts = BondOptions {
+            ad_select: Some(BondAdSelect::ActorPortPrio),
+            ..Default::default()
+        };
+        let json_str = serde_json::to_string(&opts).unwrap();
+        assert_eq!(json_str, "{\"ad_select\":\"actor_port_prio\"}",);
+    }
+
+    #[test]
+    fn test_bond_ad_select_yaml_round_trip() {
+        for (value, expected) in [
+            ("stable", BondAdSelect::Stable),
+            ("bandwidth", BondAdSelect::Bandwidth),
+            ("count", BondAdSelect::Count),
+            ("actor_port_prio", BondAdSelect::ActorPortPrio),
+        ] {
+            let opts: BondOptions =
+                serde_yaml::from_str(&format!("ad_select: {value}\n")).unwrap();
+            assert_eq!(opts.ad_select, Some(expected));
+            let serialized = serde_yaml::to_string(&opts).unwrap();
+            assert_eq!(serialized, format!("ad_select: {value}\n"));
+        }
+    }
 }

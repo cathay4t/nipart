@@ -130,6 +130,7 @@ impl From<BondAdSelect> for nispor::BondAdSelect {
             BondAdSelect::Stable => Self::Stable,
             BondAdSelect::Bandwidth => Self::Bandwidth,
             BondAdSelect::Count => Self::Count,
+            BondAdSelect::ActorPortPrio => Self::Other(3),
         }
     }
 }
@@ -382,6 +383,7 @@ fn np_bond_options_to_nipart(np_bond: &nispor::BondInfo) -> BondOptions {
             nispor::BondAdSelect::Stable => Some(BondAdSelect::Stable),
             nispor::BondAdSelect::Bandwidth => Some(BondAdSelect::Bandwidth),
             nispor::BondAdSelect::Count => Some(BondAdSelect::Count),
+            nispor::BondAdSelect::Other(3) => Some(BondAdSelect::ActorPortPrio),
             _ => {
                 log::warn!("Unsupported bond ad_select option {r:?}");
                 None
@@ -516,5 +518,31 @@ fn np_bond_options_to_nipart(np_bond: &nispor::BondInfo) -> BondOptions {
         lacp_active: np_bond.lacp_active,
         ns_ip6_target: np_bond.ns_ip6_target.clone(),
         peer_notif_delay: np_bond.peer_notif_delay,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_bond_ad_select_actor_port_prio_to_nispor() {
+        let np_ad_select: nispor::BondAdSelect =
+            BondAdSelect::ActorPortPrio.into();
+        assert_eq!(np_ad_select, nispor::BondAdSelect::Other(3));
+    }
+
+    #[test]
+    fn test_bond_ad_select_from_nispor_actor_port_prio() {
+        let np_bond: nispor::BondInfo = serde_json::from_value(json!({
+            "mode": "802.3ad",
+            "ports": [],
+            "ad-select": { "other": 3 },
+        }))
+        .unwrap();
+        let opts = np_bond_options_to_nipart(&np_bond);
+        assert_eq!(opts.ad_select, Some(BondAdSelect::ActorPortPrio));
     }
 }

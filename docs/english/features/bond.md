@@ -211,9 +211,13 @@ Transmit hash policy for `balance-xor`, `802.3ad`, and `balance-tlb` modes:
 ### `ad_select`: 802.3ad aggregation selection
 
 Aggregation selection logic for `802.3ad` mode:
- * `stable` (0): Use the stable aggregator.
- * `bandwidth` (1): Select aggregator with highest bandwidth.
- * `count` (2): Select aggregator with most ports.
+ * `stable` (0): Select the aggregator with the most ports attached, and
+   reselect the active aggregator only when the previous one has no more
+   ports related to it.
+ * `bandwidth` (1): Select the aggregator with the highest total bandwidth.
+ * `count` (2): Select the aggregator with the largest number of ports.
+ * `actor_port_prio` (3): Select the aggregator with the highest total
+   priority of ports.
 
 ### `ad_actor_sys_prio`: Actor system priority
 
