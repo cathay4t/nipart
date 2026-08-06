@@ -196,8 +196,8 @@ The maximum age of STP information in seconds. Valid range is 6 to 40.
 
 #### `priority`: Bridge priority
 
-The STP bridge priority. Lower priority increases the chance of becoming the
-root bridge.
+The STP bridge priority. Valid range is 0 to 65535. Lower priority increases
+the chance of becoming the root bridge.
 
 ### `vlan-protocol`: VLAN protocol
 
@@ -232,7 +232,8 @@ The STP path cost of the port. Used in root port and designated port selection.
 
 ### `stp-priority`: STP priority
 
-The STP port priority. An unsigned 8-bit value (0 to 255). Lower priority
+The STP port priority. Valid range is 0 to 63 (kernel `BR_MAX_PORT_PRIORITY`,
+the priority occupies the upper 6 bits of the 16-bit port ID). Lower priority
 increases the chance of becoming the designated port.
 
 ### `vlan`: Port VLAN filtering
