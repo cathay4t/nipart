@@ -272,13 +272,15 @@ Number of IGMP membership reports to be sent after a failover.
 
 ### `num_grat_arp`: Gratuitous ARP count
 
-Number of gratuitous ARP packets to send after a failover. Must be equal
-to `num_unsol_na` if both are defined.
+Number of gratuitous ARP packets to send after a failover. Valid range is
+0 to 255, default is 1. Must be equal to `num_unsol_na` if both are
+defined.
 
 ### `num_unsol_na`: Unsolicited NA count
 
 Number of unsolicited IPv6 Neighbor Advertisements to send after a
-failover. Same meaning in kernel as `num_grat_arp`.
+failover. Valid range is 0 to 255, default is 1. Same meaning in kernel as
+`num_grat_arp`.
 
 ### `peer_notif_delay`: Peer notification delay
 

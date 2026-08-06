@@ -540,13 +540,17 @@ pub struct BondOptions {
         deserialize_with = "crate::deserializer::option_u32_or_string"
     )]
     pub min_links: Option<u32>,
+    /// Number of gratuitous ARP packets to send after a failover. Valid
+    /// range is 0 to 255, default is 1. Must be equal to `num_unsol_na` if
+    /// both are defined.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
         deserialize_with = "crate::deserializer::option_u8_or_string"
     )]
     pub num_grat_arp: Option<u8>,
-    /// Identical to [BondOptions.num_grat_arp]
+    /// Identical to [BondOptions.num_grat_arp] in kernel, valid range is
+    /// 0 to 255, default is 1.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
