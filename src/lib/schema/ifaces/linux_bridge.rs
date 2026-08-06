@@ -611,6 +611,9 @@ pub struct LinuxBridgeOptions {
     pub stp: Option<LinuxBridgeStpOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vlan_protocol: Option<VlanProtocol>,
+    /// The default Port VLAN ID (PVID) assigned to ports. Default is `1`.
+    /// Setting it to `0` makes all ports have no default PVID (they will
+    /// not accept VLAN-untagged traffic).
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
