@@ -128,7 +128,9 @@ When set to `true`, the bridge can act as a multicast querier.
 
 ### `multicast-querier-interval`: Querier interval
 
-The interval in milliseconds between querier transmissions.
+The interval in milliseconds after which the bridge starts sending its own
+queries when no queries from other multicast queriers are seen. Default is
+25500.
 
 ### `multicast-query-interval`: Query interval
 

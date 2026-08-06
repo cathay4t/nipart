@@ -547,6 +547,9 @@ pub struct LinuxBridgeOptions {
         deserialize_with = "crate::deserializer::option_bool_or_string"
     )]
     pub multicast_querier: Option<bool>,
+    /// The interval in milliseconds after which the bridge starts sending
+    /// its own queries when no queries from other multicast queriers are
+    /// seen. Default is 25500.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
