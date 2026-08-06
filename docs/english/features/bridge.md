@@ -110,6 +110,8 @@ Default is 4096.
 
 The MAC address ageing time in seconds. Controls how long a learned MAC
 address is kept in the forwarding database without being refreshed.
+Special values: `0` disables ageing (entries never age), `1` makes entries
+disappear immediately. Default is 300.
 
 ### `multicast-last-member-count`: Last member query count
 

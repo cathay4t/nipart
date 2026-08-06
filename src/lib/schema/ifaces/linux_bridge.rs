@@ -519,6 +519,10 @@ pub struct LinuxBridgeOptions {
     pub hash_max: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hello_timer: Option<u64>,
+    /// The MAC address ageing time in seconds. Controls how long a learned
+    /// MAC address is kept in the forwarding database without being
+    /// refreshed. Special values: `0` disables ageing (entries never age),
+    /// `1` makes entries disappear immediately. Default is 300.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
