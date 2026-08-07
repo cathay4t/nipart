@@ -53,7 +53,7 @@ git = "https://github.com/nispor/nispor"
 #path = "../nispor/src/lib"
 
 [workspace.dependencies.mozim]
-git = "https://github.com/nispor/mozim"
+version = "0.3.2"
 default-features = false
 
 [workspace.dependencies.rtnetlink]
