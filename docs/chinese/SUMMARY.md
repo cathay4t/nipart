@@ -1,6 +1,7 @@
 # Nipart 文档
 
 [简介](index.md)
+[架构](architecture.md)
 [功能特性](features/index.md)
 * [基础接口](features/base.md)
 * [IP 地址](features/ip.md)

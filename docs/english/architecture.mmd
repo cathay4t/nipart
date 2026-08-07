@@ -1,0 +1,57 @@
+%% Nipart Architecture (PPT-ready)
+%% Render: mmdc -i docs/english/architecture.mmd -o docs/english/architecture.svg
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Inter, PingFang SC, Microsoft YaHei, sans-serif","fontSize":"16px","primaryColor":"#ffffff","primaryBorderColor":"#cbd5e1","primaryTextColor":"#0f172a","lineColor":"#94a3b8","edgeLabelBackground":"#ffffff"}}}%%
+
+flowchart TB
+    %% ============ Clients ============
+    subgraph CLIENTS["Clients"]
+        NPT["npt CLI<br/>show · apply · wifi · ..."]
+        PYN["Python client"]
+        NOD["npt -n daemonless mode"]
+    end
+
+    %% ============ IPC ============
+    subgraph IPC["IPC · UNIX socket, size + JSON"]
+        SOCK["/var/run/nipart/sockets/daemon"]
+    end
+
+    %% ============ Daemon ============
+    subgraph DAE["Daemon · nipartd (Rust / tokio)"]
+        CORE["commander dispatcher<br/>conf · event · monitor · dhcp · plugin managers"]
+    end
+
+    %% ============ Plugins + engine ============
+    subgraph MID["Plugins & Kernel Engine"]
+        PL["Plugins · separate processes<br/>plugin-wifi · plugin-ovs · third-party"]
+        NODA["no_daemon kernel apply engine<br/>apply · query · watcher"]
+    end
+
+    %% ============ Kernel ============
+    subgraph KRN["Kernel · System Layer"]
+        N["nispor · rtnetlink · nl80211<br/>netlink query / modify / WiFi"]
+        KS["Linux kernel network subsystem<br/>ip · route · bond · bridge · vlan · vxlan"]
+    end
+
+    %% ============ Edges ============
+    NPT -->|"query / apply"| SOCK
+    PYN --> SOCK
+    SOCK --> CORE
+    CORE --> PL
+    CORE --> NODA
+    NOD -.->|"skip daemon"| NODA
+    NODA --> N
+    N --> KS
+    PL -.->|"WiFi scan"| N
+
+    %% ============ Styles ============
+    classDef client fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a;
+    classDef ipc fill:#f1f5f9,stroke:#64748b,stroke-width:2px,color:#334155;
+    classDef daemon fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95;
+    classDef mid fill:#d1fae5,stroke:#059669,stroke-width:2px,color:#064e3b;
+    classDef kern fill:#e2e8f0,stroke:#475569,stroke-width:2px,color:#1e293b;
+
+    class NPT,PYN,NOD client;
+    class SOCK ipc;
+    class CORE daemon;
+    class PL,NODA mid;
+    class N,KS kern;

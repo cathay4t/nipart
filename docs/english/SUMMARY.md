@@ -1,6 +1,7 @@
 # Nipart Document
 
 [Introduction](index.md)
+[Architecture](architecture.md)
 [Features](features/index.md)
 * [Base Interface](features/base.md)
 * [IP Address](features/ip.md)
