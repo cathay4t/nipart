@@ -71,7 +71,7 @@ impl CommandApply {
         } else {
             println!(
                 "Changed state:\n---\n{}",
-                serde_yaml::to_string(&diff_net_state)?
+                rmsd_yaml::to_string(&diff_net_state)?
             );
         }
 

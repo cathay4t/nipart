@@ -29,14 +29,14 @@ fn test_iface_type_de_kebab_case_names() {
         ("wifi-cfg", InterfaceType::WifiCfg),
         ("wireguard", InterfaceType::Wireguard),
     ] {
-        let t: InterfaceType = serde_yaml::from_str(yaml_str).unwrap();
+        let t: InterfaceType = rmsd_yaml::from_str(yaml_str).unwrap();
         assert_eq!(t, expected, "type string {yaml_str}");
     }
 }
 
 #[test]
 fn test_iface_type_de_unknown_string() {
-    let t: InterfaceType = serde_yaml::from_str("bogus-type").unwrap();
+    let t: InterfaceType = rmsd_yaml::from_str("bogus-type").unwrap();
     assert_eq!(t, InterfaceType::Unknown("bogus-type".to_string()));
     assert!(t.is_unknown());
 }
@@ -44,17 +44,17 @@ fn test_iface_type_de_unknown_string() {
 #[test]
 fn test_iface_type_serialize_round_trip() {
     assert_eq!(
-        serde_yaml::to_value(&InterfaceType::LinuxBridge).unwrap(),
-        serde_yaml::Value::String("linux-bridge".to_string())
+        rmsd_yaml::to_value(&InterfaceType::LinuxBridge).unwrap(),
+        rmsd_yaml::Value::from("linux-bridge")
     );
     assert_eq!(
-        serde_yaml::to_value(&InterfaceType::MacSec).unwrap(),
-        serde_yaml::Value::String("macsec".to_string())
+        rmsd_yaml::to_value(&InterfaceType::MacSec).unwrap(),
+        rmsd_yaml::Value::from("macsec")
     );
     assert_eq!(
-        serde_yaml::to_value(InterfaceType::Unknown("bogus-type".to_string()))
+        rmsd_yaml::to_value(InterfaceType::Unknown("bogus-type".to_string()))
             .unwrap(),
-        serde_yaml::Value::String("bogus-type".to_string())
+        rmsd_yaml::Value::from("bogus-type")
     );
 
     for t in [
@@ -62,8 +62,8 @@ fn test_iface_type_serialize_round_trip() {
         InterfaceType::WifiPhy,
         InterfaceType::Unknown("bogus-type".to_string()),
     ] {
-        let yaml_str = serde_yaml::to_string(&t).unwrap();
-        let parsed: InterfaceType = serde_yaml::from_str(&yaml_str).unwrap();
+        let yaml_str = rmsd_yaml::to_string(&t).unwrap();
+        let parsed: InterfaceType = rmsd_yaml::from_str(&yaml_str).unwrap();
         assert_eq!(parsed, t);
     }
 }

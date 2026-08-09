@@ -20,10 +20,10 @@ impl std::error::Error for CliError {
     }
 }
 
-impl From<serde_yaml::Error> for CliError {
-    fn from(e: serde_yaml::Error) -> Self {
+impl From<rmsd_yaml::Error> for CliError {
+    fn from(e: rmsd_yaml::Error) -> Self {
         Self {
-            msg: format!("serde_yaml::Error: {}", e),
+            msg: format!("rmsd_yaml::Error: {}", e),
             ..Default::default()
         }
     }

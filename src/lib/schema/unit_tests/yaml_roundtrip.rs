@@ -4,7 +4,7 @@ use crate::{NetworkState, NipartWaitOnlineCondition};
 
 fn round_trip(yaml_str: &str) -> (NetworkState, NetworkState) {
     let state = NetworkState::new_from_yaml(yaml_str).unwrap();
-    let serialized = serde_yaml::to_string(&state).unwrap();
+    let serialized = rmsd_yaml::to_string(&state).unwrap();
     let reparsed = NetworkState::new_from_yaml(&serialized).unwrap();
     (state, reparsed)
 }
@@ -176,7 +176,7 @@ fn test_yaml_serialize_hide_secrets() {
     .unwrap();
 
     state.hide_secrets();
-    let serialized = serde_yaml::to_string(&state).unwrap();
+    let serialized = rmsd_yaml::to_string(&state).unwrap();
 
     assert!(serialized.contains(NetworkState::HIDE_SECRET_STR));
     assert!(!serialized.contains("12345678"));
@@ -193,7 +193,7 @@ fn test_yaml_serialize_skips_none_fields() {
     )
     .unwrap();
 
-    let value = serde_yaml::to_value(&state).unwrap();
+    let value = rmsd_yaml::to_value(&state).unwrap();
 
     let iface = value
         .get("interfaces")

@@ -25,5 +25,5 @@ where
     fd.read_to_string(&mut content)?;
     let content = content.replace('\u{A0}', " ");
 
-    Ok(serde_yaml::from_str::<NetworkState>(&content)?)
+    Ok(rmsd_yaml::from_str::<NetworkState>(&content)?)
 }

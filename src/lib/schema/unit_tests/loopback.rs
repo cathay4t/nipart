@@ -4,7 +4,7 @@ use crate::{Interface, MergedNetworkState, NetworkState};
 
 #[test]
 fn test_loopback_include_default_ip() {
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"
         version: 1
         interfaces:
@@ -35,7 +35,7 @@ fn test_loopback_include_default_ip() {
     let apply_state = merged.gen_state_for_apply();
     let apply_iface = apply_state.ifaces.kernel_ifaces.get("lo").unwrap();
 
-    let expected: Interface = serde_yaml::from_str(
+    let expected: Interface = rmsd_yaml::from_str(
         r#"
         name: lo
         kernel-iface-name: lo

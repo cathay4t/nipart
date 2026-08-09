@@ -24,7 +24,7 @@ fn sanitize_wifi_phy(
 
 #[test]
 fn test_wifi_phy_hold_wifi_cfg_with_other_base_iface() {
-    let iface: WifiPhyInterface = serde_yaml::from_str(
+    let iface: WifiPhyInterface = rmsd_yaml::from_str(
         r#"---
         name: wlan0
         type: wifi-phy

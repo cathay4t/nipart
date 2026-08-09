@@ -101,7 +101,7 @@ fn read_state_from_file() -> Result<NetworkState, NipartError> {
         log::debug!("Saved state file {APPLIED_STATE_PATH} does not exist");
         return Ok(NetworkState::default());
     };
-    let mut state = match serde_yaml::from_str::<NetworkState>(&content) {
+    let mut state = match rmsd_yaml::from_str::<NetworkState>(&content) {
         Ok(s) => s,
         Err(e) => {
             log::debug!(
@@ -115,7 +115,7 @@ fn read_state_from_file() -> Result<NetworkState, NipartError> {
     if std::path::Path::new(APPLIED_SECRETS_PATH).exists()
         && let Ok(secrets) = std::fs::read_to_string(APPLIED_SECRETS_PATH)
     {
-        match serde_yaml::from_str::<NetworkState>(&secrets) {
+        match rmsd_yaml::from_str::<NetworkState>(&secrets) {
             Ok(s) => {
                 if let Err(e) = state.merge(&s) {
                     log::warn!(
@@ -147,19 +147,18 @@ async fn save_state_to_file(
     let mut state = net_state.clone();
     let secret_state = state.extract_secrets()?;
 
-    let state_yaml_str = serde_yaml::to_string(&state).map_err(|e| {
+    let state_yaml_str = rmsd_yaml::to_string(&state).map_err(|e| {
         NipartError::new(
             ErrorKind::Bug,
             format!("Failed to generate YAML for {state}: {e}"),
         )
     })?;
-    let secret_yaml_str =
-        serde_yaml::to_string(&secret_state).map_err(|e| {
-            NipartError::new(
-                ErrorKind::Bug,
-                format!("Failed to generate YAML for {secret_state}: {e}"),
-            )
-        })?;
+    let secret_yaml_str = rmsd_yaml::to_string(&secret_state).map_err(|e| {
+        NipartError::new(
+            ErrorKind::Bug,
+            format!("Failed to generate YAML for {secret_state}: {e}"),
+        )
+    })?;
 
     let mut fd = File::create(APPLIED_STATE_PATH).await?;
     fd.set_permissions(PermissionsExt::from_mode(0o644)).await?;

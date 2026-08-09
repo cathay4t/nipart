@@ -59,7 +59,7 @@ impl CommandWifi {
             let mut wifi_cfgs = cli.wifi_scan(opt).await?;
             wifi_cfgs.sort_unstable_by_key(|wifi_cfg| wifi_cfg.signal_percent);
             wifi_cfgs.reverse();
-            println!("{}", serde_yaml::to_string(&wifi_cfgs)?);
+            println!("{}", rmsd_yaml::to_string(&wifi_cfgs)?);
         } else if let Some(matches) = matches.subcommand_matches("connect") {
             // It is safe to unwrap because of clap `required: true`
             let ssid = matches.get_one::<String>("SSID").unwrap();
@@ -96,12 +96,12 @@ impl CommandWifi {
             };
 
             let desired_state: nipart::NetworkState =
-                serde_yaml::from_str(&state_str)?;
+                rmsd_yaml::from_str(&state_str)?;
             let mut desired_state_to_show = desired_state.clone();
             desired_state_to_show.hide_secrets();
             log::info!(
                 "Applying desire state:\n{}",
-                serde_yaml::to_string(&desired_state_to_show)?
+                rmsd_yaml::to_string(&desired_state_to_show)?
             );
             let mut cli = NipartClient::new().await?;
             cli.apply_network_state(desired_state, Default::default())

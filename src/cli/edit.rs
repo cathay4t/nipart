@@ -24,7 +24,7 @@ impl CommandEdit {
         let yaml_content = if saved_state.is_empty() {
             String::new()
         } else {
-            serde_yaml::to_string(&saved_state)?
+            rmsd_yaml::to_string(&saved_state)?
         };
 
         let tmp_dir = std::env::temp_dir();
@@ -95,7 +95,7 @@ impl CommandEdit {
         } else {
             println!(
                 "Changed state:\n---\n{}",
-                serde_yaml::to_string(&diff_net_state)?
+                rmsd_yaml::to_string(&diff_net_state)?
             );
         }
 

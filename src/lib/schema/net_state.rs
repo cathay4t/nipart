@@ -80,10 +80,10 @@ impl NetworkState {
     }
 
     // TODO(Gris): Use `rmsd-yml` to show error location in YAML.
-    /// Wrapping function of [serde_yaml::from_str()] with error mapped to
+    /// Wrapping function of [rmsd_yaml::from_str()] with error mapped to
     /// [NipartError].
     pub fn new_from_yaml(net_state_yaml: &str) -> Result<Self, NipartError> {
-        match serde_yaml::from_str(net_state_yaml) {
+        match rmsd_yaml::from_str(net_state_yaml) {
             Ok(s) => Ok(s),
             Err(e) => Err(NipartError::new(
                 ErrorKind::InvalidArgument,

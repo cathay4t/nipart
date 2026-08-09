@@ -99,10 +99,10 @@ struct TestOptionBondMode {
 
 #[test]
 fn test_de_option_bool_native() {
-    let t: TestOptionBool = serde_yaml::from_str("v: true").unwrap();
+    let t: TestOptionBool = rmsd_yaml::from_str("v: true").unwrap();
     assert_eq!(t.v, Some(true));
 
-    let t: TestOptionBool = serde_yaml::from_str("v: false").unwrap();
+    let t: TestOptionBool = rmsd_yaml::from_str("v: false").unwrap();
     assert_eq!(t.v, Some(false));
 }
 
@@ -110,7 +110,7 @@ fn test_de_option_bool_native() {
 fn test_de_option_bool_string_truthy() {
     for s in ["1", "true", "yes", "on", "y"] {
         let t: TestOptionBool =
-            serde_yaml::from_str(&format!("v: \"{s}\"")).unwrap();
+            rmsd_yaml::from_str(&format!("v: \"{s}\"")).unwrap();
         assert_eq!(t.v, Some(true), "string {s}");
     }
 }
@@ -119,149 +119,147 @@ fn test_de_option_bool_string_truthy() {
 fn test_de_option_bool_string_falsy() {
     for s in ["0", "false", "no", "off", "n"] {
         let t: TestOptionBool =
-            serde_yaml::from_str(&format!("v: \"{s}\"")).unwrap();
+            rmsd_yaml::from_str(&format!("v: \"{s}\"")).unwrap();
         assert_eq!(t.v, Some(false), "string {s}");
     }
 }
 
 #[test]
 fn test_de_option_bool_string_case_insensitive() {
-    let t: TestOptionBool = serde_yaml::from_str("v: \"TRUE\"").unwrap();
+    let t: TestOptionBool = rmsd_yaml::from_str("v: \"TRUE\"").unwrap();
     assert_eq!(t.v, Some(true));
 
-    let t: TestOptionBool = serde_yaml::from_str("v: \"No\"").unwrap();
+    let t: TestOptionBool = rmsd_yaml::from_str("v: \"No\"").unwrap();
     assert_eq!(t.v, Some(false));
 }
 
 #[test]
 fn test_de_option_bool_integer() {
-    let t: TestOptionBool = serde_yaml::from_str("v: 1").unwrap();
+    let t: TestOptionBool = rmsd_yaml::from_str("v: 1").unwrap();
     assert_eq!(t.v, Some(true));
 
-    let t: TestOptionBool = serde_yaml::from_str("v: 0").unwrap();
+    let t: TestOptionBool = rmsd_yaml::from_str("v: 0").unwrap();
     assert_eq!(t.v, Some(false));
 }
 
 #[test]
 fn test_de_option_bool_absent_is_none() {
-    let t: TestOptionBool = serde_yaml::from_str("{}").unwrap();
+    let t: TestOptionBool = rmsd_yaml::from_str("{}").unwrap();
     assert_eq!(t.v, None);
 }
 
 #[test]
 fn test_de_option_bool_invalid_string() {
-    let result: Result<TestOptionBool, _> =
-        serde_yaml::from_str("v: \"maybe\"");
+    let result: Result<TestOptionBool, _> = rmsd_yaml::from_str("v: \"maybe\"");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_bool_invalid_integer() {
-    let result: Result<TestOptionBool, _> = serde_yaml::from_str("v: 2");
+    let result: Result<TestOptionBool, _> = rmsd_yaml::from_str("v: 2");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_u64_native_integer() {
-    let t: TestOptionU64 = serde_yaml::from_str("v: 42").unwrap();
+    let t: TestOptionU64 = rmsd_yaml::from_str("v: 42").unwrap();
     assert_eq!(t.v, Some(42));
 }
 
 #[test]
 fn test_de_option_u64_decimal_string() {
-    let t: TestOptionU64 = serde_yaml::from_str("v: \"42\"").unwrap();
+    let t: TestOptionU64 = rmsd_yaml::from_str("v: \"42\"").unwrap();
     assert_eq!(t.v, Some(42));
 }
 
 #[test]
 fn test_de_option_u64_hex_string() {
-    let t: TestOptionU64 = serde_yaml::from_str("v: \"0xff\"").unwrap();
+    let t: TestOptionU64 = rmsd_yaml::from_str("v: \"0xff\"").unwrap();
     assert_eq!(t.v, Some(255));
 }
 
 #[test]
 fn test_de_option_u64_invalid_string() {
     let result: Result<TestOptionU64, _> =
-        serde_yaml::from_str("v: \"not-a-number\"");
+        rmsd_yaml::from_str("v: \"not-a-number\"");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_u64_absent_is_none() {
-    let t: TestOptionU64 = serde_yaml::from_str("{}").unwrap();
+    let t: TestOptionU64 = rmsd_yaml::from_str("{}").unwrap();
     assert_eq!(t.v, None);
 }
 
 #[test]
 fn test_de_option_u8_valid() {
-    let t: TestOptionU8 = serde_yaml::from_str("v: 255").unwrap();
+    let t: TestOptionU8 = rmsd_yaml::from_str("v: 255").unwrap();
     assert_eq!(t.v, Some(255));
 
-    let t: TestOptionU8 = serde_yaml::from_str("v: \"200\"").unwrap();
+    let t: TestOptionU8 = rmsd_yaml::from_str("v: \"200\"").unwrap();
     assert_eq!(t.v, Some(200));
 }
 
 #[test]
 fn test_de_option_u8_overflow() {
-    let result: Result<TestOptionU8, _> = serde_yaml::from_str("v: 256");
+    let result: Result<TestOptionU8, _> = rmsd_yaml::from_str("v: 256");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_u8_absent_is_none() {
-    let t: TestOptionU8 = serde_yaml::from_str("{}").unwrap();
+    let t: TestOptionU8 = rmsd_yaml::from_str("{}").unwrap();
     assert_eq!(t.v, None);
 }
 
 #[test]
 fn test_de_option_u16_valid() {
-    let t: TestOptionU16 = serde_yaml::from_str("v: 65535").unwrap();
+    let t: TestOptionU16 = rmsd_yaml::from_str("v: 65535").unwrap();
     assert_eq!(t.v, Some(65535));
 
-    let t: TestOptionU16 = serde_yaml::from_str("v: \"4096\"").unwrap();
+    let t: TestOptionU16 = rmsd_yaml::from_str("v: \"4096\"").unwrap();
     assert_eq!(t.v, Some(4096));
 }
 
 #[test]
 fn test_de_option_u16_overflow() {
-    let result: Result<TestOptionU16, _> = serde_yaml::from_str("v: 65536");
+    let result: Result<TestOptionU16, _> = rmsd_yaml::from_str("v: 65536");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_u16_absent_is_none() {
-    let t: TestOptionU16 = serde_yaml::from_str("{}").unwrap();
+    let t: TestOptionU16 = rmsd_yaml::from_str("{}").unwrap();
     assert_eq!(t.v, None);
 }
 
 #[test]
 fn test_de_option_u32_valid() {
-    let t: TestOptionU32 = serde_yaml::from_str("v: 4294967295").unwrap();
+    let t: TestOptionU32 = rmsd_yaml::from_str("v: 4294967295").unwrap();
     assert_eq!(t.v, Some(u32::MAX));
 
-    let t: TestOptionU32 = serde_yaml::from_str("v: \"4096\"").unwrap();
+    let t: TestOptionU32 = rmsd_yaml::from_str("v: \"4096\"").unwrap();
     assert_eq!(t.v, Some(4096));
 }
 
 #[test]
 fn test_de_option_u32_overflow() {
-    let result: Result<TestOptionU32, _> =
-        serde_yaml::from_str("v: 4294967296");
+    let result: Result<TestOptionU32, _> = rmsd_yaml::from_str("v: 4294967296");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_u32_absent_is_none() {
-    let t: TestOptionU32 = serde_yaml::from_str("{}").unwrap();
+    let t: TestOptionU32 = rmsd_yaml::from_str("{}").unwrap();
     assert_eq!(t.v, None);
 }
 
 #[test]
 fn test_de_option_i64_native_integer() {
-    let t: TestOptionI64 = serde_yaml::from_str("v: 42").unwrap();
+    let t: TestOptionI64 = rmsd_yaml::from_str("v: 42").unwrap();
     assert_eq!(t.v, Some(42));
 
-    let t: TestOptionI64 = serde_yaml::from_str("v: -42").unwrap();
+    let t: TestOptionI64 = rmsd_yaml::from_str("v: -42").unwrap();
     assert_eq!(t.v, Some(-42));
 }
 
@@ -269,188 +267,186 @@ fn test_de_option_i64_native_integer() {
 fn test_de_option_i64_unsigned_overflow() {
     // i64::MAX + 1, parsed as u64 by YAML, cannot fit into i64
     let result: Result<TestOptionI64, _> =
-        serde_yaml::from_str("v: 9223372036854775808");
+        rmsd_yaml::from_str("v: 9223372036854775808");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_i64_string() {
-    let t: TestOptionI64 = serde_yaml::from_str("v: \"-5\"").unwrap();
+    let t: TestOptionI64 = rmsd_yaml::from_str("v: \"-5\"").unwrap();
     assert_eq!(t.v, Some(-5));
 
-    let t: TestOptionI64 = serde_yaml::from_str("v: \"5\"").unwrap();
+    let t: TestOptionI64 = rmsd_yaml::from_str("v: \"5\"").unwrap();
     assert_eq!(t.v, Some(5));
 }
 
 #[test]
 fn test_de_option_i64_invalid_string() {
     let result: Result<TestOptionI64, _> =
-        serde_yaml::from_str("v: \"not-a-number\"");
+        rmsd_yaml::from_str("v: \"not-a-number\"");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_i64_absent_is_none() {
-    let t: TestOptionI64 = serde_yaml::from_str("{}").unwrap();
+    let t: TestOptionI64 = rmsd_yaml::from_str("{}").unwrap();
     assert_eq!(t.v, None);
 }
 
 #[test]
 fn test_de_option_i32_valid() {
-    let t: TestOptionI32 = serde_yaml::from_str("v: -42").unwrap();
+    let t: TestOptionI32 = rmsd_yaml::from_str("v: -42").unwrap();
     assert_eq!(t.v, Some(-42));
 
-    let t: TestOptionI32 = serde_yaml::from_str("v: \"-5\"").unwrap();
+    let t: TestOptionI32 = rmsd_yaml::from_str("v: \"-5\"").unwrap();
     assert_eq!(t.v, Some(-5));
 }
 
 #[test]
 fn test_de_option_i32_overflow() {
-    let result: Result<TestOptionI32, _> =
-        serde_yaml::from_str("v: 2147483648");
+    let result: Result<TestOptionI32, _> = rmsd_yaml::from_str("v: 2147483648");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_i32_absent_is_none() {
-    let t: TestOptionI32 = serde_yaml::from_str("{}").unwrap();
+    let t: TestOptionI32 = rmsd_yaml::from_str("{}").unwrap();
     assert_eq!(t.v, None);
 }
 
 #[test]
 fn test_de_u8_or_string_valid() {
-    let t: TestRequiredU8 = serde_yaml::from_str("v: 255").unwrap();
+    let t: TestRequiredU8 = rmsd_yaml::from_str("v: 255").unwrap();
     assert_eq!(t.v, 255);
 
-    let t: TestRequiredU8 = serde_yaml::from_str("v: \"200\"").unwrap();
+    let t: TestRequiredU8 = rmsd_yaml::from_str("v: \"200\"").unwrap();
     assert_eq!(t.v, 200);
 }
 
 #[test]
 fn test_de_u8_or_string_missing_field() {
-    let result: Result<TestRequiredU8, _> = serde_yaml::from_str("{}");
+    let result: Result<TestRequiredU8, _> = rmsd_yaml::from_str("{}");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_u16_or_string_valid() {
-    let t: TestRequiredU16 = serde_yaml::from_str("v: 65535").unwrap();
+    let t: TestRequiredU16 = rmsd_yaml::from_str("v: 65535").unwrap();
     assert_eq!(t.v, 65535);
 
-    let t: TestRequiredU16 = serde_yaml::from_str("v: \"4096\"").unwrap();
+    let t: TestRequiredU16 = rmsd_yaml::from_str("v: \"4096\"").unwrap();
     assert_eq!(t.v, 4096);
 }
 
 #[test]
 fn test_de_u16_or_string_missing_field() {
-    let result: Result<TestRequiredU16, _> = serde_yaml::from_str("{}");
+    let result: Result<TestRequiredU16, _> = rmsd_yaml::from_str("{}");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_u32_or_string_valid() {
-    let t: TestRequiredU32 = serde_yaml::from_str("v: 4294967295").unwrap();
+    let t: TestRequiredU32 = rmsd_yaml::from_str("v: 4294967295").unwrap();
     assert_eq!(t.v, u32::MAX);
 
-    let t: TestRequiredU32 = serde_yaml::from_str("v: \"4096\"").unwrap();
+    let t: TestRequiredU32 = rmsd_yaml::from_str("v: \"4096\"").unwrap();
     assert_eq!(t.v, 4096);
 }
 
 #[test]
 fn test_de_u32_or_string_missing_field() {
-    let result: Result<TestRequiredU32, _> = serde_yaml::from_str("{}");
+    let result: Result<TestRequiredU32, _> = rmsd_yaml::from_str("{}");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_bool_or_string_valid() {
-    let t: TestRequiredBool = serde_yaml::from_str("v: true").unwrap();
+    let t: TestRequiredBool = rmsd_yaml::from_str("v: true").unwrap();
     assert!(t.v);
 
-    let t: TestRequiredBool = serde_yaml::from_str("v: \"yes\"").unwrap();
+    let t: TestRequiredBool = rmsd_yaml::from_str("v: \"yes\"").unwrap();
     assert!(t.v);
 }
 
 #[test]
 fn test_de_bool_or_string_missing_field() {
-    let result: Result<TestRequiredBool, _> = serde_yaml::from_str("{}");
+    let result: Result<TestRequiredBool, _> = rmsd_yaml::from_str("{}");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_number_as_string_string() {
     let t: TestOptionNumberAsString =
-        serde_yaml::from_str("v: \"hello\"").unwrap();
+        rmsd_yaml::from_str("v: \"hello\"").unwrap();
     assert_eq!(t.v, Some("hello".to_string()));
 
     let t: TestOptionNumberAsString =
-        serde_yaml::from_str("v: \"123\"").unwrap();
+        rmsd_yaml::from_str("v: \"123\"").unwrap();
     assert_eq!(t.v, Some("123".to_string()));
 }
 
 #[test]
 fn test_de_option_number_as_string_unsigned() {
-    let t: TestOptionNumberAsString = serde_yaml::from_str("v: 42").unwrap();
+    let t: TestOptionNumberAsString = rmsd_yaml::from_str("v: 42").unwrap();
     assert_eq!(t.v, Some("42".to_string()));
 }
 
 #[test]
 fn test_de_option_number_as_string_signed() {
-    let t: TestOptionNumberAsString = serde_yaml::from_str("v: -5").unwrap();
+    let t: TestOptionNumberAsString = rmsd_yaml::from_str("v: -5").unwrap();
     assert_eq!(t.v, Some("-5".to_string()));
 }
 
 #[test]
 fn test_de_option_number_as_string_float() {
-    let t: TestOptionNumberAsString = serde_yaml::from_str("v: 1.5").unwrap();
+    let t: TestOptionNumberAsString = rmsd_yaml::from_str("v: 1.5").unwrap();
     assert_eq!(t.v, Some("1.5".to_string()));
 }
 
 #[test]
 fn test_de_option_number_as_string_absent_is_none() {
-    let t: TestOptionNumberAsString = serde_yaml::from_str("{}").unwrap();
+    let t: TestOptionNumberAsString = rmsd_yaml::from_str("{}").unwrap();
     assert_eq!(t.v, None);
 }
 
 #[test]
 fn test_de_number_as_string_valid() {
-    let t: TestRequiredNumberAsString = serde_yaml::from_str("v: 42").unwrap();
+    let t: TestRequiredNumberAsString = rmsd_yaml::from_str("v: 42").unwrap();
     assert_eq!(t.v, "42");
 
     let t: TestRequiredNumberAsString =
-        serde_yaml::from_str("v: \"abc\"").unwrap();
+        rmsd_yaml::from_str("v: \"abc\"").unwrap();
     assert_eq!(t.v, "abc");
 }
 
 #[test]
 fn test_de_number_as_string_missing_field() {
     let result: Result<TestRequiredNumberAsString, _> =
-        serde_yaml::from_str("{}");
+        rmsd_yaml::from_str("{}");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_enum_string_or_integer_string() {
     let t: TestOptionBondMode =
-        serde_yaml::from_str("v: active-backup").unwrap();
+        rmsd_yaml::from_str("v: active-backup").unwrap();
     assert_eq!(t.v, Some(BondMode::ActiveBackup));
 }
 
 #[test]
 fn test_de_option_enum_string_or_integer_integer() {
-    let t: TestOptionBondMode = serde_yaml::from_str("v: 1").unwrap();
+    let t: TestOptionBondMode = rmsd_yaml::from_str("v: 1").unwrap();
     assert_eq!(t.v, Some(BondMode::ActiveBackup));
 }
 
 #[test]
 fn test_de_option_enum_string_or_integer_invalid() {
-    let result: Result<TestOptionBondMode, _> =
-        serde_yaml::from_str("v: bogus");
+    let result: Result<TestOptionBondMode, _> = rmsd_yaml::from_str("v: bogus");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_de_option_enum_string_or_integer_absent_is_none() {
-    let t: TestOptionBondMode = serde_yaml::from_str("{}").unwrap();
+    let t: TestOptionBondMode = rmsd_yaml::from_str("{}").unwrap();
     assert_eq!(t.v, None);
 }
