@@ -124,3 +124,22 @@ Key points:
   used.
 * This feature only works in daemon mode, as it requires querying the
   current network state.
+
+## Renaming the matched interface
+
+When the config also specifies `kernel-iface-name`, the matched interface
+is renamed to that name:
+
+```yaml
+interfaces:
+  - name: port1
+    type: ethernet
+    identifier: mac-address
+    mac-address: 52:54:00:15:17:63
+    kernel-iface-name: eth0
+```
+
+The original kernel name is kept as an alt-name so existing references
+keep resolving, unless `alt-names` is defined explicitly in the desired
+or saved state.  Without `kernel-iface-name`, the interface keeps its
+current kernel name.
