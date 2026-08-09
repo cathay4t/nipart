@@ -19,15 +19,18 @@ use super::{
     udev::udev_net_device_is_initialized,
 };
 
-const BOOTUP_NIC_CHECK_MAX_COUNT: u64 = 30;
+// The boot apply retries for `BOOTUP_NIC_CHECK_MAX_QUICK` rounds of
+// `BOOTUP_NIC_CHECK_INTERVAL_MS_QUICK` (5 seconds total) to give udev time
+// to finish initializing NICs that exist but are still enumerating when the
+// daemon first polls.  After that grace period the remaining saved configs
+// (e.g. `identifier: mac-address` profiles whose NIC is not present) are
+// left for the monitor worker: it emits a link event when the NIC appears
+// and the event worker then applies the saved config.  We must not keep
+// retrying indefinitely: a saved config whose NIC does not exist would
+// otherwise delay the whole boot apply (and thus wait-online) for the full
+// retry window.
 const BOOTUP_NIC_CHECK_MAX_QUICK: u64 = 10;
-// During quick retry, we retry every 0.5 second.
 const BOOTUP_NIC_CHECK_INTERVAL_MS_QUICK: u64 = 500;
-// After quick retry, we only retry every 2 seconds: the 10 seconds
-// granularity used before meant a NIC that became udev-initialized right
-// after a poll would not be configured until up to 10 seconds later,
-// delaying the whole boot apply (and thus wait-online) on wired NICs.
-const BOOTUP_NIC_CHECK_INTERVAL_SEC_SLOW: u64 = 2;
 
 /// Commander manages all the task managers.
 /// This struct is safe to clone and move to threads
@@ -74,7 +77,11 @@ impl NipartCommander {
     //  1. Query current network state.
     //  2. For each non-virtual interface mentioned in saved state, if udev has
     //     it initialized, apply its config.
-    //  3. Keep retry with timeout and interval for missing interfaces.
+    //  3. Retry for a short grace period so NICs that are still enumerating
+    //     (udev not finished) get applied in the same boot pass.
+    //  4. Leave the remaining saved configs (their NIC is not present) for
+    //     the monitor worker: it emits a link event when the NIC appears and
+    //     the event worker then applies the saved config.
     pub(crate) async fn load_saved_state(&mut self) -> Result<(), NipartError> {
         self.monitor_manager.pause().await?;
         let result = self.load_saved_state_inner().await;
@@ -94,7 +101,7 @@ impl NipartCommander {
             log::info!("Saved state is empty");
         } else {
             log::trace!("Loading saved state: {saved_state}");
-            for retry_count in 0..BOOTUP_NIC_CHECK_MAX_COUNT {
+            for _ in 0..BOOTUP_NIC_CHECK_MAX_QUICK {
                 let kernel_iface_names =
                     get_initialized_nics(&saved_state).await?;
 
@@ -139,23 +146,28 @@ impl NipartCommander {
                     break;
                 }
 
-                if retry_count < BOOTUP_NIC_CHECK_MAX_QUICK {
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        BOOTUP_NIC_CHECK_INTERVAL_MS_QUICK,
-                    ))
-                    .await;
-                } else {
-                    tokio::time::sleep(std::time::Duration::from_secs(
-                        BOOTUP_NIC_CHECK_INTERVAL_SEC_SLOW,
-                    ))
-                    .await;
-                }
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    BOOTUP_NIC_CHECK_INTERVAL_MS_QUICK,
+                ))
+                .await;
             }
             if !saved_state.is_empty() {
-                log::error!(
-                    "Failed to apply all saved state within {} retries, \
-                     remaining: {saved_state}",
-                    BOOTUP_NIC_CHECK_MAX_COUNT
+                // The remaining saved configs target NICs that are not
+                // present in the kernel (e.g. `identifier: mac-address`
+                // profiles for NICs that are not installed on this host).
+                // They are not applied at boot: register their monitor
+                // watches so the monitor worker emits a link event when
+                // such a NIC appears and the event worker then applies the
+                // saved config.  Keep them in the saved state for that
+                // path.
+                self.monitor_manager
+                    .setup_saved_state_monitors(&saved_state, true)
+                    .await?;
+                log::info!(
+                    "Saved config for {} interface(s) without a present NIC \
+                     is left for monitor worker to activate when the NIC \
+                     appears: {saved_state}",
+                    saved_state.ifaces.iter().count()
                 );
             }
         }
