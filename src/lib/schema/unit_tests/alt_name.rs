@@ -411,3 +411,55 @@ fn test_mac_id_kernel_iface_name_same_as_current_no_rename() {
     assert_eq!(for_apply.kernel_iface_name(), "enp1s0");
     assert!(for_apply.base_iface().alt_names.is_none());
 }
+
+#[test]
+fn test_mac_id_kernel_iface_name_persisted_in_for_save() {
+    // The rename target `kernel-iface-name` must be persisted in the saved
+    // state so the rename is re-applied at boot.
+    let merged = gen_merged(
+        r#"---
+        interfaces:
+          - name: port1
+            type: ethernet
+            identifier: mac-address
+            mac-address: 52:54:00:15:17:63
+            kernel-iface-name: eth0
+        "#,
+        r#"---
+        interfaces:
+          - name: enp1s0
+            type: ethernet
+            mac-address: 52:54:00:15:17:63
+        "#,
+    )
+    .unwrap();
+    let merged_iface = merged.ifaces.kernel_ifaces.get("eth0").unwrap();
+    let for_save = merged_iface.for_save.as_ref().unwrap();
+    assert_eq!(for_save.kernel_iface_name(), "eth0");
+}
+
+#[test]
+fn test_mac_id_without_kernel_iface_name_not_persisted() {
+    // A MAC-identified config without an explicit `kernel-iface-name` keeps
+    // the old behavior: the kernel name is not persisted (the config stays
+    // resolvable by MAC at boot).
+    let merged = gen_merged(
+        r#"---
+        interfaces:
+          - name: port1
+            type: ethernet
+            identifier: mac-address
+            mac-address: 52:54:00:15:17:63
+        "#,
+        r#"---
+        interfaces:
+          - name: enp1s0
+            type: ethernet
+            mac-address: 52:54:00:15:17:63
+        "#,
+    )
+    .unwrap();
+    let merged_iface = merged.ifaces.kernel_ifaces.get("enp1s0").unwrap();
+    let for_save = merged_iface.for_save.as_ref().unwrap();
+    assert!(for_save.kernel_iface_name().is_empty());
+}
