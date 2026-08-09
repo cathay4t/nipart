@@ -5,9 +5,9 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ErrorKind, Interface, InterfaceIdentifier, InterfaceType, Interfaces,
-    JsonDisplayHideSecrets, MergedInterface, NipartError, NipartInterface,
-    schema::IfaceSearch,
+    AltNameEntry, ErrorKind, Interface, InterfaceIdentifier, InterfaceType,
+    Interfaces, JsonDisplayHideSecrets, MergedInterface, NipartError,
+    NipartInterface, schema::IfaceSearch,
 };
 
 // The max loop count for Interfaces.set_ifaces_up_priority()
@@ -228,13 +228,44 @@ impl MergedInterfaces {
                 if des_iface.base_iface().identifier
                     == Some(InterfaceIdentifier::MacAddress)
                 {
-                    let kernel_name = cur_iface.kernel_iface_name().to_string();
+                    let cur_kernel_name =
+                        cur_iface.kernel_iface_name().to_string();
                     if des_iface.base_iface().profile_name.is_none() {
                         des_iface.base_iface_mut().profile_name =
                             Some(des_iface.name().to_string());
                     }
-                    des_iface.base_iface_mut().name = kernel_name.clone();
-                    des_iface.base_iface_mut().kernel_iface_name = kernel_name;
+                    // An explicit `kernel-iface-name` renames the matched
+                    // interface to that name (keeping the original kernel
+                    // name as an alt-name unless the user manages
+                    // alt-names explicitly); otherwise the interface keeps
+                    // its current kernel name.
+                    let des_kernel_name =
+                        des_iface.base_iface().kernel_iface_name.clone();
+                    if !des_kernel_name.is_empty()
+                        && des_kernel_name != cur_kernel_name
+                    {
+                        des_iface.base_iface_mut().name =
+                            des_kernel_name.clone();
+                        des_iface.base_iface_mut().kernel_iface_name =
+                            des_kernel_name;
+                        if des_iface.base_iface().alt_names.is_none()
+                            && saved_iface
+                                .as_ref()
+                                .and_then(|s| s.base_iface().alt_names.as_ref())
+                                .is_none()
+                        {
+                            des_iface.base_iface_mut().alt_names =
+                                Some(vec![AltNameEntry {
+                                    name: cur_kernel_name.clone(),
+                                    state: None,
+                                }]);
+                        }
+                    } else {
+                        des_iface.base_iface_mut().name =
+                            cur_kernel_name.clone();
+                        des_iface.base_iface_mut().kernel_iface_name =
+                            cur_kernel_name;
+                    }
                 }
             }
             // When the desired interface matches a current interface by
@@ -530,11 +561,19 @@ impl MergedInterfaces {
             let Some(des_iface) = merged_iface.for_apply.as_ref() else {
                 continue;
             };
-            // The current kernel name of this same interface: an existing
-            // alt-name owned by it is not a conflict (e.g. a
+            // The desired (post-rename) kernel name of this same interface:
+            // an existing alt-name owned by it is not a conflict (e.g. a
             // `identifier: mac-address` config whose desired `name` is the
-            // profile name, not the kernel name).
-            let self_kernel_name =
+            // profile name, not the kernel name).  When the config renames
+            // the interface, the target name is the interface's own name,
+            // not the current one (which becomes an alt-name).
+            let self_kernel_name = Some(des_iface.kernel_iface_name());
+            // The current (pre-rename) kernel name of this same interface:
+            // the name being renamed away is still a kernel interface name
+            // at validation time, but it belongs to this interface and
+            // becomes its alt-name, so it is not "an interface name of
+            // other NIC".
+            let self_cur_kernel_name =
                 merged_iface.current.as_ref().map(|i| i.kernel_iface_name());
             let mut iface_seen_alt_names: HashSet<&str> = HashSet::new();
             if let Some(alt_names) = des_iface.base_iface().alt_names.as_ref() {
@@ -578,7 +617,9 @@ impl MergedInterfaces {
                                 ),
                             ));
                         };
-                    } else if all_iface_names.contains(alt_name.name.as_str()) {
+                    } else if all_iface_names.contains(alt_name.name.as_str())
+                        && self_cur_kernel_name != Some(alt_name.name.as_str())
+                    {
                         return Err(NipartError::new(
                             ErrorKind::InvalidArgument,
                             format!(

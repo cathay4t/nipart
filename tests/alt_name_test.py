@@ -190,3 +190,89 @@ def test_boot_load_saved_alt_names():
         ), "Saved alt-names not re-applied at boot"
     finally:
         _remove_veth_pair()
+
+
+def _iface_has_alt_names(iface_name, expected):
+    rc, out, _ = exec_cmd(
+        ["ip", "-d", "link", "show", iface_name], check=False
+    )
+    if rc != 0:
+        return False
+    alt_names = {
+        line.split()[-1]
+        for line in out.splitlines()
+        if line.strip().startswith("altname")
+    }
+    return alt_names == set(expected)
+
+
+REN_VETH = "veth-ren0"
+REN_VETH_PEER = "veth-ren1"
+
+
+def _create_ren_veth_pair():
+    exec_cmd(
+        f"ip link add {REN_VETH} type veth peer name {REN_VETH_PEER}".split()
+    )
+
+
+def _remove_ren_veth_pair():
+    exec_cmd(f"ip link del {REN_VETH}".split(), check=False)
+
+
+def test_mac_id_kernel_iface_name_rename_keeps_original_alt_name():
+    # A MAC-identified config with an explicit `kernel-iface-name` renames
+    # the matched interface and keeps the original kernel name as an
+    # alt-name (no `alt-names` in desired or saved state).
+    _create_ren_veth_pair()
+    try:
+        exec_cmd(f"ip link set {REN_VETH} address 00:11:22:33:44:55".split())
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                - name: port1
+                  type: ethernet
+                  identifier: mac-address
+                  mac-address: 00:11:22:33:44:55
+                  kernel-iface-name: renamed0
+                """))
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT,
+            _iface_has_alt_names,
+            "renamed0",
+            [REN_VETH],
+        ), "Interface not renamed with original name kept as alt-name"
+        iface = show_only("renamed0")
+        assert iface is not None
+        assert iface.get("profile-name") == "port1"
+    finally:
+        exec_cmd(["ip", "link", "del", "renamed0"], check=False)
+        _remove_ren_veth_pair()
+
+
+def test_mac_id_kernel_iface_name_no_auto_alt_name_when_defined():
+    # When the desired state defines `alt-names` explicitly, the original
+    # kernel name is not auto-added.
+    _create_ren_veth_pair()
+    try:
+        exec_cmd(f"ip link set {REN_VETH} address 00:11:22:33:44:56".split())
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                - name: port2
+                  type: ethernet
+                  identifier: mac-address
+                  mac-address: 00:11:22:33:44:56
+                  kernel-iface-name: renamed1
+                  alt-names:
+                    - name: renamed-port
+                """))
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT,
+            _iface_has_alt_names,
+            "renamed1",
+            ["renamed-port"],
+        ), "Alt-names not applied on renamed interface"
+        # The original kernel name must NOT be auto-added.
+        assert REN_VETH not in _kernel_alt_names("renamed1")
+    finally:
+        exec_cmd(["ip", "link", "del", "renamed1"], check=False)
+        _remove_ren_veth_pair()

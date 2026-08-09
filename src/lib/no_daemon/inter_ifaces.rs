@@ -17,6 +17,7 @@ pub(crate) async fn apply_ifaces(
         log::info!("Applying: {apply_iface}");
     }
     delete_ifaces_before_apply(merged_ifaces).await?;
+    rename_ifaces_before_apply(merged_ifaces).await?;
 
     // Some interface might been deleted when apply, hence it is OK to fail, we
     // trust verification stage to find the problem
@@ -98,6 +99,63 @@ async fn delete_ifaces_before_apply(
                 format!("Failed to delete interfaces: {e}"),
             ));
         }
+    }
+    Ok(())
+}
+
+/// Rename the interfaces whose desired `kernel-iface-name` differs from
+/// their current kernel name (e.g. a `identifier: mac-address` config with
+/// an explicit `kernel-iface-name` renames the matched interface).  nispor
+/// cannot rename an existing interface, so the rename must be done before
+/// the nispor batch below (which looks the interface up by its new name).
+async fn rename_ifaces_before_apply(
+    merged_ifaces: &MergedInterfaces,
+) -> Result<(), NipartError> {
+    // Vec<(iface_index, cur_name, new_name)>
+    let mut renames: Vec<(u32, String, String)> = Vec::new();
+    for merged_iface in merged_ifaces.iter() {
+        let Some(apply_iface) = merged_iface.for_apply.as_ref() else {
+            continue;
+        };
+        let Some(cur_iface) = merged_iface.current.as_ref() else {
+            continue;
+        };
+        if apply_iface.is_absent() {
+            continue;
+        }
+        let new_name = apply_iface.kernel_iface_name();
+        let cur_name = cur_iface.kernel_iface_name();
+        if new_name.is_empty() || new_name == cur_name {
+            continue;
+        }
+        let Some(iface_index) = cur_iface.base_iface().iface_index else {
+            continue;
+        };
+        renames.push((iface_index, cur_name.to_string(), new_name.to_string()));
+    }
+    if renames.is_empty() {
+        return Ok(());
+    }
+    let (conn, handle, _) = rtnetlink::new_connection().map_err(|e| {
+        NipartError::new(
+            ErrorKind::Bug,
+            format!("Failed to create rtnetlink connection: {e}"),
+        )
+    })?;
+    tokio::spawn(conn);
+    for (iface_index, cur_name, new_name) in renames {
+        log::info!("Renaming interface {cur_name} to {new_name}");
+        let msg = rtnetlink::LinkUnspec::new_with_index(iface_index)
+            .name(new_name.clone())
+            .build();
+        handle.link().set(msg).execute().await.map_err(|e| {
+            NipartError::new(
+                ErrorKind::Bug,
+                format!(
+                    "Failed to rename interface {cur_name} to {new_name}: {e}"
+                ),
+            )
+        })?;
     }
     Ok(())
 }

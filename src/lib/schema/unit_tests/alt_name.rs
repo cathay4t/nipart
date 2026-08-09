@@ -19,6 +19,22 @@ fn gen_merged(
     )
 }
 
+fn gen_merged_with_saved(
+    desired: &str,
+    current: &str,
+    saved: &str,
+) -> Result<MergedNetworkState, crate::NipartError> {
+    let desired = NetworkState::new_from_yaml(desired).unwrap();
+    let current = NetworkState::new_from_yaml(current).unwrap();
+    let saved = NetworkState::new_from_yaml(saved).unwrap();
+    MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        NipartApplyOption::default(),
+    )
+}
+
 fn assert_invalid_argument(
     result: Result<MergedNetworkState, crate::NipartError>,
     msg_part: &str,
@@ -263,4 +279,135 @@ fn test_revert_added_alt_name_generates_absent() {
     assert_eq!(alt_names.len(), 1);
     assert_eq!(alt_names[0].name, "primary");
     assert!(alt_names[0].is_absent());
+}
+
+#[test]
+fn test_mac_id_kernel_iface_name_rename_keeps_original_as_alt_name() {
+    // A MAC-identified config with an explicit `kernel-iface-name` renames
+    // the matched interface and keeps the original kernel name as an
+    // alt-name (no `alt-names` defined in desired or saved state).
+    let merged = gen_merged(
+        r#"---
+        interfaces:
+          - name: port1
+            type: ethernet
+            identifier: mac-address
+            mac-address: 52:54:00:15:17:63
+            kernel-iface-name: eth0
+        "#,
+        r#"---
+        interfaces:
+          - name: enp1s0
+            type: ethernet
+            mac-address: 52:54:00:15:17:63
+        "#,
+    )
+    .unwrap();
+    let merged_iface = merged.ifaces.kernel_ifaces.get("eth0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    assert_eq!(for_apply.kernel_iface_name(), "eth0");
+    let alt_names = for_apply.base_iface().alt_names.as_ref().unwrap();
+    assert_eq!(alt_names.len(), 1);
+    assert_eq!(alt_names[0].name, "enp1s0");
+    assert!(!alt_names[0].is_absent());
+}
+
+#[test]
+fn test_mac_id_kernel_iface_name_no_auto_alt_name_when_desired_defines() {
+    // When the desired state manages `alt-names` explicitly, the original
+    // kernel name is not auto-added.
+    let merged = gen_merged(
+        r#"---
+        interfaces:
+          - name: port1
+            type: ethernet
+            identifier: mac-address
+            mac-address: 52:54:00:15:17:63
+            kernel-iface-name: eth0
+            alt-names:
+              - name: primary
+        "#,
+        r#"---
+        interfaces:
+          - name: enp1s0
+            type: ethernet
+            mac-address: 52:54:00:15:17:63
+        "#,
+    )
+    .unwrap();
+    let merged_iface = merged.ifaces.kernel_ifaces.get("eth0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    assert_eq!(for_apply.kernel_iface_name(), "eth0");
+    let alt_names = for_apply.base_iface().alt_names.as_ref().unwrap();
+    assert_eq!(alt_names.len(), 1);
+    assert_eq!(alt_names[0].name, "primary");
+}
+
+#[test]
+fn test_mac_id_kernel_iface_name_no_auto_alt_name_when_saved_defines() {
+    // When the saved state manages `alt-names` explicitly, the original
+    // kernel name is not auto-added.
+    let merged = gen_merged_with_saved(
+        r#"---
+        interfaces:
+          - name: port1
+            type: ethernet
+            identifier: mac-address
+            mac-address: 52:54:00:15:17:63
+            kernel-iface-name: eth0
+        "#,
+        r#"---
+        interfaces:
+          - name: enp1s0
+            type: ethernet
+            mac-address: 52:54:00:15:17:63
+        "#,
+        r#"---
+        interfaces:
+          - name: port1
+            type: ethernet
+            identifier: mac-address
+            mac-address: 52:54:00:15:17:63
+            kernel-iface-name: eth0
+            alt-names:
+              - name: primary
+        "#,
+    )
+    .unwrap();
+    let merged_iface = merged.ifaces.kernel_ifaces.get("eth0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    assert_eq!(for_apply.kernel_iface_name(), "eth0");
+    // The saved state manages alt-names explicitly: the original kernel
+    // name is not auto-added, and the saved alt-name `primary` is applied.
+    let alt_names = for_apply.base_iface().alt_names.as_ref().unwrap();
+    assert_eq!(alt_names.len(), 1);
+    assert_eq!(alt_names[0].name, "primary");
+}
+
+#[test]
+fn test_mac_id_kernel_iface_name_same_as_current_no_rename() {
+    // `kernel-iface-name` equal to the current kernel name: no rename, no
+    // auto alt-name (an interface cannot hold an alt-name equal to its own
+    // name).
+    let merged = gen_merged(
+        r#"---
+        interfaces:
+          - name: port1
+            type: ethernet
+            identifier: mac-address
+            mac-address: 52:54:00:15:17:63
+            kernel-iface-name: enp1s0
+        "#,
+        r#"---
+        interfaces:
+          - name: enp1s0
+            type: ethernet
+            mac-address: 52:54:00:15:17:63
+        "#,
+    )
+    .unwrap();
+    let merged_iface = merged.ifaces.kernel_ifaces.get("enp1s0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    assert_eq!(for_apply.kernel_iface_name(), "enp1s0");
+    assert!(for_apply.base_iface().alt_names.is_none());
 }
