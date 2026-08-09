@@ -91,7 +91,11 @@ pub(crate) fn apply_iface_link_changes(
 
     let mut np_iface = init_np_iface(apply_iface.base_iface());
 
-    apply_base_iface_link_changes(&mut np_iface, apply_iface.base_iface())?;
+    apply_base_iface_link_changes(
+        &mut np_iface,
+        apply_iface.base_iface(),
+        merged_iface.current.as_ref().map(|i| i.base_iface()),
+    )?;
 
     if let Interface::Ethernet(apply_iface) = apply_iface {
         apply_ethernet_conf(np_iface, apply_iface)

@@ -9,9 +9,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ErrorKind, InterfaceAutoConnect, InterfaceIdentifier, InterfaceIpv4,
-    InterfaceIpv6, InterfaceLinkState, InterfaceState, InterfaceType,
-    JsonDisplay, NipartError,
+    AltNameEntry, ErrorKind, InterfaceAutoConnect, InterfaceIdentifier,
+    InterfaceIpv4, InterfaceIpv6, InterfaceLinkState, InterfaceState,
+    InterfaceType, JsonDisplay, NipartError,
 };
 
 #[derive(
@@ -90,6 +90,11 @@ pub struct BaseInterface {
     /// Maximum MTU allowed. Ignored during apply.
     /// Serialize and deserialize to/from `max-mtu`.
     pub max_mtu: Option<u64>,
+    /// Alternative names of the interface. An entry with `state: absent`
+    /// removes that alternative name.
+    /// Serialize and deserialize to/from `alt-names`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alt_names: Option<Vec<AltNameEntry>>,
     /// IPv4 information.
     /// Hided if interface is not allowed to hold IP information(e.g. port of
     /// bond is not allowed to hold IP information).
@@ -195,6 +200,13 @@ impl BaseInterface {
         // iface_index is query only
         for_save.iface_index = None;
         for_apply.iface_index = None;
+
+        // Alternative names: sorted so the verification (which compares the
+        // list in order) matches the kernel-reported order after apply.
+        for_apply.sanitize_alt_names();
+        for_save.sanitize_alt_names();
+        for_verify.sanitize_alt_names();
+        merged.sanitize_alt_names();
 
         desired.validate_mtu(current)?;
         if desired.identifier == Some(InterfaceIdentifier::MacAddress)
@@ -400,6 +412,43 @@ impl BaseInterface {
             && let Some(cur_ipv6) = current.ipv6.as_mut()
         {
             des_ipv6.sanitize_before_verify(cur_ipv6);
+        }
+        self.alt_name_pre_verify(current);
+    }
+
+    /// Adjust the current alt-names to match the desired list so the
+    /// verification (an order-sensitive list comparison) passes.  Mirrors
+    /// nmstate's `Interface::alt_name_pre_verify()`: `state: absent` entries
+    /// are mirrored into the current list, and current alt-names not listed
+    /// in the desired state are ignored (the apply only touches the listed
+    /// entries, other alt-names such as systemd's auto-generated ones are
+    /// left alone).
+    fn alt_name_pre_verify(&self, current: &mut Self) {
+        if let Some(des_alt_names) = self.alt_names.as_ref() {
+            let cur_alt_names = current.alt_names.get_or_insert(Vec::new());
+            for des_alt_name in des_alt_names {
+                if des_alt_name.is_absent()
+                    && !cur_alt_names
+                        .iter()
+                        .any(|c| c.name == des_alt_name.name)
+                {
+                    // Add the `state: absent` entry so the follow-up
+                    // verification can pass.
+                    cur_alt_names.push(des_alt_name.clone());
+                }
+            }
+            cur_alt_names
+                .retain(|cur_alt_name| des_alt_names.contains(cur_alt_name));
+            cur_alt_names.sort_unstable();
+        }
+    }
+
+    /// Sort the alternative names in place so the verification (which
+    /// compares the list in order) matches the kernel-reported order after
+    /// apply.
+    fn sanitize_alt_names(&mut self) {
+        if let Some(alt_names) = self.alt_names.as_mut() {
+            alt_names.sort_unstable();
         }
     }
 

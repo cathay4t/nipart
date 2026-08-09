@@ -309,6 +309,8 @@ impl MergedInterfaces {
 
         ret.post_merge_sanitize()?;
 
+        ret.validate_alt_names()?;
+
         ret._set_up_priority()?;
 
         ret.mark_will_delete();
@@ -500,6 +502,99 @@ impl MergedInterfaces {
         self.post_merge_sanitize_wifi();
         self.post_merge_sanitize_controller_and_port()?;
 
+        Ok(())
+    }
+
+    /// Validate that no two interfaces share the same alternative name, and
+    /// that no alternative name collides with an existing kernel interface
+    /// name.  Mirrors nmstate's `MergedInterfaces::validate_alt_names()`.
+    fn validate_alt_names(&self) -> Result<(), NipartError> {
+        // HashMap<alt_name, current_kernel_iface_name>
+        let mut all_alt_names: HashMap<&str, &str> = HashMap::new();
+
+        let all_iface_names: HashSet<&str> =
+            self.kernel_ifaces.keys().map(|s| s.as_str()).collect();
+
+        for merged_iface in self.kernel_ifaces.values() {
+            if let Some(cur_iface) = merged_iface.current.as_ref()
+                && let Some(alt_names) =
+                    cur_iface.base_iface().alt_names.as_ref()
+            {
+                for alt_name in alt_names {
+                    all_alt_names
+                        .insert(alt_name.name.as_str(), cur_iface.name());
+                }
+            }
+        }
+        for merged_iface in self.kernel_ifaces.values() {
+            let Some(des_iface) = merged_iface.for_apply.as_ref() else {
+                continue;
+            };
+            // The current kernel name of this same interface: an existing
+            // alt-name owned by it is not a conflict (e.g. a
+            // `identifier: mac-address` config whose desired `name` is the
+            // profile name, not the kernel name).
+            let self_kernel_name =
+                merged_iface.current.as_ref().map(|i| i.kernel_iface_name());
+            let mut iface_seen_alt_names: HashSet<&str> = HashSet::new();
+            if let Some(alt_names) = des_iface.base_iface().alt_names.as_ref() {
+                for alt_name in alt_names {
+                    if !iface_seen_alt_names.insert(alt_name.name.as_str()) {
+                        return Err(NipartError::new(
+                            ErrorKind::InvalidArgument,
+                            format!(
+                                "Duplicate alt-name {} on interface {}",
+                                alt_name.name,
+                                des_iface.name(),
+                            ),
+                        ));
+                    }
+                    if alt_name.is_absent() {
+                        all_alt_names.remove(alt_name.name.as_str());
+                    } else if self_kernel_name == Some(alt_name.name.as_str()) {
+                        // The kernel forbids an interface holding an
+                        // alt-name equal to its own kernel name.
+                        return Err(NipartError::new(
+                            ErrorKind::InvalidArgument,
+                            format!(
+                                "Alternative name {} for interface {} cannot \
+                                 be the same as its kernel interface name",
+                                alt_name.name,
+                                des_iface.name(),
+                            ),
+                        ));
+                    } else if let Some(other_iface_name) =
+                        all_alt_names.get(alt_name.name.as_str())
+                    {
+                        if self_kernel_name != Some(*other_iface_name) {
+                            return Err(NipartError::new(
+                                ErrorKind::InvalidArgument,
+                                format!(
+                                    "Desired alt-name {} for interface {} is \
+                                     already used by interface {}",
+                                    alt_name.name,
+                                    des_iface.name(),
+                                    other_iface_name
+                                ),
+                            ));
+                        };
+                    } else if all_iface_names.contains(alt_name.name.as_str()) {
+                        return Err(NipartError::new(
+                            ErrorKind::InvalidArgument,
+                            format!(
+                                "Desired alt-name {} for interface {} is \
+                                 already an interface name of other NIC",
+                                alt_name.name,
+                                des_iface.name(),
+                            ),
+                        ));
+                    } else {
+                        all_alt_names
+                            .insert(alt_name.name.as_str(), des_iface.name());
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
