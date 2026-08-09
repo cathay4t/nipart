@@ -51,6 +51,13 @@ pub(crate) enum NipartMonitorCmd {
     AddIface(String),
     /// Stop monitoring on specified interface
     DelIface(String),
+    /// Start monitoring on specified MAC address (uppercase, e.g.
+    /// `00:11:22:33:44:55`): link events of interfaces carrying this MAC
+    /// are emitted even when their kernel name is not known yet (saved
+    /// `identifier: mac-address` configs whose NIC is not present at boot).
+    AddMacWatch(String),
+    /// Stop monitoring on specified MAC address
+    DelMacWatch(String),
     /// Start monitoring on WIFI SSID association
     EnableWifiMonitor,
     /// Stop monitoring on WIFI SSID association
@@ -73,6 +80,12 @@ impl std::fmt::Display for NipartMonitorCmd {
             }
             Self::DelIface(iface) => {
                 write!(f, "stop-iface-monitor:{iface}")
+            }
+            Self::AddMacWatch(mac) => {
+                write!(f, "start-mac-monitor:{mac}")
+            }
+            Self::DelMacWatch(mac) => {
+                write!(f, "stop-mac-monitor:{mac}")
             }
             Self::EnableWifiMonitor => {
                 write!(f, "enable-wifi-monitor")
@@ -108,6 +121,14 @@ pub(crate) struct NipartMonitorWorker {
         UnboundedReceiver<(NetlinkMessage<RouteNetlinkMessage>, SocketAddr)>,
     >,
     iface_monitor_list: HashSet<String>,
+    // MAC addresses (uppercase) of saved `identifier: mac-address` configs
+    // whose NIC is not present yet: when a NIC carrying one of these MACs
+    // appears, its link events are emitted so the event worker can apply
+    // the saved config.
+    mac_watch_list: HashSet<String>,
+    // Latest MAC address (uppercase) observed per kernel interface name,
+    // used to match link events against `mac_watch_list`.
+    iface_mac: HashMap<String, String>,
     wifi_monitor_enabled: bool,
     msg_to_commander: Option<UnboundedSender<NipartManagerCmd>>,
     manual_paused: bool,
@@ -125,6 +146,8 @@ impl TaskWorker for NipartMonitorWorker {
         Ok(Self {
             receiver,
             iface_monitor_list: HashSet::new(),
+            mac_watch_list: HashSet::new(),
+            iface_mac: HashMap::new(),
             wifi_monitor_enabled: false,
             netlink_handle: None,
             netlink_msg_receiver: None,
@@ -156,9 +179,19 @@ impl TaskWorker for NipartMonitorWorker {
             }
             NipartMonitorCmd::DelIface(iface) => {
                 self.iface_monitor_list.remove(&iface);
-                if self.iface_monitor_list.is_empty()
-                    && !self.wifi_monitor_enabled
-                {
+                if self.should_pause() {
+                    self.pause();
+                }
+            }
+            NipartMonitorCmd::AddMacWatch(mac) => {
+                self.mac_watch_list.insert(mac.to_ascii_uppercase());
+                if self.netlink_msg_receiver.is_none() && !self.manual_paused {
+                    self.resume().await?;
+                }
+            }
+            NipartMonitorCmd::DelMacWatch(mac) => {
+                self.mac_watch_list.remove(&mac.to_ascii_uppercase());
+                if self.should_pause() {
                     self.pause();
                 }
             }
@@ -170,7 +203,7 @@ impl TaskWorker for NipartMonitorWorker {
             }
             NipartMonitorCmd::DisableWifiMonitor => {
                 self.wifi_monitor_enabled = false;
-                if self.iface_monitor_list.is_empty() {
+                if self.should_pause() {
                     self.pause();
                 }
             }
@@ -180,9 +213,7 @@ impl TaskWorker for NipartMonitorWorker {
             }
             NipartMonitorCmd::Resume => {
                 self.manual_paused = false;
-                if !self.iface_monitor_list.is_empty()
-                    || self.wifi_monitor_enabled
-                {
+                if self.should_resume() {
                     self.resume().await?;
                 }
             }
@@ -249,6 +280,22 @@ impl TaskWorker for NipartMonitorWorker {
 }
 
 impl NipartMonitorWorker {
+    /// Whether the netlink socket should be dropped: no interface, no MAC
+    /// watch and no wifi monitoring left.
+    fn should_pause(&self) -> bool {
+        self.iface_monitor_list.is_empty()
+            && self.mac_watch_list.is_empty()
+            && !self.wifi_monitor_enabled
+    }
+
+    /// Whether the netlink socket should be (re)created: at least one
+    /// interface, one MAC watch or wifi monitoring is active.
+    fn should_resume(&self) -> bool {
+        !self.iface_monitor_list.is_empty()
+            || !self.mac_watch_list.is_empty()
+            || self.wifi_monitor_enabled
+    }
+
     fn pause(&mut self) {
         self.netlink_handle = None;
         self.netlink_msg_receiver = None;
@@ -337,9 +384,12 @@ impl NipartMonitorWorker {
 
         let mut link_handle = handle.link().get().execute();
         while let Some(Ok(link_msg)) = link_handle.next().await {
-            if let Some(event) =
+            if let Some((event, mac)) =
                 parse_link_msg(&link_msg, self.wifi_monitor_enabled, false)
             {
+                if let Some(mac) = mac {
+                    self.iface_mac.insert(event.iface_name.clone(), mac);
+                }
                 self.try_notify(event).await?;
             }
         }
@@ -353,9 +403,12 @@ impl NipartMonitorWorker {
         &mut self,
         nl_msg: NetlinkMessage<RouteNetlinkMessage>,
     ) -> Result<(), NipartError> {
-        if let Some(event) =
+        if let Some((event, mac)) =
             parse_route_netlink_msg(nl_msg, self.wifi_monitor_enabled)
         {
+            if let Some(mac) = mac {
+                self.iface_mac.insert(event.iface_name.clone(), mac);
+            }
             self.try_notify(event).await?;
         }
         Ok(())
@@ -363,6 +416,13 @@ impl NipartMonitorWorker {
 
     fn event_is_interested(&self, event: &InterfaceLinkEvent) -> bool {
         self.iface_monitor_list.contains(&event.iface_name)
+            // A NIC matching a saved `identifier: mac-address` config may
+            // carry a kernel name unknown to us (it was not present at boot):
+            // match it by the MAC address instead.
+            || self
+                .iface_mac
+                .get(&event.iface_name)
+                .is_some_and(|mac| self.mac_watch_list.contains(mac))
             || (self.wifi_monitor_enabled && event.ssid.is_some())
             || (self.wifi_monitor_enabled
                 && event.iface_type == InterfaceType::WifiPhy)
@@ -421,7 +481,7 @@ fn parse_link_msg(
     link_msg: &LinkMessage,
     wifi_monitor_enabled: bool,
     is_delete: bool,
-) -> Option<InterfaceLinkEvent> {
+) -> Option<(InterfaceLinkEvent, Option<String>)> {
     let iface_name = link_msg.attributes.iter().find_map(|attr| {
         if let &LinkAttribute::IfName(iface_name) = &attr {
             Some(iface_name.to_string())
@@ -430,6 +490,16 @@ fn parse_link_msg(
         }
     })?;
     let iface_index = link_msg.header.index;
+    // The MAC address of the interface, used to match link events against
+    // saved `identifier: mac-address` configs whose NIC was not present at
+    // boot (their kernel name is unknown until the NIC appears).
+    let mac = link_msg.attributes.iter().find_map(|attr| {
+        if let LinkAttribute::Address(addr) = attr {
+            format_mac(addr)
+        } else {
+            None
+        }
+    });
     // TODO: We should return early when event should be ignored(up event for up
     // link, or down event for down link, etc).
 
@@ -450,7 +520,7 @@ fn parse_link_msg(
 
     if is_delete {
         event.is_delete = true;
-        return Some(event);
+        return Some((event, mac));
     }
 
     let op_state = link_msg.attributes.iter().find_map(|attr| {
@@ -506,7 +576,7 @@ fn parse_link_msg(
                 "{iface_name}: Cannot get SSID of out wifi-phy event \
                  {link_msg:?}"
             );
-            return Some(event);
+            return Some((event, mac));
         };
 
         match Nl80211Elements::parse(wifi_ie.as_slice()) {
@@ -536,13 +606,29 @@ fn parse_link_msg(
         }
     }
 
-    Some(event)
+    Some((event, mac))
+}
+
+/// Format a raw MAC address (6 bytes) into the uppercase
+/// `XX:XX:XX:XX:XX:XX` form used by the saved config and the MAC watch
+/// list.  Returns `None` for addresses of any other length (e.g. the
+/// 20-byte InfiniBand addresses) which cannot match an ethernet MAC.
+fn format_mac(addr: &[u8]) -> Option<String> {
+    if addr.len() != 6 {
+        return None;
+    }
+    Some(
+        addr.iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(":"),
+    )
 }
 
 fn parse_route_netlink_msg(
     nl_msg: NetlinkMessage<RouteNetlinkMessage>,
     wifi_monitor_enabled: bool,
-) -> Option<InterfaceLinkEvent> {
+) -> Option<(InterfaceLinkEvent, Option<String>)> {
     if let NetlinkPayload::InnerMessage(RouteNetlinkMessage::NewLink(
         link_msg,
     )) = nl_msg.payload
@@ -615,5 +701,110 @@ fn is_wifi_phy_nic(iface_name: &str) -> bool {
         content.contains("DEVTYPE=wlan")
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_channel::mpsc::unbounded;
+    use nipart::{InterfaceLinkEvent, InterfaceType};
+
+    use super::{NipartMonitorWorker, format_mac};
+    use crate::task::TaskWorker;
+
+    fn gen_event(iface_name: &str) -> InterfaceLinkEvent {
+        InterfaceLinkEvent::new(
+            iface_name.to_string(),
+            10,
+            InterfaceType::Ethernet,
+            true,
+            None,
+        )
+    }
+
+    fn gen_worker() -> NipartMonitorWorker {
+        let (_tx, rx) = unbounded();
+        tokio::runtime::Runtime::new()
+            .expect("Failed to create tokio runtime")
+            .block_on(NipartMonitorWorker::new(rx))
+            .expect("Failed to create monitor worker")
+    }
+
+    #[test]
+    fn test_format_mac() {
+        assert_eq!(
+            format_mac(&[0x3c, 0xe1, 0xa1, 0xbf, 0xd8, 0x4d]),
+            Some("3C:E1:A1:BF:D8:4D".to_string())
+        );
+        // Addresses of other lengths (e.g. InfiniBand 20 bytes) cannot
+        // match an ethernet MAC.
+        assert_eq!(format_mac(&[0x00, 0x11]), None);
+        assert_eq!(format_mac(&[]), None);
+    }
+
+    #[test]
+    fn test_event_is_interested_by_mac_watch() {
+        // A NIC matching a saved `identifier: mac-address` config carries a
+        // kernel name unknown to the monitor: the event must be emitted
+        // when its MAC address is watched.
+        let mut worker = gen_worker();
+        worker
+            .mac_watch_list
+            .insert("3C:E1:A1:BF:D8:4D".to_string());
+        worker
+            .iface_mac
+            .insert("enp4s0".to_string(), "3C:E1:A1:BF:D8:4D".to_string());
+
+        assert!(worker.event_is_interested(&gen_event("enp4s0")));
+
+        // Same interface name with a different (unwatched) MAC: not
+        // interested unless the name itself is monitored.
+        worker
+            .iface_mac
+            .insert("enp4s0".to_string(), "00:11:22:33:44:55".to_string());
+        assert!(!worker.event_is_interested(&gen_event("enp4s0")));
+
+        // Interface without any observed MAC address.
+        worker.iface_mac.remove("enp4s0");
+        assert!(!worker.event_is_interested(&gen_event("enp4s0")));
+    }
+
+    #[test]
+    fn test_event_is_interested_by_name_or_wifi() {
+        let mut worker = gen_worker();
+        // Monitored by kernel name.
+        worker.iface_monitor_list.insert("enp1s0".to_string());
+        assert!(worker.event_is_interested(&gen_event("enp1s0")));
+        assert!(!worker.event_is_interested(&gen_event("enp2s0")));
+
+        // Wifi monitoring passes all wifi-phy events.
+        worker.wifi_monitor_enabled = true;
+        let wifi_event = InterfaceLinkEvent::new(
+            "wlan0".to_string(),
+            10,
+            InterfaceType::WifiPhy,
+            true,
+            None,
+        );
+        assert!(worker.event_is_interested(&wifi_event));
+        assert!(!worker.event_is_interested(&gen_event("enp2s0")));
+    }
+
+    #[test]
+    fn test_should_pause_and_resume_include_mac_watch() {
+        let mut worker = gen_worker();
+        assert!(worker.should_pause());
+        assert!(!worker.should_resume());
+
+        // A MAC watch alone keeps the netlink socket alive.
+        worker
+            .mac_watch_list
+            .insert("3C:E1:A1:BF:D8:4D".to_string());
+        assert!(!worker.should_pause());
+        assert!(worker.should_resume());
+
+        // Removing the last watch pauses again.
+        worker.mac_watch_list.clear();
+        assert!(worker.should_pause());
     }
 }

@@ -191,6 +191,15 @@ impl NipartEventWorker {
                 NipartApplyOption::new().no_verify(),
             )?;
             commander.apply_merged_state(None, &merged_state).await?;
+            // The event path applies the saved config directly (no
+            // `apply_network_state`), so refresh the monitor setup here:
+            // the applied interface gets its kernel-name watch, and a stale
+            // MAC watch of an interface that has just become active is
+            // dropped.
+            commander
+                .monitor_manager
+                .setup_monitor(&merged_state, &saved_state)
+                .await?;
         } else {
             log::trace!("No change required for event {event}");
         }
