@@ -115,3 +115,24 @@ Query only property. The maximum MTU supported by the interface
 ## `ipv4` and `ipv6` - IP configuration
 
 Please check [IP configuration](./ip.md) for details.
+
+## `alt-names` - Alternative names
+
+List of alternative names of the interface.  An entry with `state: absent`
+removes that alternative name:
+
+```yaml
+interfaces:
+  - name: port1
+    type: ethernet
+    identifier: mac-address
+    mac-address: 52:54:00:15:17:63
+    alt-names:
+      - name: port1
+      - name: primary
+```
+
+Only the listed entries are touched on apply (incremental semantic, same as
+nmstate): other existing alt-names (e.g. systemd's auto-generated ones) are
+left alone.  Unlike nmstate, no systemd link files are created — nipart is a
+daemon and re-applies the saved alt-names from its own saved state at boot.

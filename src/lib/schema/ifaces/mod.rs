@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+mod alt_name;
 mod base;
 mod bond;
 mod bridge_vlan;
@@ -17,6 +18,7 @@ mod wifi;
 mod wireguard;
 
 pub use self::{
+    alt_name::{AltNameEntry, AltNameState},
     base::BaseInterface,
     bond::{
         BondAdSelect, BondAllPortActive, BondArpAllTargets, BondArpValidate,

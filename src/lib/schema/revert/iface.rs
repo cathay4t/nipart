@@ -2,7 +2,8 @@
 
 use super::value::gen_revert_state;
 use crate::{
-    Interface, InterfaceState, MergedInterface, NipartError, NipartInterface,
+    AltNameEntry, AltNameState, Interface, InterfaceState, MergedInterface,
+    NipartError, NipartInterface,
 };
 
 impl MergedInterface {
@@ -46,6 +47,44 @@ impl Interface {
         let current_value = serde_json::to_value(current)?;
 
         gen_revert_state(&desired_value, &current_value, &mut revert_value);
+
+        // The apply only touches the alt-names listed in the desired state
+        // (incremental semantic), so reverting to the pre-apply list
+        // cannot undo an alt-name the apply added: emit `state: absent`
+        // for alt-names the apply added, and a plain entry for the ones
+        // the apply removed (to re-add them).
+        if let Some(des_alt_names) = for_apply.base_iface().alt_names.as_ref() {
+            let cur_alt_names: Vec<&str> = current
+                .base_iface()
+                .alt_names
+                .as_ref()
+                .map(|entries| {
+                    entries.iter().map(|entry| entry.name.as_str()).collect()
+                })
+                .unwrap_or_default();
+            let mut revert_alt_names: Vec<AltNameEntry> = Vec::new();
+            for des_alt_name in des_alt_names {
+                let in_current =
+                    cur_alt_names.contains(&des_alt_name.name.as_str());
+                if !des_alt_name.is_absent() && !in_current {
+                    // The apply added it: revert removes it.
+                    revert_alt_names.push(AltNameEntry {
+                        name: des_alt_name.name.clone(),
+                        state: Some(AltNameState::Absent),
+                    });
+                } else if des_alt_name.is_absent() && in_current {
+                    // The apply removed it: revert re-adds it.
+                    revert_alt_names.push(AltNameEntry {
+                        name: des_alt_name.name.clone(),
+                        state: None,
+                    });
+                }
+            }
+            if !revert_alt_names.is_empty() {
+                revert_value["alt-names"] =
+                    serde_json::to_value(revert_alt_names)?;
+            }
+        }
 
         let mut revert_iface: Interface = serde_json::from_value(revert_value)?;
 

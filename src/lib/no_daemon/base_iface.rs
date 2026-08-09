@@ -5,8 +5,8 @@ use super::{
     ip::{np_ipv4_to_nipart, np_ipv6_to_nipart},
 };
 use crate::{
-    BaseInterface, InterfaceLinkState, InterfaceState, InterfaceType,
-    NipartError,
+    AltNameEntry, BaseInterface, InterfaceLinkState, InterfaceState,
+    InterfaceType, NipartError,
 };
 
 fn np_iface_type_to_nipart(np_iface_type: &nispor::IfaceType) -> InterfaceType {
@@ -105,6 +105,22 @@ pub(crate) fn np_iface_to_base_iface(
         } else {
             None
         },
+        alt_names: if np_iface.alt_names.is_empty() {
+            None
+        } else {
+            let mut alt_names: Vec<AltNameEntry> = np_iface
+                .alt_names
+                .iter()
+                .map(|name| AltNameEntry {
+                    name: name.clone(),
+                    state: None,
+                })
+                .collect();
+            // Sort so the verification (order-sensitive list comparison)
+            // matches the sorted desired alt-names.
+            alt_names.sort_unstable();
+            Some(alt_names)
+        },
         ..Default::default()
     };
     if !base_iface.iface_type.is_supported() {
@@ -143,6 +159,7 @@ fn get_permanent_mac_address(iface: &nispor::Iface) -> Option<String> {
 pub(crate) fn apply_base_iface_link_changes(
     np_iface: &mut nispor::IfaceConf,
     apply_iface: &BaseInterface,
+    cur_iface: Option<&BaseInterface>,
 ) -> Result<(), NipartError> {
     // We do not check current property state, nispor will ignore unchanged
     // property.
@@ -157,6 +174,39 @@ pub(crate) fn apply_base_iface_link_changes(
 
     if apply_iface.iface_type != InterfaceType::OvsInterface {
         np_iface.controller = apply_iface.controller.clone();
+    }
+
+    // Alternative names: nispor applies the add/remove after the interface
+    // exists (it fetches the fresh ifindex), so this also works for
+    // interfaces created in the same apply.  Only the entries explicitly
+    // listed in the desired `alt-names` are touched; other existing
+    // alt-names are left alone.
+    if let Some(des_alt_names) = apply_iface.alt_names.as_ref() {
+        let cur_alt_names: std::collections::HashSet<&str> = cur_iface
+            .and_then(|i| i.alt_names.as_ref())
+            .map(|entries| {
+                entries.iter().map(|entry| entry.name.as_str()).collect()
+            })
+            .unwrap_or_default();
+        let mut np_alt_names: Vec<nispor::AltNameConf> = Vec::new();
+        for des_alt_name in des_alt_names {
+            let des_absent = des_alt_name.is_absent();
+            let cur_exists = cur_alt_names.contains(des_alt_name.name.as_str());
+            match (des_absent, cur_exists) {
+                // Add a new alt-name, or remove an existing one.
+                (false, false) | (true, true) => {
+                    np_alt_names.push(nispor::AltNameConf::new(
+                        des_alt_name.name.to_string(),
+                        des_absent,
+                    ));
+                }
+                // Already exists, or already removed: no-op.
+                (false, true) | (true, false) => {}
+            }
+        }
+        if !np_alt_names.is_empty() {
+            np_iface.alt_names = np_alt_names;
+        }
     }
     Ok(())
 }
