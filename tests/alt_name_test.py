@@ -276,3 +276,50 @@ def test_mac_id_kernel_iface_name_no_auto_alt_name_when_defined():
     finally:
         exec_cmd(["ip", "link", "del", "renamed1"], check=False)
         _remove_ren_veth_pair()
+
+
+def test_boot_load_saved_rename_keeps_original_alt_name():
+    # The saved config (MAC-identified with `kernel-iface-name`) must
+    # re-apply the rename and the auto-kept original alt-name at boot.
+    _create_ren_veth_pair()
+    try:
+        exec_cmd(f"ip link set {REN_VETH} address 00:11:22:33:44:57".split())
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                - name: port3
+                  type: ethernet
+                  identifier: mac-address
+                  mac-address: 00:11:22:33:44:57
+                  kernel-iface-name: renamed0
+                """))
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT,
+            _iface_has_alt_names,
+            "renamed0",
+            [REN_VETH],
+        ), "Interface not renamed with original name kept as alt-name"
+
+        # Wipe the kernel state: rename back and remove the alt-name.
+        exec_cmd(
+            f"ip link property del dev renamed0 altname {REN_VETH}".split(),
+            check=False,
+        )
+        exec_cmd(f"ip link set renamed0 name {REN_VETH}".split())
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT, _iface_has_alt_names, REN_VETH, []
+        ), "Kernel alt-name not wiped before daemon restart"
+
+        # Restart the daemon: the saved config must re-apply the rename
+        # and the auto-kept alt-name.
+        stop_daemon()
+        start_daemon()
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT,
+            _iface_has_alt_names,
+            "renamed0",
+            [REN_VETH],
+        ), "Saved rename + original alt-name not re-applied at boot"
+    finally:
+        exec_cmd(["ip", "link", "del", "renamed0"], check=False)
+        exec_cmd(["ip", "link", "del", REN_VETH], check=False)
+        _remove_ren_veth_pair()

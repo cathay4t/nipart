@@ -189,7 +189,19 @@ impl BaseInterface {
         }
 
         if !for_apply.is_name_matching() {
-            for_save.kernel_iface_name = String::new();
+            // For a MAC-identified config, the saved state keeps the
+            // profile name as `name` and (unless the user explicitly
+            // requested a rename via `kernel-iface-name`) clears the
+            // kernel name so the config stays resolvable by MAC at boot.
+            // The desired `kernel_iface_name` holds the resolved kernel
+            // name: it only differs from the current kernel name when the
+            // user requested an explicit rename.
+            if current.is_none()
+                || current.map(|c| c.kernel_iface_name.as_str())
+                    == Some(self.kernel_iface_name.as_str())
+            {
+                for_save.kernel_iface_name = String::new();
+            }
             if let Some(profile_name) = for_save.profile_name.as_ref()
                 && !profile_name.is_empty()
             {
