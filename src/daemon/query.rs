@@ -41,15 +41,51 @@ impl NipartCommander {
                     }
                 }
 
-                // Use `auto-connect` stored in conf_manager
-                for (_, mut iface) in saved_state.ifaces.kernel_ifaces.drain() {
-                    if let Some(kernel_iface) = net_state
-                        .ifaces
-                        .kernel_ifaces
-                        .get_mut(iface.kernel_iface_name())
+                // Apply saved config properties which cannot be queried
+                // from kernel state:
+                //  * `auto-connect`: daemon-only config stored in
+                //    conf_manager.
+                //  * `profile-name`: the logical name of the saved config
+                //    managing this kernel interface.
+                for (_, mut saved_iface) in
+                    saved_state.ifaces.kernel_ifaces.drain()
+                {
+                    // The saved config of `identifier: mac-address`
+                    // interface holds no `kernel-iface-name`(keyed by
+                    // profile name), hence search by MAC address match.
+                    let cur_iface =
+                        if saved_iface.is_name_matching() {
+                            net_state
+                                .ifaces
+                                .kernel_ifaces
+                                .get_mut(saved_iface.kernel_iface_name())
+                        } else {
+                            net_state.ifaces.kernel_ifaces.values_mut().find(
+                                |cur_iface| saved_iface.is_match(cur_iface),
+                            )
+                        };
+                    let Some(cur_iface) = cur_iface else {
+                        continue;
+                    };
+                    // Multiple saved configs may resolve to the same
+                    // running interface (e.g. a name-matched and a
+                    // MAC-matched config for the same NIC), and the
+                    // `drain()` order is nondeterministic. Only fill
+                    // missing values so a `None` never clobbers a set
+                    // one.
+                    if let Some(auto_connect) =
+                        saved_iface.base_iface_mut().auto_connect.take()
+                        && cur_iface.base_iface().auto_connect.is_none()
                     {
-                        kernel_iface.base_iface_mut().auto_connect =
-                            iface.base_iface_mut().auto_connect.take();
+                        cur_iface.base_iface_mut().auto_connect =
+                            Some(auto_connect);
+                    }
+                    if let Some(profile_name) =
+                        saved_iface.base_iface().profile_name.as_ref()
+                        && cur_iface.base_iface().profile_name.is_none()
+                    {
+                        cur_iface.base_iface_mut().profile_name =
+                            Some(profile_name.clone());
                     }
                 }
 
