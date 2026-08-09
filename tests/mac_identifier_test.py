@@ -17,6 +17,7 @@ from .testlib.veth import veth_interface
 MAC_TEST_VETH = "veth-mac0"
 MAC_TEST_VETH_PEER = "veth-mac1"
 MAC_TEST_IP = "192.0.2.99"
+MAC_TEST_PROFILE = "mac-prof0"
 
 ROUTE_MAC_NEXTHOP = "192.0.2.1"
 ROUTE_LOGICAL_NAME = "my-gw-iface"
@@ -62,6 +63,68 @@ def test_mac_identifier_resolve_with_veth(veth_env):
         },
         iface_state["ipv4"],
     )
+
+
+def test_mac_identifier_profile_name_in_running_state(veth_env):
+    iface_state = show_only(MAC_TEST_VETH)
+    mac_address = iface_state["mac-address"]
+
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+          - name: {MAC_TEST_PROFILE}
+            type: ethernet
+            identifier: mac-address
+            mac-address: {mac_address}
+            auto-connect: false
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: false
+              address:
+                - ip: {MAC_TEST_IP}
+                  prefix-length: 24"""))
+
+    iface_state = show_only(MAC_TEST_VETH)
+    assert iface_state.get("profile-name") == MAC_TEST_PROFILE, (
+        f"Running state of {MAC_TEST_VETH} should carry profile-name "
+        f"{MAC_TEST_PROFILE}: {iface_state}"
+    )
+    assert iface_state.get("auto-connect") is False, (
+        f"Running state of {MAC_TEST_VETH} should carry the saved "
+        f"`auto-connect: false` value: {iface_state}"
+    )
+
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+          - name: {MAC_TEST_PROFILE}
+            type: ethernet
+            identifier: mac-address
+            mac-address: {mac_address}
+            state: absent"""))
+
+
+def test_name_identifier_auto_connect_in_running_state(veth_env):
+    # Name-matched configs (the default `identifier: name` path) must
+    # also surface daemon-only `auto-connect` from the saved config in
+    # the running state.
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+          - name: {MAC_TEST_VETH}
+            type: ethernet
+            auto-connect: false
+            state: up"""))
+
+    iface_state = show_only(MAC_TEST_VETH)
+    assert iface_state.get("auto-connect") is False, (
+        f"Running state of {MAC_TEST_VETH} should carry the saved "
+        f"`auto-connect: false` value: {iface_state}"
+    )
+
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+          - name: {MAC_TEST_VETH}
+            type: ethernet
+            state: absent"""))
 
 
 def test_route_next_hop_interface_with_mac_identifier(veth_env):
