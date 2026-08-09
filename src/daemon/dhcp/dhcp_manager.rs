@@ -54,7 +54,21 @@ impl NipartDhcpV4Manager {
         Ok(())
     }
 
-    async fn start_iface_dhcp(
+    /// The kernel interface names that currently have a DHCP client
+    /// thread running.
+    pub(crate) async fn running_ifaces(
+        &mut self,
+    ) -> Result<std::collections::HashSet<String>, NipartError> {
+        let mut ret = std::collections::HashSet::new();
+        if let NipartDhcpReply::QueryReply(threads) =
+            self.mgr.exec(NipartDhcpCmd::Query).await?
+        {
+            ret.extend(threads.into_keys());
+        }
+        Ok(ret)
+    }
+
+    pub(crate) async fn start_iface_dhcp(
         &mut self,
         base_iface: &BaseInterface,
     ) -> Result<(), NipartError> {

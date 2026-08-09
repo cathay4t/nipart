@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 use futures_channel::mpsc::UnboundedSender;
 use nipart::{
-    InterfaceType, NetworkState, NipartApplyOption, NipartError,
-    NipartInterface, NipartNoDaemon, NipartQueryOption, NipartWifiScanOption,
-    WifiScanResult,
+    Interface, InterfaceIdentifier, InterfaceState, InterfaceType,
+    NetworkState, NipartApplyOption, NipartError, NipartInterface,
+    NipartNoDaemon, NipartQueryOption, NipartWifiScanOption, WifiScanResult,
 };
 
 use super::{
@@ -101,6 +101,10 @@ impl NipartCommander {
             log::info!("Saved state is empty");
         } else {
             log::trace!("Loading saved state: {saved_state}");
+            // Accumulate the saved interfaces successfully applied at
+            // boot: after the loop their DHCP clients are restored (see
+            // `restore_saved_dhcp_clients`).
+            let mut boot_applied_ifaces: Vec<Interface> = Vec::new();
             for _ in 0..BOOTUP_NIC_CHECK_MAX_QUICK {
                 let kernel_iface_names =
                     get_initialized_nics(&saved_state).await?;
@@ -139,6 +143,8 @@ impl NipartCommander {
                         }
                     } else {
                         log::debug!("Remaining saved state: {saved_state}");
+                        boot_applied_ifaces
+                            .extend(nic_ready_state.ifaces.iter().cloned());
                     }
                 }
                 if saved_state.is_empty() {
@@ -151,6 +157,14 @@ impl NipartCommander {
                 ))
                 .await;
             }
+            // A DHCP-enabled interface whose lease survived the daemon
+            // restart still carries its address in the kernel (reported
+            // with `dhcp: true`), so the boot apply sees no diff and
+            // never restarts the DHCP client - which is a userspace
+            // process that died with the daemon.  The lease would then
+            // expire without renewal.  Restore the DHCP clients now.
+            self.restore_saved_dhcp_clients(&boot_applied_ifaces)
+                .await?;
             if !saved_state.is_empty() {
                 // The remaining saved configs target NICs that are not
                 // present in the kernel (e.g. `identifier: mac-address`
@@ -180,6 +194,132 @@ impl NipartCommander {
     ) -> Result<Vec<WifiScanResult>, NipartError> {
         self.plugin_manager.wifi_scan(opt).await
     }
+
+    /// Restore the DHCP clients for the saved interfaces applied at boot.
+    ///
+    /// [`Self::apply_network_state`] only (re)starts DHCP for interfaces
+    /// whose kernel state changed.  A DHCP-enabled interface whose lease
+    /// survived the daemon restart still carries its address in the
+    /// kernel (reported with `dhcp: true`), so the merge sees no diff and
+    /// the DHCP client - a userspace process that died with the daemon -
+    /// is never restarted; the lease then expires without renewal.  This
+    /// starts the DHCP client for every applied saved interface that has
+    /// DHCP enabled and whose kernel interface already carries a DHCP
+    /// address (i.e. the no-diff case; a cold boot has no address and is
+    /// handled by the normal apply path).
+    async fn restore_saved_dhcp_clients(
+        &mut self,
+        applied_ifaces: &[Interface],
+    ) -> Result<(), NipartError> {
+        let cur_state =
+            NipartNoDaemon::query_network_state(NipartQueryOption::running())
+                .await?;
+        // Interfaces the boot apply already started a DHCP client for
+        // (kernel state changed) must not be started again.
+        let v4_running = self.dhcpv4_manager.running_ifaces().await?;
+        let v6_running = self.dhcpv6_manager.running_ifaces().await?;
+        for saved_iface in applied_ifaces {
+            let base = saved_iface.base_iface();
+            if base.state != InterfaceState::Up {
+                continue;
+            }
+            // The DHCP client runs on the kernel interface the config
+            // binds to: a wifi-cfg maps to the wifi-phy carrying its
+            // SSID, all other configs to the interface matched by kernel
+            // name or MAC address.
+            let Some(cur_iface) =
+                match_kernel_iface_for_saved_iface(saved_iface, &cur_state)
+            else {
+                continue;
+            };
+            let cur_base = cur_iface.base_iface();
+            let iface_name = cur_iface.name().to_string();
+            if base.ipv4.as_ref().is_some_and(|i| i.is_auto())
+                && cur_base.ipv4.as_ref().is_some_and(|i| i.dhcp == Some(true))
+                && !v4_running.contains(&iface_name)
+            {
+                log::info!(
+                    "Restoring DHCPv4 client on interface {}({}) after \
+                     daemon restart",
+                    iface_name,
+                    cur_iface.iface_type()
+                );
+                if let Err(e) =
+                    self.dhcpv4_manager.start_iface_dhcp(cur_base).await
+                {
+                    // Do not abort the whole boot apply on a transient
+                    // DHCP failure; the interface keeps its lease until
+                    // it expires and a later apply can retry.
+                    log::warn!(
+                        "Failed to restore DHCPv4 client on interface \
+                         {iface_name}: {e}"
+                    );
+                }
+            }
+            if base
+                .ipv6
+                .as_ref()
+                .is_some_and(|i| i.is_enabled() && i.dhcp == Some(true))
+                && cur_base.ipv6.as_ref().is_some_and(|i| i.dhcp == Some(true))
+                && !v6_running.contains(&iface_name)
+            {
+                log::info!(
+                    "Restoring DHCPv6 client on interface {}({}) after \
+                     daemon restart",
+                    iface_name,
+                    cur_iface.iface_type()
+                );
+                if let Err(e) =
+                    self.dhcpv6_manager.start_iface_dhcp(cur_base).await
+                {
+                    log::warn!(
+                        "Failed to restore DHCPv6 client on interface \
+                         {iface_name}: {e}"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Find the kernel interface a saved config applies its DHCP to: a
+/// wifi-cfg maps to the wifi-phy carrying its SSID, all other configs
+/// match by kernel name or MAC address.
+fn match_kernel_iface_for_saved_iface<'a>(
+    saved_iface: &Interface,
+    cur_state: &'a NetworkState,
+) -> Option<&'a Interface> {
+    if let Interface::WifiCfg(wifi_cfg) = saved_iface {
+        let ssid = wifi_cfg.ssid()?;
+        return cur_state.ifaces.kernel_ifaces.values().find(|cur_iface| {
+            cur_iface.iface_type() == &InterfaceType::WifiPhy
+                && matches!(
+                    cur_iface,
+                    Interface::WifiPhy(wifi_phy)
+                        if wifi_phy.ssid() == Some(ssid)
+                )
+        });
+    }
+    let base = saved_iface.base_iface();
+    let saved_mac = if base.identifier == Some(InterfaceIdentifier::MacAddress)
+    {
+        base.mac_address.as_deref().map(|m| m.to_ascii_uppercase())
+    } else {
+        None
+    };
+    cur_state.ifaces.kernel_ifaces.values().find(|cur_iface| {
+        let cur_base = cur_iface.base_iface();
+        saved_iface.kernel_iface_name() == cur_iface.kernel_iface_name()
+            || saved_iface.name() == cur_iface.kernel_iface_name()
+            || saved_mac.as_deref().is_some_and(|saved_mac| {
+                cur_base
+                    .mac_address
+                    .as_deref()
+                    .map(|m| m.to_ascii_uppercase() == saved_mac)
+                    .unwrap_or(false)
+            })
+    })
 }
 
 async fn get_initialized_nics(
