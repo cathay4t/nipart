@@ -442,7 +442,7 @@ mod tests {
     };
 
     fn gen_saved_state() -> NetworkState {
-        serde_yaml::from_str(
+        rmsd_yaml::from_str(
             r#"---
 version: 1
 routes:

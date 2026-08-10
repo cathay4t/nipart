@@ -79,9 +79,9 @@ impl NipartCommander {
     //     it initialized, apply its config.
     //  3. Retry for a short grace period so NICs that are still enumerating
     //     (udev not finished) get applied in the same boot pass.
-    //  4. Leave the remaining saved configs (their NIC is not present) for
-    //     the monitor worker: it emits a link event when the NIC appears and
-    //     the event worker then applies the saved config.
+    //  4. Leave the remaining saved configs (their NIC is not present) for the
+    //     monitor worker: it emits a link event when the NIC appears and the
+    //     event worker then applies the saved config.
     pub(crate) async fn load_saved_state(&mut self) -> Result<(), NipartError> {
         self.monitor_manager.pause().await?;
         let result = self.load_saved_state_inner().await;
@@ -239,8 +239,8 @@ impl NipartCommander {
                 && !v4_running.contains(&iface_name)
             {
                 log::info!(
-                    "Restoring DHCPv4 client on interface {}({}) after \
-                     daemon restart",
+                    "Restoring DHCPv4 client on interface {}({}) after daemon \
+                     restart",
                     iface_name,
                     cur_iface.iface_type()
                 );
@@ -264,8 +264,8 @@ impl NipartCommander {
                 && !v6_running.contains(&iface_name)
             {
                 log::info!(
-                    "Restoring DHCPv6 client on interface {}({}) after \
-                     daemon restart",
+                    "Restoring DHCPv6 client on interface {}({}) after daemon \
+                     restart",
                     iface_name,
                     cur_iface.iface_type()
                 );
@@ -547,7 +547,7 @@ mod tests {
         // A `wifi-cfg` profile is a userspace interface: it must be moved
         // into the ready state so the boot retry loop can terminate, even
         // when no kernel NIC is ready yet.
-        let mut state: NetworkState = serde_yaml::from_str(
+        let mut state: NetworkState = rmsd_yaml::from_str(
             r#"---
             interfaces:
               - name: MyWiFi
@@ -576,7 +576,7 @@ mod tests {
         // The non-virtual kernel interface without udev initialization must
         // stay in the saved state for later retry, while the userspace
         // `wifi-cfg` is moved out immediately.
-        let mut state: NetworkState = serde_yaml::from_str(
+        let mut state: NetworkState = rmsd_yaml::from_str(
             r#"---
             interfaces:
               - name: eth0
@@ -610,7 +610,7 @@ mod tests {
     fn test_remove_manual_activation() {
         // Interfaces with `auto-connect: false`, their dependents, and
         // routes pointing to them are removed from the boot state.
-        let mut state: NetworkState = serde_yaml::from_str(
+        let mut state: NetworkState = rmsd_yaml::from_str(
             r#"---
             interfaces:
               - name: eth0

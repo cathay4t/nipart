@@ -78,7 +78,7 @@ impl CommandShow {
             net_state.hide_secrets();
         }
 
-        println!("{}", serde_yaml::to_string(&net_state)?);
+        println!("{}", rmsd_yaml::to_string(&net_state)?);
 
         Ok(())
     }

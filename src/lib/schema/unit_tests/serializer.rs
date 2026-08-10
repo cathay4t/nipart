@@ -28,16 +28,13 @@ fn test_serialize_is_option_string_empty_non_empty() {
 #[test]
 fn test_serialize_option_u32_as_hex_some() {
     let t = TestHexU32 { v: Some(255) };
-    let value: serde_yaml::Value = serde_yaml::to_value(&t).unwrap();
-    assert_eq!(
-        value.get("v"),
-        Some(&serde_yaml::Value::String("0xff".to_string()))
-    );
+    let value: rmsd_yaml::Value = rmsd_yaml::to_value(&t).unwrap();
+    assert_eq!(value.get("v"), Some(&rmsd_yaml::Value::from("0xff")));
 }
 
 #[test]
 fn test_serialize_option_u32_as_hex_none() {
     let t = TestHexU32 { v: None };
-    let value: serde_yaml::Value = serde_yaml::to_value(&t).unwrap();
-    assert_eq!(value.get("v"), Some(&serde_yaml::Value::Null));
+    let value: rmsd_yaml::Value = rmsd_yaml::to_value(&t).unwrap();
+    assert!(value.get("v").unwrap().is_null());
 }

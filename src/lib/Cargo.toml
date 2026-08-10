@@ -21,7 +21,7 @@ rand = { workspace = true }
 rtnetlink = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+rmsd_yaml = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
 

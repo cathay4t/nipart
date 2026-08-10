@@ -7,7 +7,7 @@ fn test_absent_to_down_for_type(
     is_virtual: bool,
     expected_state: InterfaceState,
 ) {
-    let desired: Interfaces = serde_yaml::from_str(&format!(
+    let desired: Interfaces = rmsd_yaml::from_str(&format!(
         r#"---
         - name: test0
           type: {iface_type}
@@ -16,7 +16,7 @@ fn test_absent_to_down_for_type(
     ))
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(&format!(
+    let current: Interfaces = rmsd_yaml::from_str(&format!(
         r#"---
         - name: test0
           type: {iface_type}

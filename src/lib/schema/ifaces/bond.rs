@@ -1159,9 +1159,9 @@ mod test {
             ("actor_port_prio", BondAdSelect::ActorPortPrio),
         ] {
             let opts: BondOptions =
-                serde_yaml::from_str(&format!("ad_select: {value}\n")).unwrap();
+                rmsd_yaml::from_str(&format!("ad_select: {value}\n")).unwrap();
             assert_eq!(opts.ad_select, Some(expected));
-            let serialized = serde_yaml::to_string(&opts).unwrap();
+            let serialized = rmsd_yaml::to_string(&opts).unwrap();
             assert_eq!(serialized, format!("ad_select: {value}\n"));
         }
     }

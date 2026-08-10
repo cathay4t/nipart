@@ -9,7 +9,7 @@ use crate::{
 /// Test basic MAC address matching with MAC provided.
 #[test]
 fn test_resolve_mac_identifier_basic_with_mac() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: wan0
           type: ethernet
@@ -19,7 +19,7 @@ fn test_resolve_mac_identifier_basic_with_mac() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -40,7 +40,7 @@ fn test_resolve_mac_identifier_basic_with_mac() {
 /// Test MAC address matching with `permanent-mac-address`.
 #[test]
 fn test_resolve_mac_identifier_perm_mac() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: wan0
           type: ethernet
@@ -50,7 +50,7 @@ fn test_resolve_mac_identifier_perm_mac() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -70,7 +70,7 @@ fn test_resolve_mac_identifier_perm_mac() {
 /// Test error when MAC does not match any current interface.
 #[test]
 fn test_resolve_mac_identifier_no_match() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: wan0
           type: ethernet
@@ -80,7 +80,7 @@ fn test_resolve_mac_identifier_no_match() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -96,7 +96,7 @@ fn test_resolve_mac_identifier_no_match() {
 /// Test re-resolution when profile_name already set and NIC name changed.
 #[test]
 fn test_resolve_mac_identifier_re_resolve() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -107,7 +107,7 @@ fn test_resolve_mac_identifier_re_resolve() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: enp0s3
           type: ethernet
@@ -128,7 +128,7 @@ fn test_resolve_mac_identifier_re_resolve() {
 /// Test that absent interfaces with MAC identifier still merge correctly.
 #[test]
 fn test_resolve_mac_identifier_absent_skipped() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: wan0
           type: ethernet
@@ -139,7 +139,7 @@ fn test_resolve_mac_identifier_absent_skipped() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -170,7 +170,7 @@ fn test_resolve_mac_identifier_absent_skipped() {
 /// regardless of interface type in desired state.
 #[test]
 fn test_resolve_mac_identifier_unknown_type() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: wan0
           type: ethernet
@@ -180,7 +180,7 @@ fn test_resolve_mac_identifier_unknown_type() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -199,7 +199,7 @@ fn test_resolve_mac_identifier_unknown_type() {
 /// Test error when mac_address is not provided.
 #[test]
 fn test_resolve_mac_identifier_missing_mac() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: wan0
           type: ethernet
@@ -208,7 +208,7 @@ fn test_resolve_mac_identifier_missing_mac() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -224,7 +224,7 @@ fn test_resolve_mac_identifier_missing_mac() {
 /// Test that already-resolved interface (name matches kernel name) works.
 #[test]
 fn test_resolve_mac_identifier_already_resolved() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -236,7 +236,7 @@ fn test_resolve_mac_identifier_already_resolved() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -257,7 +257,7 @@ fn test_resolve_mac_identifier_already_resolved() {
 /// Test case-insensitive MAC address matching.
 #[test]
 fn test_resolve_mac_identifier_case_insensitive() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: wan0
           type: ethernet
@@ -267,7 +267,7 @@ fn test_resolve_mac_identifier_case_insensitive() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -287,7 +287,7 @@ fn test_resolve_mac_identifier_case_insensitive() {
 /// Test resolving multiple interfaces with MAC identifiers.
 #[test]
 fn test_resolve_mac_identifier_multiple_ifaces() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: wan0
           type: ethernet
@@ -301,7 +301,7 @@ fn test_resolve_mac_identifier_multiple_ifaces() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -329,7 +329,7 @@ fn test_resolve_mac_identifier_multiple_ifaces() {
 /// matching.
 #[test]
 fn test_resolve_mac_identifier_perm_mac_preferred() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: wan0
           type: ethernet
@@ -339,7 +339,7 @@ fn test_resolve_mac_identifier_perm_mac_preferred() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -364,7 +364,7 @@ fn test_resolve_mac_identifier_perm_mac_preferred() {
 /// first match.
 #[test]
 fn test_resolve_mac_identifier_duplicate_mac_across_nics() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: wan0
           type: ethernet
@@ -374,7 +374,7 @@ fn test_resolve_mac_identifier_duplicate_mac_across_nics() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -400,7 +400,7 @@ fn test_resolve_mac_identifier_duplicate_mac_across_nics() {
 /// Test re-resolution when NIC renamed (eth0 -> eth1).
 #[test]
 fn test_resolve_mac_identifier_re_resolve_type_change() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -411,7 +411,7 @@ fn test_resolve_mac_identifier_re_resolve_type_change() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth1
           type: ethernet
@@ -431,7 +431,7 @@ fn test_resolve_mac_identifier_re_resolve_type_change() {
 /// Test full merge flow with MAC identifier via MergedNetworkState.
 #[test]
 fn test_merge_flow_with_mac_identifier() {
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: wan0
@@ -448,7 +448,7 @@ fn test_merge_flow_with_mac_identifier() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: eth0
@@ -545,7 +545,7 @@ fn test_sanitize_does_not_override_mac_kernel_iface_name() {
 /// interface).
 #[test]
 fn test_route_next_hop_iface_with_plain_saved_config_not_overwritten() {
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: my-gw-iface
@@ -570,7 +570,7 @@ fn test_route_next_hop_iface_with_plain_saved_config_not_overwritten() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: veth-mac0
@@ -599,7 +599,7 @@ fn test_route_next_hop_iface_with_plain_saved_config_not_overwritten() {
 
     // Saved config of the previous apply (keyed by profile name), plus the
     // plain saved config of the same kernel interface from its creation.
-    let saved: NetworkState = serde_yaml::from_str(
+    let saved: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: my-veth
@@ -646,7 +646,7 @@ fn test_route_next_hop_iface_with_plain_saved_config_not_overwritten() {
 /// logical name (profile_name) to kernel name.
 #[test]
 fn test_route_next_hop_iface_resolves_by_profile_name() {
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: wan0
@@ -664,7 +664,7 @@ fn test_route_next_hop_iface_resolves_by_profile_name() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: eth0
@@ -695,7 +695,7 @@ fn test_route_next_hop_iface_resolves_by_profile_name() {
 /// without profile_name lookup.
 #[test]
 fn test_route_next_hop_iface_direct_kernel_name() {
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: wan0
@@ -713,7 +713,7 @@ fn test_route_next_hop_iface_direct_kernel_name() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: eth0
@@ -744,7 +744,7 @@ fn test_route_next_hop_iface_direct_kernel_name() {
 /// via logical name raises error.
 #[test]
 fn test_route_next_hop_iface_absent_by_logical_name() {
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: wan0
@@ -762,7 +762,7 @@ fn test_route_next_hop_iface_absent_by_logical_name() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: eth0
@@ -783,7 +783,7 @@ fn test_route_next_hop_iface_absent_by_logical_name() {
 /// resolves to one of the matches via MergedInterfaces::new().
 #[test]
 fn test_route_next_hop_iface_duplicate_logical_name() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -797,7 +797,7 @@ fn test_route_next_hop_iface_duplicate_logical_name() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -828,7 +828,7 @@ fn test_route_next_hop_iface_no_match_returns_none() {
 /// a single profile_name match is found via MergedInterfaces::new().
 #[test]
 fn test_route_next_hop_iface_single_profile_match() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -838,7 +838,7 @@ fn test_route_next_hop_iface_single_profile_match() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -856,7 +856,7 @@ fn test_route_next_hop_iface_single_profile_match() {
 /// interface raises error.
 #[test]
 fn test_route_next_hop_iface_unmatched_logical_name_adds_route() {
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"
         routes:
           config:
@@ -878,7 +878,7 @@ fn test_route_next_hop_iface_unmatched_logical_name_adds_route() {
 /// Test parsing `auto-gateway` in IPv4 DHCP config.
 #[test]
 fn test_ipv4_auto_gateway_false() {
-    let net_state: NetworkState = serde_yaml::from_str(
+    let net_state: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: eth1
@@ -905,7 +905,7 @@ fn test_ipv4_auto_gateway_false() {
 /// Test that default value for `auto-gateway` is `None` when not specified.
 #[test]
 fn test_ipv4_auto_gateway_defaults() {
-    let net_state: NetworkState = serde_yaml::from_str(
+    let net_state: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: eth1
@@ -931,7 +931,7 @@ fn test_ipv4_auto_gateway_defaults() {
 /// Test `auto-gateway: true`.
 #[test]
 fn test_ipv4_auto_gateway_true() {
-    let net_state: NetworkState = serde_yaml::from_str(
+    let net_state: NetworkState = rmsd_yaml::from_str(
         r#"
         interfaces:
           - name: eth1
@@ -1009,7 +1009,7 @@ fn test_ipv6_sanitize_clears_dhcp_state() {
 /// interface names when ports use MAC address identifier.
 #[test]
 fn test_bond_resolve_port_ref_by_mac_identifier() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: bond1
           type: bond
@@ -1030,7 +1030,7 @@ fn test_bond_resolve_port_ref_by_mac_identifier() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1064,7 +1064,7 @@ fn test_bond_resolve_port_ref_by_mac_identifier() {
 /// kernel interface names when ports use MAC address identifier.
 #[test]
 fn test_linux_bridge_resolve_port_ref_by_mac_identifier() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: br0
           type: linux-bridge
@@ -1079,7 +1079,7 @@ fn test_linux_bridge_resolve_port_ref_by_mac_identifier() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1110,7 +1110,7 @@ fn test_linux_bridge_resolve_port_ref_by_mac_identifier() {
 /// kernel interface names when ports use MAC address identifier.
 #[test]
 fn test_ovs_bridge_resolve_port_ref_by_mac_identifier() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: ovs-br0
           type: ovs-bridge
@@ -1125,7 +1125,7 @@ fn test_ovs_bridge_resolve_port_ref_by_mac_identifier() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1160,7 +1160,7 @@ fn test_ovs_bridge_resolve_port_ref_by_mac_identifier() {
 /// resolved by MAC identifier matching uppercase MACs in current state.
 #[test]
 fn test_bond_gen_state_for_apply_and_save() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: port1
           type: ethernet
@@ -1182,7 +1182,7 @@ fn test_bond_gen_state_for_apply_and_save() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth1
           kernel-iface-name: eth1
@@ -1344,7 +1344,7 @@ fn test_sanitize_fills_for_apply_ip_with_full_config() {
 /// diff onto `for_save`, purging the rest of the saved IP config.
 #[test]
 fn test_for_apply_ipv4_uses_full_merged_config_not_diff() {
-    let saved: Interfaces = serde_yaml::from_str(
+    let saved: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1363,7 +1363,7 @@ fn test_for_apply_ipv4_uses_full_merged_config_not_diff() {
     // the newly added address, omitting `enabled` and `dhcp`.
     let current: Interfaces = saved.clone();
 
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1417,7 +1417,7 @@ fn test_for_apply_ipv4_uses_full_merged_config_not_diff() {
 /// and `for_save`.
 #[test]
 fn test_for_apply_ipv4_discards_static_addr_when_switch_to_dhcp() {
-    let saved: Interfaces = serde_yaml::from_str(
+    let saved: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1434,7 +1434,7 @@ fn test_for_apply_ipv4_discards_static_addr_when_switch_to_dhcp() {
 
     let current: Interfaces = saved.clone();
 
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1471,7 +1471,7 @@ fn test_for_apply_ipv4_discards_static_addr_when_switch_to_dhcp() {
 /// ones; when the desired state does not specify addresses, IPv4 gets no IP.
 #[test]
 fn test_for_apply_ipv4_discards_dynamic_addr_when_disable_auto() {
-    let saved: Interfaces = serde_yaml::from_str(
+    let saved: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1483,7 +1483,7 @@ fn test_for_apply_ipv4_discards_dynamic_addr_when_disable_auto() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1499,7 +1499,7 @@ fn test_for_apply_ipv4_discards_dynamic_addr_when_disable_auto() {
     .unwrap();
 
     // Desired disables DHCP without specifying addresses: no IP at all.
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1523,7 +1523,7 @@ fn test_for_apply_ipv4_discards_dynamic_addr_when_disable_auto() {
     );
 
     // Desired disables DHCP with static addresses specified: use them.
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1552,7 +1552,7 @@ fn test_for_apply_ipv4_discards_dynamic_addr_when_disable_auto() {
 /// autoconf, the stale static addresses must be discarded.
 #[test]
 fn test_for_apply_ipv6_discards_static_addr_when_switch_to_autoconf() {
-    let saved: Interfaces = serde_yaml::from_str(
+    let saved: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1568,7 +1568,7 @@ fn test_for_apply_ipv6_discards_static_addr_when_switch_to_autoconf() {
 
     let current: Interfaces = saved.clone();
 
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1606,7 +1606,7 @@ fn test_for_apply_ipv6_discards_static_addr_when_switch_to_autoconf() {
 /// IPv6 keeps only the kernel-generated link-local address.
 #[test]
 fn test_for_apply_ipv6_discards_dynamic_addr_when_disable_auto() {
-    let saved: Interfaces = serde_yaml::from_str(
+    let saved: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1618,7 +1618,7 @@ fn test_for_apply_ipv6_discards_dynamic_addr_when_disable_auto() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1633,7 +1633,7 @@ fn test_for_apply_ipv6_discards_dynamic_addr_when_disable_auto() {
     )
     .unwrap();
 
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1672,7 +1672,7 @@ fn test_for_apply_ipv6_discards_dynamic_addr_when_disable_auto() {
 #[test]
 fn test_for_apply_ipv4_no_saved_does_not_inherit_kernel_state() {
     // Current IPv4 is disabled (kernel query format when no IP assigned).
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1684,7 +1684,7 @@ fn test_for_apply_ipv4_no_saved_does_not_inherit_kernel_state() {
     .unwrap();
 
     // First-time static IPv4 without explicit `enabled` must be applied.
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1708,7 +1708,7 @@ fn test_for_apply_ipv4_no_saved_does_not_inherit_kernel_state() {
     assert_eq!(apply_addrs[0].prefix_length, 24);
 
     // First-time DHCP on a disabled interface must keep `dhcp: true`.
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1718,7 +1718,7 @@ fn test_for_apply_ipv4_no_saved_does_not_inherit_kernel_state() {
         "#,
     )
     .unwrap();
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1738,7 +1738,7 @@ fn test_for_apply_ipv4_no_saved_does_not_inherit_kernel_state() {
     // Switching an interface currently on DHCP to static must not inherit
     // `dhcp: true` from the current state (which would restart DHCP on top
     // of the static config).
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1752,7 +1752,7 @@ fn test_for_apply_ipv4_no_saved_does_not_inherit_kernel_state() {
         "#,
     )
     .unwrap();
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1781,7 +1781,7 @@ fn test_for_apply_ipv4_no_saved_does_not_inherit_kernel_state() {
 /// rule must NOT discard the lease address.
 #[test]
 fn test_for_apply_ipv4_keeps_lease_addr_when_prev_ipv4_disabled() {
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1792,7 +1792,7 @@ fn test_for_apply_ipv4_keeps_lease_addr_when_prev_ipv4_disabled() {
     )
     .unwrap();
 
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1826,7 +1826,7 @@ fn test_for_apply_ipv4_keeps_lease_addr_when_prev_ipv4_disabled() {
 /// interface which would overwrite the merged interface.
 #[test]
 fn test_mac_identifier_desired_keeps_ipv4_with_plain_saved_config() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: my-veth
           type: ethernet
@@ -1843,7 +1843,7 @@ fn test_mac_identifier_desired_keeps_ipv4_with_plain_saved_config() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: veth-mac0
           type: ethernet
@@ -1857,7 +1857,7 @@ fn test_mac_identifier_desired_keeps_ipv4_with_plain_saved_config() {
 
     // The saved config of the veth does not carry the identifier or the
     // MAC address, so the MAC-based saved matching fails.
-    let saved: Interfaces = serde_yaml::from_str(
+    let saved: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: veth-mac0
           type: ethernet
@@ -1903,7 +1903,7 @@ fn test_mac_identifier_desired_keeps_ipv4_with_plain_saved_config() {
 /// they are not part of the desired state.
 #[test]
 fn test_saved_mac_identifier_ifaces_kept_when_not_desired() {
-    let desired: Interfaces = serde_yaml::from_str(
+    let desired: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: vpn0
           type: wireguard
@@ -1921,7 +1921,7 @@ fn test_saved_mac_identifier_ifaces_kept_when_not_desired() {
     )
     .unwrap();
 
-    let current: Interfaces = serde_yaml::from_str(
+    let current: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: eth0
           type: ethernet
@@ -1936,7 +1936,7 @@ fn test_saved_mac_identifier_ifaces_kept_when_not_desired() {
     )
     .unwrap();
 
-    let saved: Interfaces = serde_yaml::from_str(
+    let saved: Interfaces = rmsd_yaml::from_str(
         r#"---
         - name: nic1
           profile-name: nic1
@@ -1987,7 +1987,7 @@ fn test_saved_mac_identifier_ifaces_kept_when_not_desired() {
 /// after daemon restart). Regression test for routes dropped on boot.
 #[test]
 fn test_partial_apply_keeps_routes_of_untouched_iface() {
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2002,7 +2002,7 @@ fn test_partial_apply_keeps_routes_of_untouched_iface() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2049,7 +2049,7 @@ fn test_partial_apply_keeps_routes_of_untouched_iface() {
 /// routes must still be removed (intended behavior kept).
 #[test]
 fn test_apply_ip_disabled_iface_removes_its_routes() {
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth1
@@ -2061,7 +2061,7 @@ fn test_apply_ip_disabled_iface_removes_its_routes() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth1
@@ -2105,7 +2105,7 @@ fn test_apply_ip_disabled_iface_removes_its_routes() {
 /// the new routes and the surviving saved ones.
 #[test]
 fn test_gen_state_for_save_keeps_saved_routes_of_untouched_iface() {
-    let saved: NetworkState = serde_yaml::from_str(
+    let saved: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2131,7 +2131,7 @@ fn test_gen_state_for_save_keeps_saved_routes_of_untouched_iface() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2165,7 +2165,7 @@ fn test_gen_state_for_save_keeps_saved_routes_of_untouched_iface() {
     )
     .unwrap();
 
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth1
@@ -2213,7 +2213,7 @@ fn test_gen_state_for_save_keeps_saved_routes_of_untouched_iface() {
 /// state is dropped from the persisted state.
 #[test]
 fn test_gen_state_for_save_drops_explicitly_absent_route() {
-    let saved: NetworkState = serde_yaml::from_str(
+    let saved: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2234,7 +2234,7 @@ fn test_gen_state_for_save_drops_explicitly_absent_route() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2255,7 +2255,7 @@ fn test_gen_state_for_save_drops_explicitly_absent_route() {
     )
     .unwrap();
 
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"---
         routes:
           config:
@@ -2286,7 +2286,7 @@ fn test_gen_state_for_save_drops_explicitly_absent_route() {
 /// state are dropped from the persisted state.
 #[test]
 fn test_gen_state_for_save_drops_routes_of_absent_iface() {
-    let saved: NetworkState = serde_yaml::from_str(
+    let saved: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2303,7 +2303,7 @@ fn test_gen_state_for_save_drops_routes_of_absent_iface() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2320,7 +2320,7 @@ fn test_gen_state_for_save_drops_routes_of_absent_iface() {
     )
     .unwrap();
 
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2350,7 +2350,7 @@ fn test_gen_state_for_save_drops_routes_of_absent_iface() {
 /// are dropped, while its IPv6 routes are kept.
 #[test]
 fn test_gen_state_for_save_drops_routes_of_ip_disabled_iface() {
-    let saved: NetworkState = serde_yaml::from_str(
+    let saved: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2375,7 +2375,7 @@ fn test_gen_state_for_save_drops_routes_of_ip_disabled_iface() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2400,7 +2400,7 @@ fn test_gen_state_for_save_drops_routes_of_ip_disabled_iface() {
     )
     .unwrap();
 
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2432,7 +2432,7 @@ fn test_gen_state_for_save_drops_routes_of_ip_disabled_iface() {
 /// are preserved as-is.
 #[test]
 fn test_gen_state_for_save_preserves_saved_routes_without_route_section() {
-    let saved: NetworkState = serde_yaml::from_str(
+    let saved: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2449,7 +2449,7 @@ fn test_gen_state_for_save_preserves_saved_routes_without_route_section() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2466,7 +2466,7 @@ fn test_gen_state_for_save_preserves_saved_routes_without_route_section() {
     )
     .unwrap();
 
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"---
         routes: {}
         "#,
@@ -2493,7 +2493,7 @@ fn test_gen_state_for_save_preserves_saved_routes_without_route_section() {
 /// the saved routes must be preserved.
 #[test]
 fn test_gen_state_for_save_preserves_saved_routes_with_empty_config() {
-    let saved: NetworkState = serde_yaml::from_str(
+    let saved: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2510,7 +2510,7 @@ fn test_gen_state_for_save_preserves_saved_routes_with_empty_config() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2527,7 +2527,7 @@ fn test_gen_state_for_save_preserves_saved_routes_with_empty_config() {
     )
     .unwrap();
 
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"---
         routes:
           config: []
@@ -2557,7 +2557,7 @@ fn test_gen_state_for_save_preserves_saved_routes_with_empty_config() {
 /// saved routes from the persisted state.
 #[test]
 fn test_gen_state_for_save_drops_routes_of_absent_mac_identified_iface() {
-    let saved: NetworkState = serde_yaml::from_str(
+    let saved: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: wan0
@@ -2576,7 +2576,7 @@ fn test_gen_state_for_save_drops_routes_of_absent_mac_identified_iface() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2594,7 +2594,7 @@ fn test_gen_state_for_save_drops_routes_of_absent_mac_identified_iface() {
     )
     .unwrap();
 
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: wan0
@@ -2628,7 +2628,7 @@ fn test_gen_state_for_save_drops_routes_of_absent_mac_identified_iface() {
 /// kernel interface name before matching).
 #[test]
 fn test_gen_state_for_save_drops_explicitly_absent_profile_named_route() {
-    let saved: NetworkState = serde_yaml::from_str(
+    let saved: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: wan0
@@ -2647,7 +2647,7 @@ fn test_gen_state_for_save_drops_explicitly_absent_profile_named_route() {
     )
     .unwrap();
 
-    let current: NetworkState = serde_yaml::from_str(
+    let current: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: eth0
@@ -2665,7 +2665,7 @@ fn test_gen_state_for_save_drops_explicitly_absent_profile_named_route() {
     )
     .unwrap();
 
-    let desired: NetworkState = serde_yaml::from_str(
+    let desired: NetworkState = rmsd_yaml::from_str(
         r#"---
         interfaces:
           - name: wan0

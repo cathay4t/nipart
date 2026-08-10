@@ -46,7 +46,7 @@ impl CommandDiff {
 
         println!(
             "{}",
-            serde_yaml::to_string(&new_state.gen_diff(&old_state)?)?
+            rmsd_yaml::to_string(&new_state.gen_diff(&old_state)?)?
         );
         Ok(())
     }

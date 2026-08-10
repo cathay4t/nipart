@@ -7,7 +7,7 @@ use crate::{
 
 #[test]
 fn test_iface_de_ethernet() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: eth1
         type: ethernet
@@ -20,7 +20,7 @@ fn test_iface_de_ethernet() {
 
 #[test]
 fn test_iface_de_veth_maps_to_ethernet() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: veth0
         type: veth
@@ -40,7 +40,7 @@ fn test_iface_de_veth_maps_to_ethernet() {
 
 #[test]
 fn test_iface_de_ovs_bridge() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: ovsbr0
         type: ovs-bridge
@@ -52,7 +52,7 @@ fn test_iface_de_ovs_bridge() {
 
 #[test]
 fn test_iface_de_ovs_interface() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: ovs0
         type: ovs-interface
@@ -64,7 +64,7 @@ fn test_iface_de_ovs_interface() {
 
 #[test]
 fn test_iface_de_loopback() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: lo
         type: loopback
@@ -76,7 +76,7 @@ fn test_iface_de_loopback() {
 
 #[test]
 fn test_iface_de_wifi_phy() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: wlan0
         type: wifi-phy
@@ -90,7 +90,7 @@ fn test_iface_de_wifi_phy() {
 
 #[test]
 fn test_iface_de_wifi_cfg() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: Test-WIFI
         type: wifi-cfg
@@ -105,7 +105,7 @@ fn test_iface_de_wifi_cfg() {
 
 #[test]
 fn test_iface_de_dummy() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: dummy0
         type: dummy
@@ -117,7 +117,7 @@ fn test_iface_de_dummy() {
 
 #[test]
 fn test_iface_de_vlan() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: eth1.100
         type: vlan
@@ -132,7 +132,7 @@ fn test_iface_de_vlan() {
 
 #[test]
 fn test_iface_de_vxlan() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: vxlan0
         type: vxlan
@@ -147,7 +147,7 @@ fn test_iface_de_vxlan() {
 
 #[test]
 fn test_iface_de_bond() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: bond0
         type: bond
@@ -159,7 +159,7 @@ fn test_iface_de_bond() {
 
 #[test]
 fn test_iface_de_linux_bridge() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: br0
         type: linux-bridge
@@ -171,7 +171,7 @@ fn test_iface_de_linux_bridge() {
 
 #[test]
 fn test_iface_de_wireguard() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: wg0
         type: wireguard
@@ -183,7 +183,7 @@ fn test_iface_de_wireguard() {
 
 #[test]
 fn test_iface_de_unsupported_type_falls_to_unknown() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: hsr0
         type: hsr
@@ -196,13 +196,13 @@ fn test_iface_de_unsupported_type_falls_to_unknown() {
 
 #[test]
 fn test_iface_de_missing_type_fails() {
-    let result: Result<Interface, _> = serde_yaml::from_str("name: eth1");
+    let result: Result<Interface, _> = rmsd_yaml::from_str("name: eth1");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_iface_de_absent_strips_extra_properties() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: eth1
         type: ethernet
@@ -224,7 +224,7 @@ fn test_iface_de_absent_strips_extra_properties() {
 
 #[test]
 fn test_iface_de_absent_keeps_identifier_properties() {
-    let iface: Interface = serde_yaml::from_str(
+    let iface: Interface = rmsd_yaml::from_str(
         r#"---
         name: eth1
         type: ethernet

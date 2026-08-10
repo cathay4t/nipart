@@ -37,7 +37,7 @@ impl CommandMerge {
 
         state.merge(&new_state)?;
 
-        println!("{}", serde_yaml::to_string(&state)?);
+        println!("{}", rmsd_yaml::to_string(&state)?);
 
         Ok(())
     }

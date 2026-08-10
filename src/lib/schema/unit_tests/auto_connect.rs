@@ -126,7 +126,7 @@ fn test_auto_connect_yaml_round_trip() {
     )
     .unwrap();
 
-    let serialized = serde_yaml::to_string(&state).unwrap();
+    let serialized = rmsd_yaml::to_string(&state).unwrap();
     let reparsed = NetworkState::new_from_yaml(&serialized).unwrap();
     assert_eq!(state, reparsed);
 }
@@ -161,37 +161,34 @@ fn test_auto_connect_serialized_form() {
     )
     .unwrap();
 
-    let value = serde_yaml::to_value(&state).unwrap();
+    let value = rmsd_yaml::to_value(&state).unwrap();
     let ifaces = value
         .get("interfaces")
-        .and_then(serde_yaml::Value::as_sequence)
+        .and_then(rmsd_yaml::Value::as_sequence)
         .unwrap();
     assert_eq!(ifaces.len(), 4);
     for iface in ifaces {
-        let name = iface
-            .get("name")
-            .and_then(serde_yaml::Value::as_str)
-            .unwrap();
+        let name = iface.get("name").unwrap().as_str().unwrap();
         let auto_connect = iface.get("auto-connect").unwrap();
         match name {
             "eth1" => {
-                assert_eq!(auto_connect, &serde_yaml::Value::Bool(true));
+                assert!(auto_connect.as_bool().unwrap());
             }
             "eth2" => {
-                assert_eq!(auto_connect, &serde_yaml::Value::Bool(false));
+                assert!(!auto_connect.as_bool().unwrap());
             }
             "wg0" => {
                 assert_eq!(auto_connect.as_mapping().unwrap().len(), 1);
                 assert_eq!(
                     auto_connect.get("wifi"),
-                    Some(&serde_yaml::Value::String("HomeWifi".to_string()))
+                    Some(&rmsd_yaml::Value::from("HomeWifi"))
                 );
             }
             "wg1" => {
                 assert_eq!(auto_connect.as_mapping().unwrap().len(), 1);
                 assert_eq!(
                     auto_connect.get("wifi-not"),
-                    Some(&serde_yaml::Value::String("OfficeWifi".to_string()))
+                    Some(&rmsd_yaml::Value::from("OfficeWifi"))
                 );
             }
             _ => panic!("Unexpected interface {name}"),

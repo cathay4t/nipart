@@ -193,7 +193,7 @@ fn test_alt_name_yaml_round_trip() {
                 state: absent
         "#;
     let state = NetworkState::new_from_yaml(yaml).unwrap();
-    let serialized = serde_yaml::to_string(&state).unwrap();
+    let serialized = rmsd_yaml::to_string(&state).unwrap();
     let reparsed = NetworkState::new_from_yaml(&serialized).unwrap();
     assert_eq!(state, reparsed);
 }

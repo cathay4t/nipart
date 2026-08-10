@@ -43,8 +43,7 @@ impl NipartCommander {
 
                 // Apply saved config properties which cannot be queried
                 // from kernel state:
-                //  * `auto-connect`: daemon-only config stored in
-                //    conf_manager.
+                //  * `auto-connect`: daemon-only config stored in conf_manager.
                 //  * `profile-name`: the logical name of the saved config
                 //    managing this kernel interface.
                 for (_, mut saved_iface) in
