@@ -2697,3 +2697,303 @@ fn test_gen_state_for_save_drops_explicitly_absent_profile_named_route() {
          {saved_routes:?}"
     );
 }
+
+/// The MAC address of a `identifier: mac-address` config is only an
+/// identifier used to locate the interface. When the matched interface is
+/// already a bond port (its MAC is controlled by the bond kernel driver,
+/// e.g. active-backup mode assigns the bond's MAC to every slave), the MAC
+/// must not be applied nor verified — otherwise apply of an already-settled
+/// state fails verification forever.
+#[test]
+fn test_mac_identifier_bond_port_mac_not_applied_or_verified() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: bond1
+          type: bond
+          state: up
+          bond:
+            mode: active-backup
+            ports:
+            - name: port1
+            - name: port2
+        - name: port1
+          type: ethernet
+          identifier: mac-address
+          mac-address: 52:54:00:B8:D9:2A
+        - name: port2
+          type: ethernet
+          identifier: mac-address
+          mac-address: 52:54:00:16:FC:6E
+        "#,
+    )
+    .unwrap();
+
+    // The current MAC of the bond port differs from its permanent MAC (the
+    // identifier) because the bond reassigned the port's MAC on enslave.
+    // `controller-type` is not reported by the kernel query, only resolved
+    // during merge.
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: bond1
+          type: bond
+          state: up
+          bond:
+            mode: active-backup
+            ports:
+            - name: enp1s0
+            - name: enp2s0
+        - name: enp1s0
+          type: ethernet
+          mac-address: 52:54:00:16:FC:6E
+          permanent-mac-address: 52:54:00:B8:D9:2A
+          state: up
+          controller: bond1
+        - name: enp2s0
+          type: ethernet
+          mac-address: 52:54:00:16:FC:6E
+          permanent-mac-address: 52:54:00:16:FC:6E
+          state: up
+          controller: bond1
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+    for (name, merged_iface) in &merged.kernel_ifaces {
+        if merged_iface.merged.base_iface().identifier
+            != Some(InterfaceIdentifier::MacAddress)
+        {
+            continue;
+        }
+        assert!(
+            merged_iface
+                .for_verify
+                .as_ref()
+                .and_then(|i| i.base_iface().mac_address.as_ref())
+                .is_none(),
+            "{name}: for_verify must not carry mac-address for a bond port"
+        );
+        assert!(
+            merged_iface
+                .for_apply
+                .as_ref()
+                .and_then(|i| i.base_iface().mac_address.as_ref())
+                .is_none(),
+            "{name}: for_apply must not carry mac-address for a bond port"
+        );
+    }
+
+    // And verification must pass against the post-apply current state where
+    // the bond port MAC differs from the identifier MAC.
+    let post_apply_current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: bond1
+          type: bond
+          state: up
+          bond:
+            mode: active-backup
+            ports:
+            - name: enp1s0
+            - name: enp2s0
+        - name: enp1s0
+          type: ethernet
+          mac-address: 52:54:00:16:FC:6E
+          permanent-mac-address: 52:54:00:B8:D9:2A
+          state: up
+          controller: bond1
+        - name: enp2s0
+          type: ethernet
+          mac-address: 52:54:00:16:FC:6E
+          permanent-mac-address: 52:54:00:16:FC:6E
+          state: up
+          controller: bond1
+        "#,
+    )
+    .unwrap();
+    merged
+        .verify(&post_apply_current)
+        .expect("verification must pass for settled bond port state");
+}
+
+/// The same as `test_mac_identifier_bond_port_mac_not_applied_or_verified`,
+/// but for the transition case where the bond does not exist yet and the
+/// MAC-identified interfaces are attached as bond ports in this apply.
+#[test]
+fn test_mac_identifier_bond_port_mac_not_applied_or_verified_transition() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: bond1
+          type: bond
+          state: up
+          bond:
+            mode: active-backup
+            ports:
+            - name: port1
+            - name: port2
+        - name: port1
+          type: ethernet
+          identifier: mac-address
+          mac-address: 52:54:00:B8:D9:2A
+        - name: port2
+          type: ethernet
+          identifier: mac-address
+          mac-address: 52:54:00:16:FC:6E
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: enp1s0
+          type: ethernet
+          mac-address: 52:54:00:B8:D9:2A
+          permanent-mac-address: 52:54:00:B8:D9:2A
+          state: up
+        - name: enp2s0
+          type: ethernet
+          mac-address: 52:54:00:16:FC:6E
+          permanent-mac-address: 52:54:00:16:FC:6E
+          state: up
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+    for (name, merged_iface) in &merged.kernel_ifaces {
+        if merged_iface.merged.base_iface().identifier
+            != Some(InterfaceIdentifier::MacAddress)
+        {
+            continue;
+        }
+        assert!(
+            merged_iface
+                .for_apply
+                .as_ref()
+                .and_then(|i| i.base_iface().mac_address.as_ref())
+                .is_none(),
+            "{name}: for_apply must not carry mac-address for a bond port"
+        );
+    }
+}
+
+/// When the `identifier: mac-address` ports of a bond resolve to a
+/// different kernel port order than the current bond (e.g. the user
+/// swapped the MAC addresses of port1/port2 while the port set is
+/// unchanged), verification must not fail on the port order: the bond
+/// ports are sorted before comparison.
+#[test]
+fn test_mac_identifier_bond_port_order_swapped_passes_verify() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: bond1
+          type: bond
+          state: up
+          bond:
+            mode: active-backup
+            ports:
+            - name: port1
+            - name: port2
+        - name: port1
+          type: ethernet
+          identifier: mac-address
+          mac-address: 52:54:00:16:FC:6E
+        - name: port2
+          type: ethernet
+          identifier: mac-address
+          mac-address: 52:54:00:B8:D9:2A
+        "#,
+    )
+    .unwrap();
+
+    // port1 now matches enp2s0 and port2 matches enp1s0, so the desired
+    // bond port order resolves to [enp2s0, enp1s0] while the current
+    // bond holds [enp1s0, enp2s0].
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: bond1
+          type: bond
+          state: up
+          bond:
+            mode: active-backup
+            ports:
+            - name: enp1s0
+            - name: enp2s0
+        - name: enp1s0
+          type: ethernet
+          mac-address: 52:54:00:16:FC:6E
+          permanent-mac-address: 52:54:00:B8:D9:2A
+          state: up
+          controller: bond1
+        - name: enp2s0
+          type: ethernet
+          mac-address: 52:54:00:16:FC:6E
+          permanent-mac-address: 52:54:00:16:FC:6E
+          state: up
+          controller: bond1
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current.clone(), None).unwrap();
+    // The post-apply current state still holds the ports in the original
+    // kernel order: verification must pass.
+    merged
+        .verify(&current)
+        .expect("verification must pass when bond port order differs");
+}
+
+/// Sorting the bond ports before verification must not mask a real port
+/// set change: when the apply failed to change the port set, verification
+/// must still fail.
+#[test]
+fn test_bond_port_set_change_still_fails_verify() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: bond1
+          type: bond
+          state: up
+          bond:
+            mode: active-backup
+            ports:
+            - name: enp1s0
+            - name: enp2s0
+        "#,
+    )
+    .unwrap();
+
+    // Current bond holds enp1s0 + enp3s0 while enp2s0 exists standalone:
+    // the desired port set differs from the current one.
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: bond1
+          type: bond
+          state: up
+          bond:
+            mode: active-backup
+            ports:
+            - name: enp3s0
+            - name: enp1s0
+        - name: enp1s0
+          type: ethernet
+          state: up
+          controller: bond1
+        - name: enp2s0
+          type: ethernet
+          state: up
+        - name: enp3s0
+          type: ethernet
+          state: up
+          controller: bond1
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current.clone(), None).unwrap();
+    // The post-apply state still holds the old port set (the apply did not
+    // manage to change it): sorting must not hide the difference.
+    let result = merged.verify(&current);
+    assert!(
+        result.is_err(),
+        "verification must fail when the bond port set differs: {result:?}"
+    );
+}

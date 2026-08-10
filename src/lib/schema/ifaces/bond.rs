@@ -323,6 +323,25 @@ impl NipartInterface for BondInterface {
     // TODO: Include bond port name when bond port config changed.
     fn include_diff_context(&mut self, _desired: &Self, _current: &Self) {}
 
+    /// Sort the bond ports in both the desired (self) and current states so
+    /// the verification (which compares the port list in order) is
+    /// insensitive to the port order. The port order of the desired state
+    /// can differ from the current kernel order when the ports are
+    /// referenced by `identifier: mac-address`: the profile-to-kernel
+    /// rename in `MergedInterfaces::post_merge_resolve_port_ref()` runs
+    /// after the sanitize-time sort, so the resolved port order follows the
+    /// desired profile order while the port set is unchanged.
+    fn sanitize_before_verify(&mut self, current: &mut Self) {
+        if let Some(ports) = self.bond.as_mut().and_then(|b| b.ports.as_mut()) {
+            ports.sort_unstable_by_key(|p| p.name.clone());
+        }
+        if let Some(ports) =
+            current.bond.as_mut().and_then(|b| b.ports.as_mut())
+        {
+            ports.sort_unstable_by_key(|p| p.name.clone());
+        }
+    }
+
     // When bond mode changed, do not merge bond options from old state.
     fn post_merge(
         &mut self,
