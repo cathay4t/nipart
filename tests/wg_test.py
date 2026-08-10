@@ -131,6 +131,33 @@ def test_wireguard_iface_static_ip(clean_up):
     nipart.apply(desired_state)
 
 
+def test_absent_wireguard_deleted_by_other_tool(clean_up):
+    # Create the interface, then delete it out-of-band (simulating another
+    # tool). Applying `state: absent` afterwards should only remove the saved
+    # config and must not fail for missing wireguard section.
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+          - name: {WG_TEST_NIC}
+            type: wireguard
+            state: up
+            wireguard:
+              public-key: "JKossUAjywXuJ2YVcaeD6PaHs+afPmIthDuqEVlspwA="
+              private-key: "6LTHiAM4vgKEgi5vm30f/EBIEWFDmySkTc9EWCcIqEs="
+              listen-port: 51820
+        """))
+    exec_cmd(["ip", "link", "del", WG_TEST_NIC], check=True)
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+          - name: {WG_TEST_NIC}
+            type: wireguard
+            state: absent
+        """))
+    _, _, err = exec_cmd(
+        ["ip", "link", "show", WG_TEST_NIC], check=False
+    )
+    assert "does not exist" in err
+
+
 def test_new_wg_iface_with_routes_keeps_existing_saved_routes(two_wg_clean_up):
     # First apply: create the wireguard interface wg0 together with its
     # static routes, which then become part of the stored (saved) state.

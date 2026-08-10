@@ -77,3 +77,24 @@ fn test_absent_stays_absent_virtual_vxlan() {
 fn test_absent_stays_absent_virtual_wireguard() {
     test_absent_to_down_for_type("wireguard", true, InterfaceState::Absent);
 }
+
+#[test]
+fn test_absent_wireguard_without_current_iface_removes_saved_config() {
+    // Desired interface was deleted by other tools, the apply action is just
+    // to remove the saved config. This should not error out with
+    // "Need wireguard section for creating wireguard interface".
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: test0
+          type: wireguard
+          state: absent
+        "#,
+    )
+    .unwrap();
+
+    let merged =
+        MergedInterfaces::new(desired, Interfaces::default(), None).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("test0").unwrap();
+    assert!(merged_iface.for_apply.is_some());
+    assert!(merged_iface.for_apply.as_ref().unwrap().is_absent());
+}
