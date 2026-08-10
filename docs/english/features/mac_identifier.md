@@ -122,6 +122,10 @@ Key points:
 * The matched kernel interface must exist in the current running state.
 * If multiple interfaces share the same MAC address, the first match is
   used.
+* When the matched interface is enslaved by a bond, the `mac-address` is
+  treated as an identifier only, not applied nor verified, because the
+  bond kernel driver controls the MAC address of its ports (e.g. in
+  active-backup mode the kernel assigns the bond's MAC to every slave).
 * This feature only works in daemon mode, as it requires querying the
   current network state.
 

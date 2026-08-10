@@ -10,9 +10,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    BondMode, ErrorKind, Interface, InterfaceState, InterfaceType,
-    MergedInterface, MergedInterfaces, NipartError, NipartInterface,
-    OvsInterface,
+    BondMode, ErrorKind, Interface, InterfaceIdentifier, InterfaceState,
+    InterfaceType, MergedInterface, MergedInterfaces, NipartError,
+    NipartInterface, OvsInterface,
 };
 
 fn is_port_overbook(
@@ -101,6 +101,7 @@ impl MergedInterfaces {
         self.post_merge_resolve_port_ref()?;
         self.handle_changed_ports()?;
         self.resolve_controller_type()?;
+        self.drop_mac_identifier_bond_port_mac();
         self.check_overbook_ports()?;
         self.check_infiniband_as_ports()?;
         self.validate_controller_and_port_list_confliction()?;
@@ -222,6 +223,70 @@ impl MergedInterfaces {
             }
         }
         Ok(())
+    }
+
+    /// The MAC address of a bond port is controlled by the bond kernel
+    /// driver (e.g. in active-backup mode the kernel assigns the bond's MAC
+    /// to every slave), so for `identifier: mac-address` configs the MAC is
+    /// only an identifier used to locate the interface — it cannot be applied
+    /// or verified while the interface is enslaved by a bond.
+    /// `MergedInterface::apply_ctrller_change()` clears it from `for_verify`
+    /// for ports newly attached in this apply; this pass additionally covers
+    /// the steady-state case where the interface is already a bond port and
+    /// no controller change is triggered (and clears `for_apply` as well).
+    fn drop_mac_identifier_bond_port_mac(&mut self) {
+        // Collect the kernel names first so we do not hold a mutable borrow
+        // while resolving the controller type.
+        let mut bond_port_names: Vec<String> = Vec::new();
+        for merged_iface in self.iter() {
+            let Some(for_apply) = merged_iface.for_apply.as_ref() else {
+                continue;
+            };
+            if for_apply.base_iface().identifier
+                != Some(InterfaceIdentifier::MacAddress)
+            {
+                continue;
+            }
+            let ctrl_name = merged_iface
+                .merged
+                .base_iface()
+                .controller
+                .as_deref()
+                .unwrap_or_default();
+            if ctrl_name.is_empty() {
+                continue;
+            }
+            let ctrl_type = merged_iface
+                .merged
+                .base_iface()
+                .controller_type
+                .clone()
+                .or_else(|| {
+                    self.kernel_ifaces
+                        .get(ctrl_name)
+                        .map(|c| c.merged.iface_type().clone())
+                })
+                .or_else(|| {
+                    self.user_ifaces.values().find_map(|c| {
+                        (c.merged.name() == ctrl_name)
+                            .then(|| c.merged.iface_type().clone())
+                    })
+                });
+            if ctrl_type == Some(InterfaceType::Bond) {
+                bond_port_names
+                    .push(merged_iface.kernel_iface_name().to_string());
+            }
+        }
+        for name in bond_port_names {
+            if let Some(merged_iface) = self.kernel_ifaces.get_mut(&name) {
+                if let Some(for_apply) = merged_iface.for_apply.as_mut() {
+                    for_apply.base_iface_mut().mac_address = None;
+                }
+                if let Some(for_verify) = merged_iface.for_verify.as_mut() {
+                    for_verify.base_iface_mut().mac_address = None;
+                }
+            }
+        }
     }
 
     // Check whether user defined both controller property and port list of
