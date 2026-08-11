@@ -75,6 +75,13 @@ impl NipartInterface for WireguardInterface {
         merged: &mut Self,
     ) -> Result<(), NipartError> {
         let desired = self;
+        // The desired interface may be absent while the interface no longer
+        // exists in kernel (e.g. deleted by other tools), the apply action is
+        // just to remove the saved config.
+        if desired.is_absent() {
+            return Ok(());
+        }
+
         if let Some(wg_conf) = for_apply.wireguard.as_mut() {
             wg_conf.sanitize(
                 current.and_then(|c| c.wireguard.as_ref()),
