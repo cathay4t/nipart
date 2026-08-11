@@ -37,6 +37,13 @@ def _has_dhcp_addr():
     return "192.0.2." in out and "dynamic" in out
 
 
+def _has_gateway_route():
+    rc, out, _ = exec_cmd(
+        ["ip", "route", "show", "dev", DHCP_CLI_NIC], check=False
+    )
+    return any("default" in line for line in out.splitlines())
+
+
 def _log_since(pos, text):
     if not os.path.exists(DAEMON_LOG):
         return False
@@ -84,6 +91,54 @@ def test_dhcp_client_restored_after_daemon_restart():
         assert retry_till_true_or_timeout(
             DEFAULT_TIMEOUT, _log_since, log_pos, "got lease 192.0.2"
         ), "DHCPv4 client did not re-acquire the lease after daemon restart"
+    finally:
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                - name: {DHCP_CLI_NIC}
+                  type: ethernet
+                  state: absent"""))
+        _remove_veth_pair(DHCP_CLI_NIC, TEST_NET_NS)
+        stop_dhcp_server()
+
+
+def test_dhcp_auto_gateway_false_after_daemon_restart():
+    exec_cmd(f"ip netns del {TEST_NET_NS}".split(), check=False)
+    exec_cmd(f"ip netns add {TEST_NET_NS}".split())
+    _create_veth_pair(DHCP_CLI_NIC, DHCP_SRV_NIC, TEST_NET_NS)
+    start_dhcp_server(TEST_NET_NS)
+
+    try:
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                - name: {DHCP_CLI_NIC}
+                  type: ethernet
+                  state: up
+                  ipv4:
+                    enabled: true
+                    dhcp: true
+                    auto-gateway: false"""))
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT, _has_dhcp_addr
+        ), f"{DHCP_CLI_NIC} did not get a DHCPv4 lease"
+        assert not _has_gateway_route()
+
+        # The kernel state carries the DHCP address with `dhcp: true` but
+        # never the config-only `auto_gateway` property.  Whatever path
+        # restarts the DHCP client after the daemon restart (the boot apply
+        # sees a diff because of `auto-gateway`, or the client is restored
+        # explicitly when the state matches), the client must keep honoring
+        # `auto-gateway: false`, otherwise the gateway route would be added
+        # on the first renewal.
+        log_pos = 0
+        if os.path.exists(DAEMON_LOG):
+            log_pos = os.path.getsize(DAEMON_LOG)
+        stop_daemon()
+        start_daemon()
+
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT, _log_since, log_pos, "got lease 192.0.2"
+        ), "DHCPv4 client did not re-acquire the lease after daemon restart"
+        assert not _has_gateway_route()
     finally:
         nipart.apply(load_yaml(f"""---
                 interfaces:

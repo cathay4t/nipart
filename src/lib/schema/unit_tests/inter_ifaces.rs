@@ -955,6 +955,50 @@ fn test_ipv4_auto_gateway_true() {
     assert_eq!(iface.auto_gateway, Some(true));
 }
 
+/// Test that `auto-gateway: false` survives the merge into both `merged`
+/// and `for_apply` when DHCP is already running in the kernel.
+///
+/// The no-daemon DHCPv4 lease path decides whether to add the gateway routes
+/// from `merged_iface.merged.base_iface().ipv4.auto_gateway`, so losing it
+/// during the merge would make `auto-gateway: false` ineffective there.
+#[test]
+fn test_ipv4_auto_gateway_false_survives_merge() {
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth1
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+        "#,
+    )
+    .unwrap();
+
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth1
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+            auto-gateway: false
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth1").unwrap();
+
+    let merged_ipv4 = merged_iface.merged.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(merged_ipv4.auto_gateway, Some(false));
+
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv4 = for_apply.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(apply_ipv4.auto_gateway, Some(false));
+}
+
 /// Test that `InterfaceIpv4::new_disabled()` sets new fields to None.
 #[test]
 fn test_ipv4_new_disabled() {

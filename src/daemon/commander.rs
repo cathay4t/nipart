@@ -4,9 +4,10 @@ use std::collections::HashMap;
 
 use futures_channel::mpsc::UnboundedSender;
 use nipart::{
-    Interface, InterfaceIdentifier, InterfaceState, InterfaceType,
-    NetworkState, NipartApplyOption, NipartError, NipartInterface,
-    NipartNoDaemon, NipartQueryOption, NipartWifiScanOption, WifiScanResult,
+    BaseInterface, Interface, InterfaceIdentifier, InterfaceState,
+    InterfaceType, NetworkState, NipartApplyOption, NipartError,
+    NipartInterface, NipartNoDaemon, NipartQueryOption, NipartWifiScanOption,
+    WifiScanResult,
 };
 
 use super::{
@@ -244,8 +245,15 @@ impl NipartCommander {
                     iface_name,
                     cur_iface.iface_type()
                 );
+                // The kernel state (`cur_base`) never carries the
+                // config-only `auto_gateway` property, so inherit it from
+                // the saved config, otherwise the restored client would
+                // ignore `auto-gateway: false` and add the DHCP gateway
+                // routes again.
+                let dhcp_base_iface =
+                    base_iface_for_dhcp_restore(cur_base, base);
                 if let Err(e) =
-                    self.dhcpv4_manager.start_iface_dhcp(cur_base).await
+                    self.dhcpv4_manager.start_iface_dhcp(&dhcp_base_iface).await
                 {
                     // Do not abort the whole boot apply on a transient
                     // DHCP failure; the interface keeps its lease until
@@ -281,6 +289,24 @@ impl NipartCommander {
         }
         Ok(())
     }
+}
+
+/// Build the base interface used to start the DHCPv4 client after a daemon
+/// restart: the kernel state (which carries the MAC address and interface
+/// index the client needs), but with the config-only `auto_gateway` property
+/// inherited from the saved config — the kernel never reports it, so without
+/// this the restored client would ignore `auto-gateway: false` and re-add
+/// the DHCP gateway routes on the first renewal.
+fn base_iface_for_dhcp_restore(
+    kernel_base: &BaseInterface,
+    saved_base: &BaseInterface,
+) -> BaseInterface {
+    let mut ret = kernel_base.clone();
+    if let Some(ipv4) = ret.ipv4.as_mut() {
+        ipv4.auto_gateway =
+            saved_base.ipv4.as_ref().and_then(|i| i.auto_gateway);
+    }
+    ret
 }
 
 /// Find the kernel interface a saved config applies its DHCP to: a
@@ -538,9 +564,71 @@ fn remove_manual_activation(state: &mut NetworkState) {
 
 #[cfg(test)]
 mod tests {
-    use nipart::{InterfaceType, NetworkState, NipartInterface};
+    use nipart::{BaseInterface, InterfaceType, NetworkState, NipartInterface};
 
-    use super::{remove_manual_activation, remove_ready_state};
+    use super::{
+        base_iface_for_dhcp_restore, remove_manual_activation,
+        remove_ready_state,
+    };
+
+    #[test]
+    fn test_base_iface_for_dhcp_restore_inherits_auto_gateway() {
+        let kernel_base: BaseInterface = rmsd_yaml::from_str(
+            r#"---
+            name: eth0
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+            "#,
+        )
+        .unwrap();
+        let saved_base: BaseInterface = rmsd_yaml::from_str(
+            r#"---
+            name: eth0
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+              auto-gateway: false
+            "#,
+        )
+        .unwrap();
+
+        let ret = base_iface_for_dhcp_restore(&kernel_base, &saved_base);
+        assert_eq!(ret.ipv4.as_ref().and_then(|i| i.auto_gateway), Some(false));
+    }
+
+    #[test]
+    fn test_base_iface_for_dhcp_restore_defaults_to_none() {
+        // Without `auto-gateway` in the saved config, the restored client
+        // keeps the default behavior (gateway routes added).
+        let kernel_base: BaseInterface = rmsd_yaml::from_str(
+            r#"---
+            name: eth0
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+            "#,
+        )
+        .unwrap();
+        // The saved config carries no IPv4 section at all.
+        let saved_base: BaseInterface = rmsd_yaml::from_str(
+            r#"---
+            name: eth0
+            type: ethernet
+            state: up
+            "#,
+        )
+        .unwrap();
+
+        let ret = base_iface_for_dhcp_restore(&kernel_base, &saved_base);
+        assert_eq!(ret.ipv4.as_ref().and_then(|i| i.auto_gateway), None);
+    }
 
     #[test]
     fn test_remove_ready_state_moves_userspace_wifi_cfg() {
