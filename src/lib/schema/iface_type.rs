@@ -143,6 +143,7 @@ impl InterfaceType {
                 | InterfaceType::Loopback
                 | InterfaceType::Dummy
                 | InterfaceType::Vlan
+                | InterfaceType::Vrf
                 | InterfaceType::Vxlan
                 | InterfaceType::WifiPhy
                 | InterfaceType::Bond

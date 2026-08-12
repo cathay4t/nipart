@@ -18,7 +18,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use super::ip::{is_ipv6_addr, sanitize_ip_network};
-use crate::{ErrorKind, Interfaces, JsonDisplay, NipartError, NipartInterface};
+use crate::{
+    ErrorKind, Interface, InterfaceType, Interfaces, JsonDisplay, NipartError,
+    NipartInterface,
+};
 
 const DEFAULT_TABLE_ID: u32 = 254; // main route table ID
 const LOOPBACK_IFACE_NAME: &str = "lo";
@@ -152,6 +155,106 @@ impl Routes {
             }
         }
     }
+
+    /// Resolve the `vrf-name` of desired routes to `table-id` based on the
+    /// VRF interfaces in the merged state. Mirrors nmstate's
+    /// `Routes::resolve_vrf_name()`.
+    pub(crate) fn resolve_vrf_name(
+        &mut self,
+        merged_ifaces: &crate::MergedInterfaces,
+    ) -> Result<(), NipartError> {
+        let vrf_names_down: HashSet<&str> = merged_ifaces
+            .kernel_ifaces
+            .values()
+            .filter(|merged_iface| merged_iface.merged.is_down())
+            .filter_map(|merged_iface| {
+                if merged_iface.merged.iface_type() == &InterfaceType::Vrf {
+                    Some(merged_iface.merged.name())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let vrf_names_absent: HashSet<&str> = merged_ifaces
+            .kernel_ifaces
+            .values()
+            .filter(|merged_iface| merged_iface.merged.is_absent())
+            .filter_map(|merged_iface| {
+                if merged_iface.merged.iface_type() == &InterfaceType::Vrf {
+                    Some(merged_iface.merged.name())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let vrf_name_to_table_id: std::collections::HashMap<&str, u32> =
+            merged_ifaces
+                .kernel_ifaces
+                .values()
+                .filter(|merged_iface| merged_iface.merged.is_up())
+                .filter_map(|merged_iface| {
+                    if let Interface::Vrf(vrf_iface) = &merged_iface.merged {
+                        vrf_iface.vrf.as_ref().and_then(|v| v.table_id).map(
+                            |table_id| (vrf_iface.base.name.as_str(), table_id),
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+        if let Some(config_routes) = self.config.as_mut() {
+            for rt in config_routes.iter_mut() {
+                let vrf_name = if let Some(n) = rt.vrf_name.as_deref() {
+                    n
+                } else {
+                    continue;
+                };
+                if vrf_names_down.contains(vrf_name) {
+                    return Err(NipartError::new(
+                        ErrorKind::InvalidArgument,
+                        format!(
+                            "VRF defined in Route '{rt}' is marked as 'state: \
+                             down'"
+                        ),
+                    ));
+                }
+                if vrf_names_absent.contains(vrf_name) {
+                    return Err(NipartError::new(
+                        ErrorKind::InvalidArgument,
+                        format!(
+                            "VRF defined in Route '{rt}' is marked as 'state: \
+                             absent'"
+                        ),
+                    ));
+                }
+                let table_id = if let Some(t) =
+                    vrf_name_to_table_id.get(vrf_name)
+                {
+                    *t
+                } else {
+                    return Err(NipartError::new(
+                        ErrorKind::InvalidArgument,
+                        format!("VRF defined in Route '{rt}' does not exist"),
+                    ));
+                };
+                if let Some(des_table_id) = rt.table_id
+                    && des_table_id != table_id
+                {
+                    return Err(NipartError::new(
+                        ErrorKind::InvalidArgument,
+                        format!(
+                            "Route '{rt}' has both table id and VRF name \
+                             defined, but desired table ID is {} while table \
+                             ID for VRF {} is {}",
+                            des_table_id, vrf_name, table_id
+                        ),
+                    ));
+                }
+                rt.table_id = Some(table_id);
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(
@@ -282,11 +385,11 @@ pub struct RouteEntry {
         default,
         deserialize_with = "crate::deserializer::option_bool_or_string"
     )]
-    pub onlink: Option<bool>, /* TODO: Store the routes to the route table
-                               * specified VRF bind to.
-                               * #[serde(skip_serializing_if =
-                               * "Option::is_none")]
-                               * pub vrf_name: Option<String>, */
+    pub onlink: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "vrf-name")]
+    /// Store the routes to the route table the specified VRF bind to.
+    /// The `table-id` will be resolved from the VRF interface with this name.
+    pub vrf_name: Option<String>,
 }
 
 #[derive(
@@ -384,10 +487,9 @@ impl RouteEntry {
         if self.onlink.is_some() && self.onlink != other.onlink {
             return false;
         }
-
-        // if self.vrf_name.is_some() && self.vrf_name != other.vrf_name {
-        //    return false;
-        // }
+        if self.vrf_name.is_some() && self.vrf_name != other.vrf_name {
+            return false;
+        }
         true
     }
 

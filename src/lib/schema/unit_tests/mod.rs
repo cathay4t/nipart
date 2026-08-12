@@ -11,6 +11,7 @@ mod ip;
 mod loopback;
 mod net_state;
 mod serializer;
+mod vrf;
 mod vxlan;
 mod wifi;
 mod yaml_roundtrip;

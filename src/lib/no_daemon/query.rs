@@ -5,8 +5,8 @@ use crate::{
     BondInterface, DummyInterface, ErrorKind, EthernetInterface, Interface,
     InterfaceType, LinuxBridgeInterface, LoopbackInterface, NetworkState,
     NipartError, NipartInterface, NipartNoDaemon, NipartQueryOption,
-    OvsInterface, UnknownInterface, VlanInterface, VxlanInterface,
-    WifiPhyInterface, WireguardInterface,
+    OvsInterface, UnknownInterface, VlanInterface, VrfInterface,
+    VxlanInterface, WifiPhyInterface, WireguardInterface,
 };
 
 impl NipartNoDaemon {
@@ -68,6 +68,9 @@ impl NipartNoDaemon {
                 }
                 InterfaceType::Vlan => Interface::Vlan(Box::new(
                     VlanInterface::new_from_nispor(base_iface, np_iface),
+                )),
+                InterfaceType::Vrf => Interface::Vrf(Box::new(
+                    VrfInterface::new_from_nispor(base_iface, np_iface),
                 )),
                 InterfaceType::Vxlan => Interface::Vxlan(Box::new(
                     VxlanInterface::new_from_nispor(base_iface, np_iface),

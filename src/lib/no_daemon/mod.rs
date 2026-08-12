@@ -13,6 +13,7 @@ mod linux_bridge_vlan;
 mod query;
 mod route;
 mod vlan;
+mod vrf;
 mod vxlan;
 mod watcher;
 mod wifi;
@@ -38,6 +39,7 @@ impl NipartNoDaemon {
             InterfaceType::Loopback,
             InterfaceType::Veth,
             InterfaceType::Vlan,
+            InterfaceType::Vrf,
             InterfaceType::Vxlan,
             InterfaceType::WifiPhy,
             InterfaceType::Wireguard,
