@@ -2489,8 +2489,139 @@ fn test_gen_state_for_save_preserves_saved_routes_without_route_section() {
     );
 }
 
-/// An empty desired `config` route list is additive too: it adds nothing, so
-/// the saved routes must be preserved.
+/// The saved routes of an interface whose NIC is not present in the kernel
+/// (e.g. unplugged) must be kept when the desired state merely mentions the
+/// interface without an `ipv4` section: the merged state defaults to
+/// IPv4-disabled for an absent interface, but the user did not ask to
+/// disable its IP, and the interface's IPv4 config is still preserved in
+/// the saved state.
+#[test]
+fn test_gen_state_for_save_keeps_routes_of_absent_nic_iface() {
+    let saved: NetworkState = rmsd_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: br0
+            type: linux-bridge
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: false
+              address:
+                - ip: 192.0.2.10
+                  prefix-length: 24
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: br0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    // The NIC has been removed: no interface in the current state.
+    let current: NetworkState = rmsd_yaml::from_str(
+        r#"---
+        "#,
+    )
+    .unwrap();
+
+    let desired: NetworkState = rmsd_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: br0
+            type: linux-bridge
+            state: up
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+
+    let saved_routes = merged.gen_state_for_save().routes.config.unwrap();
+    assert_eq!(saved_routes.len(), 1);
+    assert_eq!(
+        saved_routes[0].destination.as_deref(),
+        Some("198.51.100.0/24")
+    );
+    // The interface IPv4 config is preserved alongside its routes.
+    let saved_state = merged.gen_state_for_save();
+    let saved_iface = saved_state.ifaces.kernel_ifaces.get("br0").unwrap();
+    assert!(saved_iface.base_iface().is_ipv4_enabled());
+}
+
+/// The saved routes of an interface whose IP is already disabled in the
+/// kernel (e.g. left over by a link-down event) must be kept when the
+/// desired state mentions the interface without re-enabling the IP.
+#[test]
+fn test_gen_state_for_save_keeps_routes_of_ip_disabled_current_iface() {
+    let saved: NetworkState = rmsd_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: false
+              address:
+                - ip: 192.0.2.10
+                  prefix-length: 24
+        routes:
+          config:
+            - destination: 198.51.100.0/24
+              next-hop-interface: eth0
+              next-hop-address: 192.0.2.1
+              metric: 100
+              table-id: 254
+        "#,
+    )
+    .unwrap();
+
+    let current: NetworkState = rmsd_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: false
+        "#,
+    )
+    .unwrap();
+
+    let desired: NetworkState = rmsd_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: eth0
+            type: ethernet
+            state: up
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedNetworkState::new(
+        desired,
+        current,
+        Some(saved),
+        Default::default(),
+    )
+    .unwrap();
+
+    let saved_routes = merged.gen_state_for_save().routes.config.unwrap();
+    assert_eq!(saved_routes.len(), 1);
+    assert_eq!(
+        saved_routes[0].destination.as_deref(),
+        Some("198.51.100.0/24")
+    );
+}
 #[test]
 fn test_gen_state_for_save_preserves_saved_routes_with_empty_config() {
     let saved: NetworkState = rmsd_yaml::from_str(
