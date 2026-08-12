@@ -20,6 +20,7 @@ pub(crate) fn nipart_iface_type_to_nispor(
         InterfaceType::WifiPhy => nispor::IfaceType::Wifi,
         InterfaceType::Dummy => nispor::IfaceType::Dummy,
         InterfaceType::Vlan => nispor::IfaceType::Vlan,
+        InterfaceType::Vrf => nispor::IfaceType::Vrf,
         InterfaceType::Vxlan => nispor::IfaceType::Vxlan,
         InterfaceType::Bond => nispor::IfaceType::Bond,
         InterfaceType::LinuxBridge => nispor::IfaceType::Bridge,
@@ -119,6 +120,15 @@ pub(crate) fn apply_iface_link_changes(
         )
     } else if let Interface::Wireguard(i) = apply_iface {
         apply_wg_conf(np_iface, i)
+    } else if let Interface::Vrf(_) = apply_iface {
+        if merged_iface.current.is_some() {
+            // Existing VRF interface: base changes (MTU, state, alt-names)
+            // are handled by the nispor change messages. Creating a new VRF
+            // is handled by rtnetlink in `apply_vrf_link_changes()`.
+            Ok(vec![np_iface])
+        } else {
+            Ok(Vec::new())
+        }
     } else {
         Ok(vec![np_iface])
     }

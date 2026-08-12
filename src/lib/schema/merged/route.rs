@@ -71,6 +71,7 @@ impl MergedRoutes {
     ) -> Result<Self, NipartError> {
         desired.remove_ignored_routes();
         desired.validate()?;
+        desired.resolve_vrf_name(merged_ifaces)?;
 
         let iface_lists = collect_iface_lists(merged_ifaces);
 

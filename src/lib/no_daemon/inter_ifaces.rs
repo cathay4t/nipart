@@ -3,6 +3,7 @@
 use super::{
     iface::{apply_iface_link_changes, nipart_iface_type_to_nispor},
     ip::apply_iface_ip_changes,
+    vrf::apply_vrf_link_changes,
 };
 use crate::{
     ErrorKind, Interface, MergedInterface, MergedInterfaces, NipartError,
@@ -196,6 +197,13 @@ async fn apply_ifaces_link_changes(
                 apply_iface.iface_type()
             );
             continue;
+        }
+
+        // VRF interface is created/removed by rtnetlink directly as nispor
+        // does not support creating VRF interface. The port attach/detach is
+        // handled by the generic controller mechanism below.
+        if matches!(apply_iface, Interface::Vrf(_)) {
+            apply_vrf_link_changes(merged_iface).await?;
         }
 
         if !apply_iface.iface_type().is_userspace() {

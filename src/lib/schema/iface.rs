@@ -17,7 +17,8 @@ use crate::{
     InterfaceIdentifier, InterfaceState, InterfaceType, JsonDisplayHideSecrets,
     LinuxBridgeInterface, LoopbackInterface, NipartError, NipartInterface,
     OvsBridgeInterface, OvsInterface, UnknownInterface, VlanInterface,
-    VxlanInterface, WifiCfgInterface, WifiPhyInterface, WireguardInterface,
+    VrfInterface, VxlanInterface, WifiCfgInterface, WifiPhyInterface,
+    WireguardInterface,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonDisplayHideSecrets)]
@@ -41,6 +42,8 @@ pub enum Interface {
     Dummy(Box<DummyInterface>),
     /// VLAN Interface
     Vlan(Box<VlanInterface>),
+    /// VRF Interface
+    Vrf(Box<VrfInterface>),
     /// VxLAN Interface
     Vxlan(Box<VxlanInterface>),
     /// Bond Interface
@@ -145,6 +148,11 @@ impl<'de> Deserialize<'de> for Interface {
                 let inner = VlanInterface::deserialize(v)
                     .map_err(serde::de::Error::custom)?;
                 Ok(Interface::Vlan(Box::new(inner)))
+            }
+            Some(InterfaceType::Vrf) => {
+                let inner = VrfInterface::deserialize(v)
+                    .map_err(serde::de::Error::custom)?;
+                Ok(Interface::Vrf(Box::new(inner)))
             }
             Some(InterfaceType::Vxlan) => {
                 let inner = VxlanInterface::deserialize(v)
@@ -360,6 +368,7 @@ macro_rules! gen_iface_trait_impl {
                     Self::WifiCfg,
                     Self::Dummy,
                     Self::Vlan,
+                    Self::Vrf,
                     Self::Vxlan,
                     Self::Bond,
                     Self::LinuxBridge,
@@ -386,6 +395,7 @@ macro_rules! gen_iface_trait_impl_mut {
                     Self::WifiCfg,
                     Self::Dummy,
                     Self::Vlan,
+                    Self::Vrf,
                     Self::Vxlan,
                     Self::Bond,
                     Self::LinuxBridge,
@@ -434,6 +444,7 @@ impl NipartInterface for Interface {
             Interface::WifiCfg,
             Interface::Dummy,
             Interface::Vlan,
+            Interface::Vrf,
             Interface::Vxlan,
             Interface::Bond,
             Interface::LinuxBridge,
@@ -454,6 +465,7 @@ impl NipartInterface for Interface {
             Interface::WifiCfg,
             Interface::Dummy,
             Interface::Vlan,
+            Interface::Vrf,
             Interface::Vxlan,
             Interface::Bond,
             Interface::LinuxBridge,
@@ -475,6 +487,7 @@ impl NipartInterface for Interface {
             Interface::WifiCfg,
             Interface::Dummy,
             Interface::Vlan,
+            Interface::Vrf,
             Interface::Vxlan,
             Interface::Bond,
             Interface::LinuxBridge,
@@ -496,6 +509,7 @@ impl NipartInterface for Interface {
             Interface::WifiCfg,
             Interface::Dummy,
             Interface::Vlan,
+            Interface::Vrf,
             Interface::Vxlan,
             Interface::Bond,
             Interface::LinuxBridge,
@@ -521,6 +535,7 @@ impl NipartInterface for Interface {
             Interface::WifiCfg,
             Interface::Dummy,
             Interface::Vlan,
+            Interface::Vrf,
             Interface::Vxlan,
             Interface::Bond,
             Interface::LinuxBridge,
@@ -541,6 +556,7 @@ impl NipartInterface for Interface {
             Interface::WifiCfg,
             Interface::Dummy,
             Interface::Vlan,
+            Interface::Vrf,
             Interface::Vxlan,
             Interface::Bond,
             Interface::LinuxBridge,
@@ -571,7 +587,7 @@ impl From<BaseInterface> for Interface {
             }
             InterfaceType::Veth => todo!(),
             InterfaceType::Vlan => Interface::Vlan(Default::default()),
-            InterfaceType::Vrf => todo!(),
+            InterfaceType::Vrf => Interface::Vrf(Default::default()),
             InterfaceType::Vxlan => Interface::Vxlan(Default::default()),
             InterfaceType::InfiniBand => todo!(),
             InterfaceType::Tun => todo!(),
@@ -638,6 +654,9 @@ impl Interface {
             iface.change_port_name(org_port_name, new_port_name)
         } else if let Interface::Bond(iface) = self {
             iface.change_port_name(org_port_name, new_port_name)
+        } else if let Interface::Vrf(iface) = self {
+            iface.change_port_name(org_port_name, new_port_name);
+            Ok(())
         } else {
             Err(NipartError::new(
                 ErrorKind::Bug,

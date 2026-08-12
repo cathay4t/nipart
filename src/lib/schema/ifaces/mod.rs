@@ -13,6 +13,7 @@ mod ovs_bridge;
 mod ovs_iface;
 mod unknown;
 mod vlan;
+mod vrf;
 mod vxlan;
 mod wifi;
 mod wireguard;
@@ -44,6 +45,7 @@ pub use self::{
         VlanConfig, VlanInterface, VlanProtocol, VlanQosMapping,
         VlanRegistrationProtocol,
     },
+    vrf::{VrfConfig, VrfInterface},
     vxlan::{VxlanConfig, VxlanInterface},
     wifi::{
         WifiAuthType, WifiAuthTypeDetailed, WifiCfgInterface, WifiConfig,
