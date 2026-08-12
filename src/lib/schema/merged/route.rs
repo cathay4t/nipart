@@ -243,7 +243,8 @@ fn gen_routes_for_save(
 /// Whether a previously saved route should be dropped from the persisted
 /// state by this apply: it is explicitly marked `absent` in the desired
 /// state, or its next hop interface is marked `absent`, has its IP stack
-/// disabled by this apply, or is marked as `ignore`.
+/// explicitly disabled by this apply (i.e. the desired state sets
+/// `ipv4`/`ipv6` to `enabled: false`), or is marked as `ignore`.
 fn saved_route_is_removed(
     rt: &RouteEntry,
     desired: &Routes,
@@ -269,7 +270,21 @@ fn saved_route_is_removed(
         && desired_rts
             .iter()
             .filter(|r| r.is_absent())
-            .any(|absent_rt| absent_rt.is_match(&resolved_rt))
+            .any(|absent_rt| {
+                // The absent desired route may reference the next hop
+                // interface by profile or logical name (e.g. a
+                // MAC-identified interface), while `resolved_rt` carries the
+                // kernel interface name: resolve the absent route the same
+                // way before matching.
+                let mut resolved_absent_rt = (*absent_rt).clone();
+                if let Some(name) = resolved_absent_rt.next_hop_iface.as_ref()
+                    && let Some(kernel_iface_name) =
+                        merged_ifaces.resolve_route_next_hop_iface(name)
+                {
+                    resolved_absent_rt.next_hop_iface = Some(kernel_iface_name);
+                }
+                resolved_absent_rt.is_match(&resolved_rt)
+            })
     {
         return true;
     }
@@ -282,13 +297,60 @@ fn saved_route_is_removed(
         || iface_lists.absent.contains(&via.as_str())
         || (iface_lists.desired_ifaces.contains(&via.as_str())
             && ((rt.is_ipv6()
-                && iface_lists.ipv6_disabled.contains(&via.as_str()))
+                && desired_iface_ipv6_disabled(via, merged_ifaces))
                 || (!rt.is_ipv6()
-                    && iface_lists.ipv4_disabled.contains(&via.as_str()))))
+                    && desired_iface_ipv4_disabled(via, merged_ifaces))))
     {
         return true;
     }
     false
+}
+
+/// Whether the desired state for the given kernel interface explicitly
+/// disables IPv4.
+///
+/// An interface merely mentioned in the desired state without an `ipv4`
+/// section does not count: when the interface is absent from the kernel
+/// (e.g. its NIC is unplugged) or its IP is already disabled, the merged
+/// interface defaults to IPv4-disabled.  Treating that default as an
+/// explicit disable would silently drop the saved routes of the interface,
+/// even though its IPv4 config is still preserved in the saved state (the
+/// interface merge keeps untouched properties) and the routes are meant to
+/// be restored when the NIC is back.
+fn desired_iface_ipv4_disabled(
+    kernel_iface_name: &str,
+    merged_ifaces: &MergedInterfaces,
+) -> bool {
+    merged_ifaces
+        .kernel_ifaces
+        .get(kernel_iface_name)
+        .and_then(|merged_iface| merged_iface.desired.as_ref())
+        .is_some_and(|desired| {
+            desired
+                .base_iface()
+                .ipv4
+                .as_ref()
+                .is_some_and(|ipv4| !ipv4.is_enabled())
+        })
+}
+
+/// Whether the desired state for the given kernel interface explicitly
+/// disables IPv6.  See [`desired_iface_ipv4_disabled`].
+fn desired_iface_ipv6_disabled(
+    kernel_iface_name: &str,
+    merged_ifaces: &MergedInterfaces,
+) -> bool {
+    merged_ifaces
+        .kernel_ifaces
+        .get(kernel_iface_name)
+        .and_then(|merged_iface| merged_iface.desired.as_ref())
+        .is_some_and(|desired| {
+            desired
+                .base_iface()
+                .ipv6
+                .as_ref()
+                .is_some_and(|ipv6| !ipv6.is_enabled())
+        })
 }
 
 fn collect_iface_lists(merged_ifaces: &MergedInterfaces) -> IfaceLists<'_> {
