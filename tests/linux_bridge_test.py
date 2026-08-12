@@ -270,3 +270,22 @@ def test_modify_linux_bridge_vlan(linux_bridge_over_dummy):
         },
         linux_bridge_iface["bridge"]["vlan"],
     )
+
+
+def test_bridge_port_with_ip_rejected():
+    # Linux bridge ports cannot hold IP, the desired state must be rejected.
+    with pytest.raises(Exception):
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_BRIDGE_NIC}
+                type: linux-bridge
+                state: up
+                bridge:
+                  port:
+                  - name: {TEST_PORT1}
+              - name: {TEST_PORT1}
+                type: dummy
+                state: up
+                ipv6:
+                  enabled: true
+            """))

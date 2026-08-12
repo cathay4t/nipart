@@ -105,6 +105,48 @@ impl MergedInterfaces {
         self.check_overbook_ports()?;
         self.check_infiniband_as_ports()?;
         self.validate_controller_and_port_list_confliction()?;
+        self.validate_can_have_ip()?;
+        Ok(())
+    }
+
+    /// A port attached to a controller which does not allow IP on its ports
+    /// (e.g. bond, linux bridge) must not have IP enabled in the desired
+    /// state. VRF ports and OVS interfaces can hold IP.
+    fn validate_can_have_ip(&self) -> Result<(), NipartError> {
+        for merged_iface in
+            self.iter().filter(|m| m.is_desired() && m.merged.is_up())
+        {
+            let Some(for_apply) = merged_iface.for_apply.as_ref() else {
+                continue;
+            };
+            let base_iface = for_apply.base_iface();
+            if !base_iface.can_have_ip()
+                && (base_iface.ipv4.as_ref().and_then(|ipv4| ipv4.enabled)
+                    == Some(true)
+                    || base_iface.ipv6.as_ref().and_then(|ipv6| ipv6.enabled)
+                        == Some(true))
+            {
+                if let Some(ctrl) = base_iface.controller.as_ref() {
+                    return Err(NipartError::new(
+                        ErrorKind::InvalidArgument,
+                        format!(
+                            "Interface {} cannot have IP enabled as it is \
+                             attached to controller {ctrl} where IP is not \
+                             allowed on its port",
+                            base_iface.name.as_str()
+                        ),
+                    ));
+                } else {
+                    return Err(NipartError::new(
+                        ErrorKind::InvalidArgument,
+                        format!(
+                            "Interface {} cannot have IP enabled",
+                            base_iface.name.as_str()
+                        ),
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
