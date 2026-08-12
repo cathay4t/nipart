@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+import tempfile
+
 import pytest
 
 import nipart
 
+from .conftest import CLI_PATH
 from .testlib.cmdlib import exec_cmd
 from .testlib.dhcp import DHCP_SRV_IP4
 from .testlib.dhcp import DHCP_SRV_IP4_PREFIX
@@ -151,3 +155,27 @@ def test_dhcpv4_auto_gateway_true(dhcp_env, dhcp_cli_cleanup):
     assert retry_till_true_or_timeout(DEFAULT_TIMEOUT, _has_dhcp_addr)
     assert retry_till_true_or_timeout(DEFAULT_TIMEOUT, _ping_dhcp_server)
     assert _has_gateway_route()
+
+
+def test_dhcpv4_auto_gateway_false_no_daemon(dhcp_env, dhcp_cli_cleanup):
+    with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as fd:
+        fd.write(f"""---
+        interfaces:
+        - name: {DHCP_CLI_NIC}
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+            auto-gateway: false""")
+        state_file = fd.name
+    try:
+        rc, out, err = exec_cmd(
+            [CLI_PATH, "apply", "-n", state_file], check=False
+        )
+        assert rc == 0, f"npt apply -n failed:\n{out}\n{err}"
+        assert retry_till_true_or_timeout(DEFAULT_TIMEOUT, _has_dhcp_addr)
+        assert retry_till_true_or_timeout(DEFAULT_TIMEOUT, _ping_dhcp_server)
+        assert not _has_gateway_route()
+    finally:
+        os.unlink(state_file)

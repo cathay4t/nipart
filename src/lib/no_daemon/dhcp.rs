@@ -334,7 +334,15 @@ async fn apply_lease_v4(
 
     let mut conf_routes: Vec<RouteEntry> = Vec::new();
     // TODO: Handle multiple addresses of router
-    if let Some(gateways) = lease.gateways.as_ref() {
+    if let Some(gateways) = lease.gateways.as_ref()
+        && merged_iface
+            .merged
+            .base_iface()
+            .ipv4
+            .as_ref()
+            .map(|i| i.auto_gateway.unwrap_or(true))
+            != Some(false)
+    {
         for (index, gateway) in gateways.iter().enumerate() {
             let route = RouteEntry {
                 destination: Some("0.0.0.0/0".to_string()),
