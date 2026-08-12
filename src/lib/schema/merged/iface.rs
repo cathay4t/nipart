@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use super::super::value::copy_undefined_value;
 use crate::{
-    ErrorKind, Interface, InterfaceIdentifier, InterfaceState, InterfaceType,
-    JsonDisplay, MergedInterfaces, NipartError, NipartInterface,
+    ErrorKind, Interface, InterfaceIdentifier, InterfaceIpv4, InterfaceIpv6,
+    InterfaceState, InterfaceType, JsonDisplay, MergedInterfaces, NipartError,
+    NipartInterface,
 };
 
 #[derive(
@@ -301,6 +302,46 @@ impl MergedInterface {
             if !self.merged.base_iface().can_have_ip() {
                 self.merged.base_iface_mut().ipv4 = None;
                 self.merged.base_iface_mut().ipv6 = None;
+                // The port is attached to a controller which does not allow
+                // IP on its ports. When the desired state does not explicitly
+                // enable IP (an explicit `ipv4/ipv6.enabled: true` is
+                // rejected by `validate_can_have_ip()`), purge the IP from
+                // the saved config so the boot restore of the saved state
+                // does not fail, and disable it in `for_apply` so the
+                // running address is removed as well.
+                let desired_ip_enabled =
+                    self.desired.as_ref().is_some_and(|desired| {
+                        desired
+                            .base_iface()
+                            .ipv4
+                            .as_ref()
+                            .and_then(|ipv4| ipv4.enabled)
+                            == Some(true)
+                            || desired
+                                .base_iface()
+                                .ipv6
+                                .as_ref()
+                                .and_then(|ipv6| ipv6.enabled)
+                                == Some(true)
+                    });
+                if !desired_ip_enabled {
+                    if let Some(for_save) = self.for_save.as_mut() {
+                        for_save.base_iface_mut().ipv4 = None;
+                        for_save.base_iface_mut().ipv6 = None;
+                    }
+                    if let Some(for_apply) = self.for_apply.as_mut() {
+                        for_apply.base_iface_mut().ipv4 = Some(InterfaceIpv4 {
+                            enabled: Some(false),
+                            dhcp: Some(false),
+                            ..Default::default()
+                        });
+                        for_apply.base_iface_mut().ipv6 = Some(InterfaceIpv6 {
+                            enabled: Some(false),
+                            dhcp: Some(false),
+                            ..Default::default()
+                        });
+                    }
+                }
             }
         }
         Ok(())
