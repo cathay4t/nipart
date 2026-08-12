@@ -282,3 +282,53 @@ def test_bond_port_with_ip_rejected():
                 ipv4:
                   enabled: true
             """))
+
+
+def test_bond_port_ip_purged_from_save_when_attached():
+    # Saved config has IP on the port, desired state moves the port into a
+    # bond: the apply must not fail and the IP must be auto-purged from the
+    # saved config (and removed from the running interface).
+    nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_PORT1}
+                type: dummy
+                state: up
+                ipv4:
+                  enabled: true
+                  dhcp: false
+                  address:
+                    - ip: 192.0.2.99
+                      prefix-length: 24
+            """))
+    try:
+        saved_port = show_saved_only(TEST_PORT1)
+        assert saved_port["ipv4"]["enabled"] is True
+
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_BOND_NIC}
+                type: bond
+                state: up
+                bond:
+                  mode: active-backup
+                  ports:
+                  - name: {TEST_PORT1}
+            """))
+
+        # The running port must not hold the IP anymore.
+        port = show_only(TEST_PORT1)
+        assert port.get("ipv4", {}).get("enabled") is not True
+
+        # The saved config must not keep the stale IP.
+        saved_port = show_saved_only(TEST_PORT1)
+        assert "ipv4" not in saved_port
+    finally:
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_BOND_NIC}
+                type: bond
+                state: absent
+              - name: {TEST_PORT1}
+                type: dummy
+                state: absent
+            """))

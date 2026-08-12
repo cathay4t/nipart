@@ -3342,3 +3342,107 @@ fn test_bond_port_with_explicit_controller_and_ip_rejected() {
         );
     }
 }
+
+#[test]
+fn test_bond_port_ip_purged_from_save_when_attached() {
+    // Saved config has IP on dummy1, desired state moves dummy1 to bond0:
+    // the apply must not fail and the IP must be purged from the saved
+    // config (and disabled in for_apply so the running address is removed).
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: bond0
+          type: bond
+          state: up
+          bond:
+            mode: active-backup
+            ports:
+            - name: dummy1
+        "#,
+    )
+    .unwrap();
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: dummy1
+          type: dummy
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: false
+            address:
+            - ip: 192.0.2.1
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+    let saved = current.clone();
+
+    let merged = MergedInterfaces::new(desired, current, Some(saved)).unwrap();
+
+    let dummy1 = merged.kernel_ifaces.get("dummy1").unwrap();
+    // Saved config must be purged.
+    assert_eq!(dummy1.for_save.as_ref().unwrap().base_iface().ipv4, None,);
+    assert_eq!(dummy1.for_save.as_ref().unwrap().base_iface().ipv6, None,);
+    // for_apply must disable IPv4 so the running address is removed.
+    assert_eq!(
+        dummy1
+            .for_apply
+            .as_ref()
+            .unwrap()
+            .base_iface()
+            .ipv4
+            .as_ref()
+            .and_then(|ipv4| ipv4.enabled),
+        Some(false),
+    );
+    // merged must not hold IP.
+    assert_eq!(dummy1.merged.base_iface().ipv4, None);
+}
+
+#[test]
+fn test_vrf_port_ip_kept_in_save_when_attached() {
+    // VRF ports can hold IP: attaching dummy1 to a VRF must NOT purge the
+    // IP from the saved config.
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: vrf0
+          type: vrf
+          state: up
+          vrf:
+            route-table-id: 100
+            ports:
+            - dummy1
+        "#,
+    )
+    .unwrap();
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: dummy1
+          type: dummy
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: false
+            address:
+            - ip: 192.0.2.1
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+    let saved = current.clone();
+
+    let merged = MergedInterfaces::new(desired, current, Some(saved)).unwrap();
+
+    let dummy1 = merged.kernel_ifaces.get("dummy1").unwrap();
+    assert!(dummy1.merged.base_iface().can_have_ip());
+    assert_eq!(
+        dummy1
+            .for_save
+            .as_ref()
+            .unwrap()
+            .base_iface()
+            .ipv4
+            .as_ref()
+            .and_then(|ipv4| ipv4.enabled),
+        Some(true),
+    );
+}
