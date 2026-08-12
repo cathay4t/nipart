@@ -262,3 +262,23 @@ def test_bond_mac_identifier_port_order_swapped(bond_over_veth_mac):
         [{"name": TEST_VETH0}, {"name": TEST_VETH1}],
         bond_iface["bond"]["ports"],
     )
+
+
+def test_bond_port_with_ip_rejected():
+    # Bond ports cannot hold IP, the desired state must be rejected.
+    with pytest.raises(Exception):
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_BOND_NIC}
+                type: bond
+                state: up
+                bond:
+                  mode: active-backup
+                  ports:
+                  - name: {TEST_PORT1}
+              - name: {TEST_PORT1}
+                type: dummy
+                state: up
+                ipv4:
+                  enabled: true
+            """))
