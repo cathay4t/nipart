@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: Run the full integration test suite
+        type: string
+        required: false
+        default: "true"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.88.0"
+
+permissions:
+  repository: read
+
+jobs:
+  lint:
+    name: Format, clippy and flake8
+    runs-on: [ubuntu-latest, x64, small]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source code
+        uses: checkout
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --profile minimal \
+            --default-toolchain "$RUST_TOOLCHAIN" \
+            --component rustfmt --component clippy
+          echo "$HOME/.cargo/bin" >> "$ATOMGIT_PATH"
+
+      - name: Cache Cargo dependencies
+        uses: cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Install flake8
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-flake8
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check Rust code with clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check Python code with flake8
+        run: python3 -m flake8 tests src/python
+
+  unit:
+    name: Unit tests
+    runs-on: [ubuntu-latest, x64, small]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source code
+        uses: checkout
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --profile minimal \
+            --default-toolchain "$RUST_TOOLCHAIN" \
+            --component rustfmt --component clippy
+          echo "$HOME/.cargo/bin" >> "$ATOMGIT_PATH"
+
+      - name: Cache Cargo dependencies
+        uses: cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Run Rust unit tests
+        run: cargo test --workspace
+
+  integration:
+    name: Integration tests
+    runs-on: [ubuntu-latest, x64, medium]
+    timeout-minutes: 120
+    needs: [lint, unit]
+    if: ${{ atomgit.event_name == 'push' || inputs.run_integration == 'true' }}
+    steps:
+      - name: Checkout source code
+        uses: checkout
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --profile minimal \
+            --default-toolchain "$RUST_TOOLCHAIN" \
+            --component rustfmt --component clippy
+          echo "$HOME/.cargo/bin" >> "$ATOMGIT_PATH"
+
+      - name: Cache Cargo dependencies
+        uses: cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            dnsmasq hostapd iw openvswitch-switch \
+            python3-pytest python3-yaml
+
+      - name: Build binaries
+        run: cargo build
+
+      - name: Run integration tests
+        run: sudo bash tests/run-tests.sh
