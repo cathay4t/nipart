@@ -3,6 +3,7 @@
 * [Nipart Base Interface support](#nipart-base-interface-support)
     * [`name`: Interface name](#name-interface-name)
     * [`type`: Interface type](#type-interface-type)
+    * [`description` - Description](#description---interface-description)
     * [`iface-index` - Interface index](#iface-index---interface-index)
     * [`state` - Interface state](#state---interface-state)
     * [`link-state`: Link state](#link-state-link-state)
@@ -26,6 +27,7 @@ version: 1
 interfaces:
 - name: eth1
   type: veth
+  description: Main interface connected to switch S1
   iface-index: 8
   state: up
   link-state: up
@@ -49,6 +51,14 @@ The kernel name of interface
 ## `type`: Interface type
 
 The type of interface, e.g. `veth`, `bond`, `bridge`, etc.
+
+## `description` - Interface description
+
+Save-only property. It is stored in the saved state and surfaced in the
+running-state query, but never applied to the kernel nor checked during
+verification.
+
+Setting it to an empty string clears the saved description.
 
 ## `iface-index` - Interface index
 

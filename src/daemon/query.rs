@@ -86,6 +86,13 @@ impl NipartCommander {
                         cur_iface.base_iface_mut().profile_name =
                             Some(profile_name.clone());
                     }
+                    if let Some(description) =
+                        saved_iface.base_iface().description.as_ref()
+                        && cur_iface.base_iface().description.is_none()
+                    {
+                        cur_iface.base_iface_mut().description =
+                            Some(description.clone());
+                    }
                 }
 
                 self.dhcpv4_manager.fill_dhcp_states(&mut net_state).await?;

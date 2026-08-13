@@ -65,13 +65,17 @@ impl MergedInterface {
 
         // We cannot use for_save as for_verify, because the kernel_iface_name
         // been resolved. We use original desired state.
-        let for_verify = desired.clone();
+        // `description` is save-only, so it is never part of verification.
+        let mut for_verify = desired.clone();
+        if let Some(for_verify) = for_verify.as_mut() {
+            for_verify.base_iface_mut().description = None;
+        }
 
         // We only apply changed properties
         let for_apply = if let Some(current) = current.as_ref()
             && let Some(for_save) = for_save.as_ref()
         {
-            for_save.gen_diff(current)?
+            for_save.gen_diff_for_apply(current)?
         } else if desired.is_some() {
             for_save.clone()
         } else {
