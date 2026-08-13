@@ -45,12 +45,12 @@ interfaces:
   - name: port1
     type: ethernet
     state: up
-    mac-address: 00:23:45:67:89:1a
+    mac-address: 02:00:00:00:00:01
     identifier: mac-address
   - name: port2
     type: ethernet
     state: up
-    mac-address: 00:23:45:67:89:1b
+    mac-address: 02:00:00:00:00:02
     identifier: mac-address
 ```
 

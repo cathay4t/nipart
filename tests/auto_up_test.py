@@ -11,7 +11,7 @@ from .testlib.statelib import load_yaml, show_only
 
 MAC_TEST_VETH = "veth-mac-plug0"
 MAC_TEST_VETH_PEER = "veth-mac-plug1"
-TEST_MAC = "00:23:45:67:89:1a"
+TEST_MAC = "02:00:00:00:00:01"
 TEST_MTU = 1280
 MAC_TEST_IP = "192.0.2.99"
 ROUTE_NEXTHOP = "192.0.2.1"

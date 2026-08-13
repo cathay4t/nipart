@@ -132,7 +132,7 @@ def test_vrf_ignore_mac_address(vrf0_over_dummy):
                 state: up
                 vrf:
                   route-table-id: {TEST_ROUTE_TABLE_ID0}
-                mac-address: DE:AD:BE:EF:00:01
+                mac-address: 02:00:00:00:00:0e
             """))
     vrf_iface = show_only(TEST_VRF0)
     assert vrf_iface["vrf"]["route-table-id"] == TEST_ROUTE_TABLE_ID0

@@ -10,7 +10,7 @@ from .testlib.retry import retry_till_true_or_timeout
 SAVED_STATE_FILE = "/etc/nipart/states/internal/applied.yml"
 TEST_VETH = "veth-saved-mac0"
 TEST_VETH_PEER = "veth-saved-mac1"
-TEST_MAC = "00:23:45:67:89:1b"
+TEST_MAC = "02:00:00:00:00:02"
 TEST_IP = "192.0.2.99"
 TEST_MTU = 1280
 ROUTE_NEXTHOP = "192.0.2.1"
@@ -23,7 +23,7 @@ SAVED_STATE = f"""---
 version: 1
 routes:
   config:
-  - destination: 172.25.80.0/24
+  - destination: 198.51.100.0/24
     next-hop-interface: wan0
     next-hop-address: {ROUTE_NEXTHOP}
     metric: 103
@@ -61,14 +61,14 @@ def _iface_has_route(iface_name):
     rc, out, _ = exec_cmd(
         ["ip", "route", "show", "dev", iface_name], check=False
     )
-    return "172.25.80.0/24" in out and ROUTE_NEXTHOP in out
+    return "198.51.100.0/24" in out and ROUTE_NEXTHOP in out
 
 
 def _route_exists():
     rc, out, _ = exec_cmd(
-        ["ip", "route", "show", "172.25.80.0/24"], check=False
+        ["ip", "route", "show", "198.51.100.0/24"], check=False
     )
-    return rc == 0 and "172.25.80.0/24" in out
+    return rc == 0 and "198.51.100.0/24" in out
 
 
 def _log_since(pos, text):

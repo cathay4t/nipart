@@ -146,7 +146,7 @@ fn test_vrf_sanitize_ignore_mac_address() {
             name: "vrf0".to_string(),
             iface_type: InterfaceType::Vrf,
             state: InterfaceState::Up,
-            mac_address: Some("DE:AD:BE:EF:00:01".to_string()),
+            mac_address: Some("02:00:00:00:00:0e".to_string()),
             ..Default::default()
         },
         vrf: Some(VrfConfig {
@@ -639,11 +639,11 @@ fn test_vrf_resolve_port_ref_by_mac_identifier() {
             - port2
         - name: port1
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
           identifier: mac-address
         - name: port2
           type: ethernet
-          mac-address: 00:23:45:67:89:1b
+          mac-address: 02:00:00:00:00:02
           identifier: mac-address"#,
     )
     .unwrap();
@@ -652,10 +652,10 @@ fn test_vrf_resolve_port_ref_by_mac_identifier() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         - name: eth1
           type: ethernet
-          mac-address: 00:23:45:67:89:1b"#,
+          mac-address: 02:00:00:00:00:02"#,
     )
     .unwrap();
 

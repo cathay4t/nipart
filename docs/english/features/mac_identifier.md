@@ -24,7 +24,7 @@ interfaces:
   - name: my-veth
     type: ethernet
     identifier: mac-address
-    mac-address: 52:54:00:12:AF:0B
+    mac-address: 02:00:00:00:00:0b
     state: up
     ipv4:
       enabled: true
@@ -61,7 +61,7 @@ interfaces:
   - name: my-gw-iface
     type: ethernet
     identifier: mac-address
-    mac-address: 52:54:00:12:AF:0B
+    mac-address: 02:00:00:00:00:0b
     state: up
     ipv4:
       enabled: true
@@ -87,7 +87,7 @@ interfaces:
   - name: my-gw-iface
     type: ethernet
     identifier: mac-address
-    mac-address: 52:54:00:12:AF:0B
+    mac-address: 02:00:00:00:00:0b
     state: absent
 routes:
   config:
@@ -139,7 +139,7 @@ interfaces:
   - name: port1
     type: ethernet
     identifier: mac-address
-    mac-address: 52:54:00:15:17:63
+    mac-address: 02:00:00:00:00:08
     kernel-iface-name: eth0
 ```
 

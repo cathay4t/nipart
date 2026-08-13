@@ -1188,7 +1188,7 @@ mod test {
     #[test]
     fn test_bond_ad_actor_system_valid_unicast_mac() {
         let opts = BondOptions {
-            ad_actor_system: Some("00:11:22:33:44:55".to_string()),
+            ad_actor_system: Some("02:00:00:00:00:03".to_string()),
             ..Default::default()
         };
         assert!(opts.validate_ad_actor_system_mac_address().is_ok());
@@ -1217,9 +1217,9 @@ mod test {
     #[test]
     fn test_bond_ad_actor_system_reject_invalid_mac() {
         for mac in [
-            "00:11:22",             // too short
+            "02:00:00",             // too short
             "gg:11:22:33:44:55",    // non hex
-            "00:11:22:33:44:55:66", // too long
+            "02:00:00:00:00:03:66", // too long
             "001:11:22:33:44:55",   // more than 2 hex digits per byte
             "0:11:22:33:44:55",     // less than 2 hex digits per byte
         ] {

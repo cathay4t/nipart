@@ -304,7 +304,7 @@ fn test_process_auto_connect_no_match_when_mac_differs() {
           - name: eth1
             type: ethernet
             state: up
-            mac-address: 00:11:22:33:44:55
+            mac-address: 02:00:00:00:00:03
         "#,
     )
     .unwrap();

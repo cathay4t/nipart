@@ -230,7 +230,7 @@ fn test_iface_de_absent_keeps_identifier_properties() {
         type: ethernet
         state: absent
         identifier: mac-address
-        mac-address: DE:AD:BE:EF:00:01
+        mac-address: 02:00:00:00:00:0e
         kernel-iface-name: eth1
         profile-name: prof1
         "#,
@@ -240,7 +240,7 @@ fn test_iface_de_absent_keeps_identifier_properties() {
     let base = iface.base_iface();
     assert_eq!(base.state, InterfaceState::Absent);
     assert_eq!(base.identifier, Some(InterfaceIdentifier::MacAddress));
-    assert_eq!(base.mac_address.as_deref(), Some("DE:AD:BE:EF:00:01"));
+    assert_eq!(base.mac_address.as_deref(), Some("02:00:00:00:00:0e"));
     assert_eq!(base.kernel_iface_name, "eth1");
     assert_eq!(base.profile_name.as_deref(), Some("prof1"));
 }
