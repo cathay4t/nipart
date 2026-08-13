@@ -120,15 +120,13 @@ pub(crate) fn apply_iface_link_changes(
         )
     } else if let Interface::Wireguard(i) = apply_iface {
         apply_wg_conf(np_iface, i)
-    } else if let Interface::Vrf(_) = apply_iface {
-        if merged_iface.current.is_some() {
-            // Existing VRF interface: base changes (MTU, state, alt-names)
-            // are handled by the nispor change messages. Creating a new VRF
-            // is handled by rtnetlink in `apply_vrf_link_changes()`.
-            Ok(vec![np_iface])
-        } else {
-            Ok(Vec::new())
+    } else if let Interface::Vrf(vrf_iface) = apply_iface {
+        if let Some(vrf_conf) = vrf_iface.vrf.as_ref() {
+            let mut np_vrf_conf = nispor::VrfConf::default();
+            np_vrf_conf.table_id = vrf_conf.table_id;
+            np_iface.vrf = Some(np_vrf_conf);
         }
+        Ok(vec![np_iface])
     } else {
         Ok(vec![np_iface])
     }

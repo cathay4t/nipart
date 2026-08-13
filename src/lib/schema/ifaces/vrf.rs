@@ -166,6 +166,21 @@ impl NipartInterface for VrfInterface {
 
         Ok(())
     }
+
+    /// The Linux kernel does not support changing the route table ID of an
+    /// existing VRF interface, hence nispor rejects such change and we need
+    /// to delete and recreate the VRF interface first.
+    fn need_delete_before_change(&self, current: &Self) -> bool {
+        let desired = self;
+        if let Some(des_table_id) =
+            desired.vrf.as_ref().and_then(|v| v.table_id)
+            && des_table_id != 0
+        {
+            return current.vrf.as_ref().and_then(|v| v.table_id)
+                != Some(des_table_id);
+        }
+        false
+    }
 }
 
 impl VrfInterface {
