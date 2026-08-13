@@ -14,7 +14,7 @@ env_logger = { workspace = true }
 log = { workspace = true }
 rmsd_yaml = { workspace = true }
 tokio = { workspace = true }
-nipart = { path = "../lib" }
+nipart = { workspace = true }
 futures-util = { workspace = true }
 futures-channel = { workspace = true }
 uuid = { workspace = true }
