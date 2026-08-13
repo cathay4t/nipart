@@ -681,3 +681,77 @@ fn test_vrf_resolve_port_ref_by_mac_identifier() {
         vec!["port1", "port2"]
     );
 }
+
+#[test]
+fn test_vrf_need_delete_before_change() {
+    let current = vrf_iface_with_config(VrfConfig {
+        table_id: Some(100),
+        ports: None,
+    });
+    let changed = vrf_iface_with_config(VrfConfig {
+        table_id: Some(101),
+        ports: None,
+    });
+    let unchanged = vrf_iface_with_config(VrfConfig {
+        table_id: Some(100),
+        ports: None,
+    });
+
+    assert!(changed.need_delete_before_change(&current));
+    assert!(!unchanged.need_delete_before_change(&current));
+    assert!(!current.need_delete_before_change(&unchanged));
+}
+
+#[test]
+fn test_vrf_table_id_change_marks_ports_for_reattach() {
+    let des_ifaces = r#"
+    - name: vrf0
+      type: vrf
+      state: up
+      vrf:
+        route-table-id: 101
+    "#;
+    let cur_ifaces = r#"
+    - name: vrf0
+      type: vrf
+      state: up
+      vrf:
+        route-table-id: 100
+        ports:
+        - dummy1
+        - dummy2
+    - name: dummy1
+      type: dummy
+      state: up
+      controller: vrf0
+    - name: dummy2
+      type: dummy
+      state: up
+      controller: vrf0
+    "#;
+
+    let merged_ifaces = merged_ifaces_with_vrf(des_ifaces, cur_ifaces).unwrap();
+    let vrf0 = merged_ifaces.kernel_ifaces.get("vrf0").unwrap();
+
+    assert!(vrf0.will_delete_before_apply());
+    let (attached_ports, detached_ports) = vrf0.get_changed_ports().unwrap();
+    assert_eq!(attached_ports.len(), 2);
+    assert!(attached_ports.contains(&"dummy1"));
+    assert!(attached_ports.contains(&"dummy2"));
+    assert_eq!(detached_ports.len(), 2);
+
+    // Both ports must be included in the apply with their controller so they
+    // are re-enslaved after the VRF is deleted and recreated.
+    let dummy1 = merged_ifaces.kernel_ifaces.get("dummy1").unwrap();
+    assert!(dummy1.is_changed());
+    assert_eq!(
+        dummy1
+            .for_apply
+            .as_ref()
+            .unwrap()
+            .base_iface()
+            .controller
+            .as_deref(),
+        Some("vrf0")
+    );
+}

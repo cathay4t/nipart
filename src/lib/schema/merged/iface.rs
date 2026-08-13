@@ -181,6 +181,15 @@ impl MergedInterface {
         self.for_apply.is_some()
     }
 
+    pub(crate) fn will_delete_before_apply(&self) -> bool {
+        self.for_apply
+            .as_ref()
+            .zip(self.current.as_ref())
+            .is_some_and(|(for_apply, current)| {
+                Interface::need_delete_before_change(for_apply, current)
+            })
+    }
+
     pub fn is_absent(&self) -> bool {
         self.for_apply.as_ref().map(|i| i.is_absent()) == Some(true)
     }

@@ -49,6 +49,29 @@ impl MergedInterface {
             }
         }
 
+        // When the controller itself will be deleted and recreated (e.g. VRF
+        // route table ID change), its deletion detaches every port in the
+        // kernel. Mark all current ports as detached and all desired ports
+        // as attached so they are re-enslaved by the controller recreated in
+        // the same apply.
+        if self.will_delete_before_apply() {
+            let desired_port_names: HashSet<&str> = self
+                .merged
+                .ports()
+                .map(|ports| HashSet::from_iter(ports.iter().cloned()))
+                .unwrap_or_default();
+            let current_port_names: HashSet<&str> = self
+                .current
+                .as_ref()
+                .and_then(|cur_iface| cur_iface.ports())
+                .map(|ports| HashSet::from_iter(ports.iter().cloned()))
+                .unwrap_or_default();
+            return Some((
+                desired_port_names.iter().copied().collect(),
+                current_port_names.iter().copied().collect(),
+            ));
+        }
+
         let desired_port_names = match for_apply_iface.ports() {
             Some(p) => HashSet::from_iter(p.iter().cloned()),
             None => {
