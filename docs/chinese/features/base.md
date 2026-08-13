@@ -30,8 +30,8 @@ interfaces:
   state: up
   link-state: up
   controller: bond0
-  mac-address: CE:67:51:EC:E2:6A
-  permanent-mac-address: CE:67:51:EC:E2:6A
+  mac-address: 02:00:00:00:00:0f
+  permanent-mac-address: 02:00:00:00:00:0f
   mtu: 1500
   min-mtu: 68
   max-mtu: 65535

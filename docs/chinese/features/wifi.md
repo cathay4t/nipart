@@ -47,8 +47,8 @@ interfaces:
     - ip: 192.0.2.6
       prefix-length: 24
   wifi:
-    ssid: SweatHome5G
-    bssid: D0:21:F9:49:B3:52
+    ssid: ExampleNetwork
+    bssid: 02:00:00:00:00:11
     password: <_hidden_>
 ```
 
@@ -95,14 +95,24 @@ interfaces:
 - `WPA3-PSK`：使用 SAE 的 WPA 3 预共享密钥
 - `unknown`：无法确定
 
-`npt wifi scan` 的每个 `WifiScanResult` 条目使用 `auth-types` 报告详细认证
-类型列表。每个条目包含简化的 `auth-type`，以及接入点通告的 AKM（认证与
-密钥管理）套件和密码套件，例如：
+`npt wifi scan` 默认以表格显示，格式与 `nmcli device wifi list` 类似，
+例如：
+
+```text
+IN-USE  BSSID              SSID              CHAN  BAND   SIGNAL  BARS  SECURITY
+*       02:00:00:00:00:11  Home              36    5 GHz  78      ▂▄▆_  WPA2
+```
+
+使用 `npt wifi scan -y` 可输出 YAML 格式。
+
+底层的 `WifiScanResult` 条目使用 `auth-types` 报告详细认证类型列表。
+每个条目包含简化的 `auth-type`，以及接入点通告的 AKM（认证与密钥管理）
+套件和密码套件，例如：
 
 ```yaml
-- ssid: SweatHome5G
+- ssid: ExampleNetwork
   base-iface: wlan0
-  bssid: d0:21:f9:49:b3:52
+  bssid: 02:00:00:00:00:11
   frequency-mhz: 5180
   signal-dbm: -45
   signal-percent: 78

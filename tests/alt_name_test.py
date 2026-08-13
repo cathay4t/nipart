@@ -226,13 +226,13 @@ def test_mac_id_kernel_iface_name_rename_keeps_original_alt_name():
     # alt-name (no `alt-names` in desired or saved state).
     _create_ren_veth_pair()
     try:
-        exec_cmd(f"ip link set {REN_VETH} address 00:11:22:33:44:55".split())
+        exec_cmd(f"ip link set {REN_VETH} address 02:00:00:00:00:03".split())
         nipart.apply(load_yaml(f"""---
                 interfaces:
                 - name: port1
                   type: ethernet
                   identifier: mac-address
-                  mac-address: 00:11:22:33:44:55
+                  mac-address: 02:00:00:00:00:03
                   kernel-iface-name: renamed0
                 """))
         assert retry_till_true_or_timeout(
@@ -254,13 +254,13 @@ def test_mac_id_kernel_iface_name_no_auto_alt_name_when_defined():
     # kernel name is not auto-added.
     _create_ren_veth_pair()
     try:
-        exec_cmd(f"ip link set {REN_VETH} address 00:11:22:33:44:56".split())
+        exec_cmd(f"ip link set {REN_VETH} address 02:00:00:00:00:04".split())
         nipart.apply(load_yaml(f"""---
                 interfaces:
                 - name: port2
                   type: ethernet
                   identifier: mac-address
-                  mac-address: 00:11:22:33:44:56
+                  mac-address: 02:00:00:00:00:04
                   kernel-iface-name: renamed1
                   alt-names:
                     - name: renamed-port
@@ -283,13 +283,13 @@ def test_boot_load_saved_rename_keeps_original_alt_name():
     # re-apply the rename and the auto-kept original alt-name at boot.
     _create_ren_veth_pair()
     try:
-        exec_cmd(f"ip link set {REN_VETH} address 00:11:22:33:44:57".split())
+        exec_cmd(f"ip link set {REN_VETH} address 02:00:00:00:00:05".split())
         nipart.apply(load_yaml(f"""---
                 interfaces:
                 - name: port3
                   type: ethernet
                   identifier: mac-address
-                  mac-address: 00:11:22:33:44:57
+                  mac-address: 02:00:00:00:00:05
                   kernel-iface-name: renamed0
                 """))
         assert retry_till_true_or_timeout(

@@ -17,7 +17,7 @@ fn test_yaml_round_trip_ethernet_with_ip() {
           - name: eth1
             type: ethernet
             mtu: 9000
-            mac-address: DE:AD:BE:EF:00:01
+            mac-address: 02:00:00:00:00:0e
             ipv4:
               enabled: true
               dhcp: false

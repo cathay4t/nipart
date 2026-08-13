@@ -78,15 +78,14 @@ async fn _wifi_scan(
                 continue;
             };
 
+            let signal_dbm = signal_mbm_to_dbm(bss_info.signal_dbm);
             let scan_res = WifiScanResult::new(
                 ssid.clone(),
                 Some(iface_name.to_string()),
                 Some(mac_to_string(&bss_info.bssid)),
                 Some(bss_info.freq_mhz),
-                Some(bss_info.signal_dbm as i16),
-                Some(WifiConfig::signal_dbm_to_percent(
-                    bss_info.signal_dbm as i16,
-                )),
+                Some(signal_dbm),
+                Some(WifiConfig::signal_dbm_to_percent(signal_dbm)),
                 detect_generation(ies),
                 vec![detect_auth_type(ies)],
             );
@@ -310,6 +309,11 @@ fn mac_to_string(mac: &[u8; 6]) -> String {
         .join(":")
 }
 
+/// Convert the nl80211 scan signal from mBm to dBm. `-3000` means `-30 dBm`.
+fn signal_mbm_to_dbm(signal_mbm: i32) -> i16 {
+    (signal_mbm / 100) as i16
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -385,5 +389,12 @@ mod test {
             [0xdd, 0x08, 0x00, 0x50, 0xf2, 0x01, 0x01, 0x00, 0x00, 0x50];
         let auth = detect_auth_type(&wpa_ie);
         assert_eq!(auth.auth_type, WifiAuthType::Unknown);
+    }
+
+    #[test]
+    fn test_signal_mbm_to_dbm() {
+        assert_eq!(signal_mbm_to_dbm(-3000), -30);
+        assert_eq!(signal_mbm_to_dbm(-4500), -45);
+        assert_eq!(signal_mbm_to_dbm(-6500), -65);
     }
 }

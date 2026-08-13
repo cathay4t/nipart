@@ -14,7 +14,7 @@ fn test_resolve_mac_identifier_basic_with_mac() {
         - name: wan0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -23,7 +23,7 @@ fn test_resolve_mac_identifier_basic_with_mac() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -45,7 +45,7 @@ fn test_resolve_mac_identifier_perm_mac() {
         - name: wan0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -55,7 +55,7 @@ fn test_resolve_mac_identifier_perm_mac() {
         - name: eth0
           type: ethernet
           mac-address: 00:00:00:00:00:00
-          permanent-mac-address: 00:23:45:67:89:1a
+          permanent-mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -75,7 +75,7 @@ fn test_resolve_mac_identifier_no_match() {
         - name: wan0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -101,7 +101,7 @@ fn test_resolve_mac_identifier_re_resolve() {
         - name: eth0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
           profile-name: wan0
         "#,
     )
@@ -111,7 +111,7 @@ fn test_resolve_mac_identifier_re_resolve() {
         r#"---
         - name: enp0s3
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -133,7 +133,7 @@ fn test_resolve_mac_identifier_absent_skipped() {
         - name: wan0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
           state: absent
         "#,
     )
@@ -143,7 +143,7 @@ fn test_resolve_mac_identifier_absent_skipped() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -175,7 +175,7 @@ fn test_resolve_mac_identifier_unknown_type() {
         - name: wan0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -184,7 +184,7 @@ fn test_resolve_mac_identifier_unknown_type() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -212,7 +212,7 @@ fn test_resolve_mac_identifier_missing_mac() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -229,7 +229,7 @@ fn test_resolve_mac_identifier_already_resolved() {
         - name: eth0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
           profile-name: wan0
           kernel-iface-name: eth0
         "#,
@@ -240,7 +240,7 @@ fn test_resolve_mac_identifier_already_resolved() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -262,7 +262,7 @@ fn test_resolve_mac_identifier_case_insensitive() {
         - name: wan0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -271,7 +271,7 @@ fn test_resolve_mac_identifier_case_insensitive() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:23:45:67:89:1A
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -292,11 +292,11 @@ fn test_resolve_mac_identifier_multiple_ifaces() {
         - name: wan0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:11:22:33:44:55
+          mac-address: 02:00:00:00:00:03
         - name: wan1
           type: ethernet
           identifier: mac-address
-          mac-address: aa:bb:cc:dd:ee:ff
+          mac-address: 02:00:00:00:00:0c
         "#,
     )
     .unwrap();
@@ -305,10 +305,10 @@ fn test_resolve_mac_identifier_multiple_ifaces() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:11:22:33:44:55
+          mac-address: 02:00:00:00:00:03
         - name: eth1
           type: ethernet
-          mac-address: aa:bb:cc:dd:ee:ff
+          mac-address: 02:00:00:00:00:0c
         "#,
     )
     .unwrap();
@@ -334,7 +334,7 @@ fn test_resolve_mac_identifier_perm_mac_preferred() {
         - name: wan0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:11:22:33:44:55
+          mac-address: 02:00:00:00:00:03
         "#,
     )
     .unwrap();
@@ -344,10 +344,10 @@ fn test_resolve_mac_identifier_perm_mac_preferred() {
         - name: eth0
           type: ethernet
           mac-address: ff:ff:ff:ff:ff:ff
-          permanent-mac-address: 00:11:22:33:44:55
+          permanent-mac-address: 02:00:00:00:00:03
         - name: eth1
           type: ethernet
-          mac-address: 00:11:22:33:44:55
+          mac-address: 02:00:00:00:00:03
         "#,
     )
     .unwrap();
@@ -369,7 +369,7 @@ fn test_resolve_mac_identifier_duplicate_mac_across_nics() {
         - name: wan0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:11:22:33:44:55
+          mac-address: 02:00:00:00:00:03
         "#,
     )
     .unwrap();
@@ -378,10 +378,10 @@ fn test_resolve_mac_identifier_duplicate_mac_across_nics() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:11:22:33:44:55
+          mac-address: 02:00:00:00:00:03
         - name: eth1
           type: ethernet
-          mac-address: 00:11:22:33:44:55
+          mac-address: 02:00:00:00:00:03
         "#,
     )
     .unwrap();
@@ -405,7 +405,7 @@ fn test_resolve_mac_identifier_re_resolve_type_change() {
         - name: eth0
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
           profile-name: wan0
         "#,
     )
@@ -415,7 +415,7 @@ fn test_resolve_mac_identifier_re_resolve_type_change() {
         r#"---
         - name: eth1
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -438,7 +438,7 @@ fn test_merge_flow_with_mac_identifier() {
             type: ethernet
             state: up
             identifier: mac-address
-            mac-address: 00:23:45:67:89:1a
+            mac-address: 02:00:00:00:00:01
             ipv4:
               enabled: true
               address:
@@ -453,7 +453,7 @@ fn test_merge_flow_with_mac_identifier() {
         interfaces:
           - name: eth0
             type: ethernet
-            mac-address: 00:23:45:67:89:1a
+            mac-address: 02:00:00:00:00:01
             state: up
         "#,
     )
@@ -482,8 +482,8 @@ fn test_sanitize_mac_address_to_uppercase() {
     let mut base =
         BaseInterface::new("eth0".to_string(), InterfaceType::Ethernet);
     base.identifier = Some(InterfaceIdentifier::MacAddress);
-    base.mac_address = Some("00:23:45:67:89:1b".to_string());
-    base.permanent_mac_address = Some("aa:bb:cc:dd:ee:ff".to_string());
+    base.mac_address = Some("02:00:00:00:00:02".to_string());
+    base.permanent_mac_address = Some("02:00:00:00:00:0c".to_string());
 
     let mut for_save = base.clone();
     let mut for_apply = base.clone();
@@ -500,17 +500,17 @@ fn test_sanitize_mac_address_to_uppercase() {
     )
     .unwrap();
 
-    assert_eq!(for_apply.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
-    assert_eq!(for_verify.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
-    assert_eq!(for_save.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
-    assert_eq!(merged.mac_address.as_deref(), Some("00:23:45:67:89:1B"));
+    assert_eq!(for_apply.mac_address.as_deref(), Some("02:00:00:00:00:02"));
+    assert_eq!(for_verify.mac_address.as_deref(), Some("02:00:00:00:00:02"));
+    assert_eq!(for_save.mac_address.as_deref(), Some("02:00:00:00:00:02"));
+    assert_eq!(merged.mac_address.as_deref(), Some("02:00:00:00:00:02"));
     // permanent_mac_address is query-only, only merged should hold it
     assert_eq!(for_apply.permanent_mac_address.as_deref(), None);
     assert_eq!(for_save.permanent_mac_address.as_deref(), None);
     assert_eq!(for_verify.permanent_mac_address.as_deref(), None);
     assert_eq!(
         merged.permanent_mac_address.as_deref(),
-        Some("AA:BB:CC:DD:EE:FF")
+        Some("02:00:00:00:00:0C")
     );
 }
 
@@ -653,7 +653,7 @@ fn test_route_next_hop_iface_resolves_by_profile_name() {
             type: ethernet
             state: up
             identifier: mac-address
-            mac-address: 00:23:45:67:89:1a
+            mac-address: 02:00:00:00:00:01
         routes:
           config:
             - destination: 0.0.0.0/0
@@ -669,7 +669,7 @@ fn test_route_next_hop_iface_resolves_by_profile_name() {
         interfaces:
           - name: eth0
             type: ethernet
-            mac-address: 00:23:45:67:89:1a
+            mac-address: 02:00:00:00:00:01
             state: up
             ipv4:
               enabled: true
@@ -702,7 +702,7 @@ fn test_route_next_hop_iface_direct_kernel_name() {
             type: ethernet
             state: up
             identifier: mac-address
-            mac-address: 00:23:45:67:89:1a
+            mac-address: 02:00:00:00:00:01
         routes:
           config:
             - destination: 0.0.0.0/0
@@ -718,7 +718,7 @@ fn test_route_next_hop_iface_direct_kernel_name() {
         interfaces:
           - name: eth0
             type: ethernet
-            mac-address: 00:23:45:67:89:1a
+            mac-address: 02:00:00:00:00:01
             state: up
             ipv4:
               enabled: true
@@ -751,7 +751,7 @@ fn test_route_next_hop_iface_absent_by_logical_name() {
             type: ethernet
             state: absent
             identifier: mac-address
-            mac-address: 00:23:45:67:89:1a
+            mac-address: 02:00:00:00:00:01
         routes:
           config:
             - destination: 0.0.0.0/0
@@ -767,7 +767,7 @@ fn test_route_next_hop_iface_absent_by_logical_name() {
         interfaces:
           - name: eth0
             type: ethernet
-            mac-address: 00:23:45:67:89:1a
+            mac-address: 02:00:00:00:00:01
             state: up
         "#,
     )
@@ -1065,11 +1065,11 @@ fn test_bond_resolve_port_ref_by_mac_identifier() {
             - name: port2
         - name: port1
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
           identifier: mac-address
         - name: port2
           type: ethernet
-          mac-address: 00:23:45:67:89:1b
+          mac-address: 02:00:00:00:00:02
           identifier: mac-address"#,
     )
     .unwrap();
@@ -1078,10 +1078,10 @@ fn test_bond_resolve_port_ref_by_mac_identifier() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         - name: eth1
           type: ethernet
-          mac-address: 00:23:45:67:89:1b"#,
+          mac-address: 02:00:00:00:00:02"#,
     )
     .unwrap();
 
@@ -1118,7 +1118,7 @@ fn test_linux_bridge_resolve_port_ref_by_mac_identifier() {
             - name: port1
         - name: port1
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
           identifier: mac-address"#,
     )
     .unwrap();
@@ -1127,7 +1127,7 @@ fn test_linux_bridge_resolve_port_ref_by_mac_identifier() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:23:45:67:89:1a"#,
+          mac-address: 02:00:00:00:00:01"#,
     )
     .unwrap();
 
@@ -1164,7 +1164,7 @@ fn test_ovs_bridge_resolve_port_ref_by_mac_identifier() {
             - name: port1
         - name: port1
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
           identifier: mac-address"#,
     )
     .unwrap();
@@ -1173,7 +1173,7 @@ fn test_ovs_bridge_resolve_port_ref_by_mac_identifier() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         "#,
     )
     .unwrap();
@@ -1209,11 +1209,11 @@ fn test_bond_gen_state_for_apply_and_save() {
         - name: port1
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1a
+          mac-address: 02:00:00:00:00:01
         - name: port2
           type: ethernet
           identifier: mac-address
-          mac-address: 00:23:45:67:89:1b
+          mac-address: 02:00:00:00:00:02
         - name: bond0
           kernel-iface-name: bond0
           type: bond
@@ -1232,12 +1232,12 @@ fn test_bond_gen_state_for_apply_and_save() {
           kernel-iface-name: eth1
           type: ethernet
           state: down
-          mac-address: 00:23:45:67:89:1A
+          mac-address: 02:00:00:00:00:01
         - name: eth2
           kernel-iface-name: eth2
           type: ethernet
           state: down
-          mac-address: 00:23:45:67:89:1B"#,
+          mac-address: 02:00:00:00:00:02"#,
     )
     .unwrap();
 
@@ -1969,13 +1969,13 @@ fn test_saved_mac_identifier_ifaces_kept_when_not_desired() {
         r#"---
         - name: eth0
           type: ethernet
-          mac-address: 00:11:22:33:44:55
+          mac-address: 02:00:00:00:00:03
         - name: eth1
           type: ethernet
-          mac-address: 00:11:22:33:44:66
+          mac-address: 02:00:00:00:00:06
         - name: eth2
           type: ethernet
-          mac-address: 00:11:22:33:44:77
+          mac-address: 02:00:00:00:00:07
         "#,
     )
     .unwrap();
@@ -1987,19 +1987,19 @@ fn test_saved_mac_identifier_ifaces_kept_when_not_desired() {
           type: ethernet
           identifier: mac-address
           state: up
-          mac-address: 00:11:22:33:44:55
+          mac-address: 02:00:00:00:00:03
         - name: nic2
           profile-name: nic2
           type: ethernet
           identifier: mac-address
           state: up
-          mac-address: 00:11:22:33:44:66
+          mac-address: 02:00:00:00:00:06
         - name: nic3
           profile-name: nic3
           type: ethernet
           identifier: mac-address
           state: up
-          mac-address: 00:11:22:33:44:77
+          mac-address: 02:00:00:00:00:07
         - name: TEST-WIFI
           type: wifi-cfg
           state: up
@@ -2894,11 +2894,11 @@ fn test_mac_identifier_bond_port_mac_not_applied_or_verified() {
         - name: port1
           type: ethernet
           identifier: mac-address
-          mac-address: 52:54:00:B8:D9:2A
+          mac-address: 02:00:00:00:00:0a
         - name: port2
           type: ethernet
           identifier: mac-address
-          mac-address: 52:54:00:16:FC:6E
+          mac-address: 02:00:00:00:00:09
         "#,
     )
     .unwrap();
@@ -2919,14 +2919,14 @@ fn test_mac_identifier_bond_port_mac_not_applied_or_verified() {
             - name: enp2s0
         - name: enp1s0
           type: ethernet
-          mac-address: 52:54:00:16:FC:6E
-          permanent-mac-address: 52:54:00:B8:D9:2A
+          mac-address: 02:00:00:00:00:09
+          permanent-mac-address: 02:00:00:00:00:0a
           state: up
           controller: bond1
         - name: enp2s0
           type: ethernet
-          mac-address: 52:54:00:16:FC:6E
-          permanent-mac-address: 52:54:00:16:FC:6E
+          mac-address: 02:00:00:00:00:09
+          permanent-mac-address: 02:00:00:00:00:09
           state: up
           controller: bond1
         "#,
@@ -2972,14 +2972,14 @@ fn test_mac_identifier_bond_port_mac_not_applied_or_verified() {
             - name: enp2s0
         - name: enp1s0
           type: ethernet
-          mac-address: 52:54:00:16:FC:6E
-          permanent-mac-address: 52:54:00:B8:D9:2A
+          mac-address: 02:00:00:00:00:09
+          permanent-mac-address: 02:00:00:00:00:0a
           state: up
           controller: bond1
         - name: enp2s0
           type: ethernet
-          mac-address: 52:54:00:16:FC:6E
-          permanent-mac-address: 52:54:00:16:FC:6E
+          mac-address: 02:00:00:00:00:09
+          permanent-mac-address: 02:00:00:00:00:09
           state: up
           controller: bond1
         "#,
@@ -3008,11 +3008,11 @@ fn test_mac_identifier_bond_port_mac_not_applied_or_verified_transition() {
         - name: port1
           type: ethernet
           identifier: mac-address
-          mac-address: 52:54:00:B8:D9:2A
+          mac-address: 02:00:00:00:00:0a
         - name: port2
           type: ethernet
           identifier: mac-address
-          mac-address: 52:54:00:16:FC:6E
+          mac-address: 02:00:00:00:00:09
         "#,
     )
     .unwrap();
@@ -3021,13 +3021,13 @@ fn test_mac_identifier_bond_port_mac_not_applied_or_verified_transition() {
         r#"---
         - name: enp1s0
           type: ethernet
-          mac-address: 52:54:00:B8:D9:2A
-          permanent-mac-address: 52:54:00:B8:D9:2A
+          mac-address: 02:00:00:00:00:0a
+          permanent-mac-address: 02:00:00:00:00:0a
           state: up
         - name: enp2s0
           type: ethernet
-          mac-address: 52:54:00:16:FC:6E
-          permanent-mac-address: 52:54:00:16:FC:6E
+          mac-address: 02:00:00:00:00:09
+          permanent-mac-address: 02:00:00:00:00:09
           state: up
         "#,
     )
@@ -3071,11 +3071,11 @@ fn test_mac_identifier_bond_port_order_swapped_passes_verify() {
         - name: port1
           type: ethernet
           identifier: mac-address
-          mac-address: 52:54:00:16:FC:6E
+          mac-address: 02:00:00:00:00:09
         - name: port2
           type: ethernet
           identifier: mac-address
-          mac-address: 52:54:00:B8:D9:2A
+          mac-address: 02:00:00:00:00:0a
         "#,
     )
     .unwrap();
@@ -3095,14 +3095,14 @@ fn test_mac_identifier_bond_port_order_swapped_passes_verify() {
             - name: enp2s0
         - name: enp1s0
           type: ethernet
-          mac-address: 52:54:00:16:FC:6E
-          permanent-mac-address: 52:54:00:B8:D9:2A
+          mac-address: 02:00:00:00:00:09
+          permanent-mac-address: 02:00:00:00:00:0a
           state: up
           controller: bond1
         - name: enp2s0
           type: ethernet
-          mac-address: 52:54:00:16:FC:6E
-          permanent-mac-address: 52:54:00:16:FC:6E
+          mac-address: 02:00:00:00:00:09
+          permanent-mac-address: 02:00:00:00:00:09
           state: up
           controller: bond1
         "#,

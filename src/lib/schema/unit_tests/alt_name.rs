@@ -57,7 +57,7 @@ fn test_alt_name_same_as_iface_name_allowed() {
           - name: port1
             type: ethernet
             identifier: mac-address
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
             alt-names:
               - name: port1
               - name: primary
@@ -66,7 +66,7 @@ fn test_alt_name_same_as_iface_name_allowed() {
         interfaces:
           - name: eth1
             type: ethernet
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
         "#,
     );
     assert!(result.is_ok());
@@ -161,7 +161,7 @@ fn test_alt_name_same_as_own_kernel_name_rejected() {
           - name: port1
             type: ethernet
             identifier: mac-address
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
             alt-names:
               - name: enp1s0
         "#,
@@ -169,7 +169,7 @@ fn test_alt_name_same_as_own_kernel_name_rejected() {
         interfaces:
           - name: enp1s0
             type: ethernet
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
         "#,
     );
     let e = result.expect_err("Should reject alt-name == own kernel name");
@@ -211,7 +211,7 @@ fn test_alt_name_keep_existing_on_mac_identified_apply() {
           - name: port1
             type: ethernet
             identifier: mac-address
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
             alt-names:
               - name: port1
               - name: primary
@@ -220,7 +220,7 @@ fn test_alt_name_keep_existing_on_mac_identified_apply() {
         interfaces:
           - name: eth1
             type: ethernet
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
             alt-names:
               - name: port1
         "#,
@@ -292,14 +292,14 @@ fn test_mac_id_kernel_iface_name_rename_keeps_original_as_alt_name() {
           - name: port1
             type: ethernet
             identifier: mac-address
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
             kernel-iface-name: eth0
         "#,
         r#"---
         interfaces:
           - name: enp1s0
             type: ethernet
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
         "#,
     )
     .unwrap();
@@ -322,7 +322,7 @@ fn test_mac_id_kernel_iface_name_no_auto_alt_name_when_desired_defines() {
           - name: port1
             type: ethernet
             identifier: mac-address
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
             kernel-iface-name: eth0
             alt-names:
               - name: primary
@@ -331,7 +331,7 @@ fn test_mac_id_kernel_iface_name_no_auto_alt_name_when_desired_defines() {
         interfaces:
           - name: enp1s0
             type: ethernet
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
         "#,
     )
     .unwrap();
@@ -353,21 +353,21 @@ fn test_mac_id_kernel_iface_name_no_auto_alt_name_when_saved_defines() {
           - name: port1
             type: ethernet
             identifier: mac-address
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
             kernel-iface-name: eth0
         "#,
         r#"---
         interfaces:
           - name: enp1s0
             type: ethernet
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
         "#,
         r#"---
         interfaces:
           - name: port1
             type: ethernet
             identifier: mac-address
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
             kernel-iface-name: eth0
             alt-names:
               - name: primary
@@ -395,14 +395,14 @@ fn test_mac_id_kernel_iface_name_same_as_current_no_rename() {
           - name: port1
             type: ethernet
             identifier: mac-address
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
             kernel-iface-name: enp1s0
         "#,
         r#"---
         interfaces:
           - name: enp1s0
             type: ethernet
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
         "#,
     )
     .unwrap();
@@ -422,14 +422,14 @@ fn test_mac_id_kernel_iface_name_persisted_in_for_save() {
           - name: port1
             type: ethernet
             identifier: mac-address
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
             kernel-iface-name: eth0
         "#,
         r#"---
         interfaces:
           - name: enp1s0
             type: ethernet
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
         "#,
     )
     .unwrap();
@@ -449,13 +449,13 @@ fn test_mac_id_without_kernel_iface_name_not_persisted() {
           - name: port1
             type: ethernet
             identifier: mac-address
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
         "#,
         r#"---
         interfaces:
           - name: enp1s0
             type: ethernet
-            mac-address: 52:54:00:15:17:63
+            mac-address: 02:00:00:00:00:08
         "#,
     )
     .unwrap();

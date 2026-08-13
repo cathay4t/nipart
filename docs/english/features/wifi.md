@@ -49,8 +49,8 @@ interfaces:
     - ip: 192.0.2.6
       prefix-length: 24
   wifi:
-    ssid: SweatHome5G
-    bssid: D0:21:F9:49:B3:52
+    ssid: ExampleNetwork
+    bssid: 02:00:00:00:00:11
     password: <_hidden_>
 ```
 
@@ -101,15 +101,24 @@ Supported authentication types:
 - `WPA3-PSK`: WPA 3 Pre-shared Key using SAE
 - `unknown`: Could not be determined
 
-`npt wifi scan` reports `auth-types` on each `WifiScanResult` entry instead:
+`npt wifi scan` prints a table in the style of `nmcli device wifi list`:
+
+```text
+IN-USE  BSSID              SSID              CHAN  BAND   SIGNAL  BARS  SECURITY
+*       02:00:00:00:00:11  Home              36    5 GHz  78      ▂▄▆_  WPA2
+```
+
+Use `npt wifi scan -y` to print the YAML format.
+
+The underlying `WifiScanResult` schema reports `auth-types` on each entry:
 a list of detailed authentication types, each containing the simplified
 `auth-type` plus the AKM (Authentication and Key Management) and cipher suites
 advertised by the access point, e.g.:
 
 ```yaml
-- ssid: SweatHome5G
+- ssid: ExampleNetwork
   base-iface: wlan0
-  bssid: d0:21:f9:49:b3:52
+  bssid: 02:00:00:00:00:11
   frequency-mhz: 5180
   signal-dbm: -45
   signal-percent: 78

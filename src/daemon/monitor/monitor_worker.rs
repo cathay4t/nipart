@@ -52,7 +52,7 @@ pub(crate) enum NipartMonitorCmd {
     /// Stop monitoring on specified interface
     DelIface(String),
     /// Start monitoring on specified MAC address (uppercase, e.g.
-    /// `00:11:22:33:44:55`): link events of interfaces carrying this MAC
+    /// `02:00:00:00:00:03`): link events of interfaces carrying this MAC
     /// are emitted even when their kernel name is not known yet (saved
     /// `identifier: mac-address` configs whose NIC is not present at boot).
     AddMacWatch(String),
@@ -733,8 +733,8 @@ mod tests {
     #[test]
     fn test_format_mac() {
         assert_eq!(
-            format_mac(&[0x3c, 0xe1, 0xa1, 0xbf, 0xd8, 0x4d]),
-            Some("3C:E1:A1:BF:D8:4D".to_string())
+            format_mac(&[0x02, 0x00, 0x00, 0x00, 0x00, 0x10]),
+            Some("02:00:00:00:00:10".to_string())
         );
         // Addresses of other lengths (e.g. InfiniBand 20 bytes) cannot
         // match an ethernet MAC.
@@ -750,10 +750,10 @@ mod tests {
         let mut worker = gen_worker();
         worker
             .mac_watch_list
-            .insert("3C:E1:A1:BF:D8:4D".to_string());
+            .insert("02:00:00:00:00:10".to_string());
         worker
             .iface_mac
-            .insert("enp4s0".to_string(), "3C:E1:A1:BF:D8:4D".to_string());
+            .insert("enp4s0".to_string(), "02:00:00:00:00:10".to_string());
 
         assert!(worker.event_is_interested(&gen_event("enp4s0")));
 
@@ -761,7 +761,7 @@ mod tests {
         // interested unless the name itself is monitored.
         worker
             .iface_mac
-            .insert("enp4s0".to_string(), "00:11:22:33:44:55".to_string());
+            .insert("enp4s0".to_string(), "02:00:00:00:00:03".to_string());
         assert!(!worker.event_is_interested(&gen_event("enp4s0")));
 
         // Interface without any observed MAC address.
@@ -799,7 +799,7 @@ mod tests {
         // A MAC watch alone keeps the netlink socket alive.
         worker
             .mac_watch_list
-            .insert("3C:E1:A1:BF:D8:4D".to_string());
+            .insert("02:00:00:00:00:10".to_string());
         assert!(!worker.should_pause());
         assert!(worker.should_resume());
 

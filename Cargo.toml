@@ -62,3 +62,6 @@ git = "https://github.com/rust-netlink/rtnetlink"
 
 [workspace.dependencies.futures_channel]
 version = "0.3.30"
+
+[workspace.dependencies.unicode-width]
+version = "0.2.2"
