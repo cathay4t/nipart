@@ -16,19 +16,21 @@ use crate::NipartWpaConn;
 impl NipartWpaConn {
     pub(crate) async fn wifi_scan(
         iface_name: Option<&str>,
+        show_hidden: bool,
     ) -> Result<Vec<WifiScanResult>, NipartError> {
-        if let Ok(r) = _wifi_scan(iface_name).await
+        if let Ok(r) = _wifi_scan(iface_name, show_hidden).await
             && !r.is_empty()
         {
             return Ok(r);
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        _wifi_scan(iface_name).await
+        _wifi_scan(iface_name, show_hidden).await
     }
 }
 
 async fn _wifi_scan(
     iface_name: Option<&str>,
+    show_hidden: bool,
 ) -> Result<Vec<WifiScanResult>, NipartError> {
     // Keep one entry per SSID, merging auth types from all BSSes of the
     // same SSID and keeping the strongest signal.
@@ -74,6 +76,9 @@ async fn _wifi_scan(
             })?;
 
         for (bss_info, ies) in &scan_results {
+            if bss_info.hidden && !show_hidden {
+                continue;
+            }
             let Some(ssid) = extract_ssid(ies) else {
                 continue;
             };

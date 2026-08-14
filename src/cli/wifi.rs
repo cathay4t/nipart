@@ -50,6 +50,12 @@ impl CommandWifi {
                             .long("yaml")
                             .action(clap::ArgAction::SetTrue)
                             .help("Show scan result in YAML format"),
+                    )
+                    .arg(
+                        clap::Arg::new("SHOW_HIDDEN")
+                            .long("show-hidden")
+                            .action(clap::ArgAction::SetTrue)
+                            .help("Show hidden SSIDs in scan result"),
                     ),
             )
             .subcommand(
@@ -81,6 +87,7 @@ impl CommandWifi {
             let mut cli = NipartClient::new().await?;
             let mut opt = NipartWifiScanOption::default();
             opt.iface_name = matches.get_one::<String>("IFACE").cloned();
+            opt.show_hidden = matches.get_flag("SHOW_HIDDEN");
             let active_ssids = match cli
                 .query_network_state(NipartQueryOption::running())
                 .await

@@ -110,6 +110,9 @@ impl NipartApplyOption {
 pub struct NipartWifiScanOption {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub iface_name: Option<String>,
+    /// Show hidden SSIDs in scan results. Default to false.
+    #[serde(default)]
+    pub show_hidden: bool,
 }
 
 impl NipartWifiScanOption {
