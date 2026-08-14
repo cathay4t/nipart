@@ -3446,3 +3446,135 @@ fn test_vrf_port_ip_kept_in_save_when_attached() {
         Some(true),
     );
 }
+
+#[test]
+fn test_description_not_applied_or_verified() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          description: "Main interface connected to switch S1"
+        "#,
+    )
+    .unwrap();
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+    // A description-only change must not trigger a kernel apply.
+    assert!(merged_iface.for_apply.is_none());
+    assert_eq!(merged_iface.for_revert, None);
+    // The description is kept for persistence.
+    assert_eq!(
+        merged_iface
+            .for_save
+            .as_ref()
+            .unwrap()
+            .base_iface()
+            .description
+            .as_deref(),
+        Some("Main interface connected to switch S1")
+    );
+    // The description is not verified.
+    assert_eq!(
+        merged_iface
+            .for_verify
+            .as_ref()
+            .unwrap()
+            .base_iface()
+            .description,
+        None
+    );
+}
+
+#[test]
+fn test_description_kept_in_save_with_real_change() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          description: "Main interface connected to switch S1"
+          mtu: 9000
+        "#,
+    )
+    .unwrap();
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    assert_eq!(for_apply.base_iface().mtu, Some(9000));
+    assert_eq!(for_apply.base_iface().description, None);
+    assert_eq!(
+        merged_iface
+            .for_save
+            .as_ref()
+            .unwrap()
+            .base_iface()
+            .description
+            .as_deref(),
+        Some("Main interface connected to switch S1")
+    );
+}
+
+#[test]
+fn test_description_survives_merge_with_saved_state() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          mtu: 9000
+        "#,
+    )
+    .unwrap();
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+        "#,
+    )
+    .unwrap();
+    let saved: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          description: "Main interface connected to switch S1"
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, Some(saved)).unwrap();
+
+    let merged_iface = merged.kernel_ifaces.get("eth0").unwrap();
+    assert_eq!(
+        merged_iface
+            .for_save
+            .as_ref()
+            .unwrap()
+            .base_iface()
+            .description
+            .as_deref(),
+        Some("Main interface connected to switch S1")
+    );
+}

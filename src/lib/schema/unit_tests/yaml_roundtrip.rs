@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{NetworkState, NipartWaitOnlineCondition};
+use crate::{NetworkState, NipartInterface, NipartWaitOnlineCondition};
 
 fn round_trip(yaml_str: &str) -> (NetworkState, NetworkState) {
     let state = NetworkState::new_from_yaml(yaml_str).unwrap();
@@ -29,6 +29,31 @@ fn test_yaml_round_trip_ethernet_with_ip() {
               dhcp: true
               autoconf: true
         "#,
+    );
+    assert_eq!(state, reparsed);
+}
+
+#[test]
+fn test_yaml_round_trip_interface_description() {
+    let (state, reparsed) = round_trip(
+        r#"---
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            description: "Main interface connected to switch S1"
+        "#,
+    );
+    assert_eq!(
+        state
+            .ifaces
+            .kernel_ifaces
+            .get("eth1")
+            .unwrap()
+            .base_iface()
+            .description
+            .as_deref(),
+        Some("Main interface connected to switch S1")
     );
     assert_eq!(state, reparsed);
 }

@@ -30,4 +30,18 @@ impl Interface {
             }
         }
     }
+
+    /// Generate a diff for the apply action. Same as [Interface::gen_diff],
+    /// but the save-only `description` property is ignored so a
+    /// description-only change does not trigger a kernel apply.
+    pub(crate) fn gen_diff_for_apply(
+        &self,
+        old: &Self,
+    ) -> Result<Option<Self>, NipartError> {
+        let mut desired = self.clone();
+        desired.base_iface_mut().description = None;
+        let mut current = old.clone();
+        current.base_iface_mut().description = None;
+        desired.gen_diff(&current)
+    }
 }

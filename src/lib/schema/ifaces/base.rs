@@ -35,6 +35,11 @@ pub struct BaseInterface {
     /// [InterfaceIdentifier::MacAddress].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_name: Option<String>,
+    /// Interface description. This is a save-only property: it is persisted
+    /// in the saved state but never applied to the kernel or checked during
+    /// verification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     // TODO: To simplify the code and workflow, we ask user to always define
     //       interface type. Let's heard feedback or use case to release
     //       this restriction.
@@ -119,6 +124,9 @@ impl BaseInterface {
     ) -> Result<(), NipartError> {
         let desired = self;
         self.fill_for_apply_ip_config(current, saved, for_save, for_apply);
+        // `description` is save-only, never applied to kernel nor verified.
+        for_apply.description = None;
+        for_verify.description = None;
         // Ignore MAC address if not InterfaceIdentifier::MacAddress
         if for_apply.identifier != Some(InterfaceIdentifier::MacAddress)
             && for_apply.mac_address.is_some()
@@ -413,6 +421,8 @@ impl BaseInterface {
     pub(crate) fn sanitize_before_verify(&mut self, current: &mut Self) {
         self.identifier = None;
         self.profile_name = None;
+        self.description = None;
+        current.description = None;
         self.kernel_iface_name.clear();
         self.controller_type = None;
         if let Some(des_ipv4) = self.ipv4.as_mut()

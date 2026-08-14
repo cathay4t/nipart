@@ -3,6 +3,7 @@
 * [Nipart 基础接口支持](#nipart-基础接口支持)
     * [`name`：接口名称](#name接口名称)
     * [`type`：接口类型](#type接口类型)
+    * [`description` - 接口描述](#description---接口描述)
     * [`iface-index` - 接口索引](#iface-index---接口索引)
     * [`state` - 接口状态](#state---接口状态)
     * [`link-state`：链路状态](#link-state链路状态)
@@ -26,6 +27,7 @@ version: 1
 interfaces:
 - name: eth1
   type: veth
+  description: Main interface connected to switch S1
   iface-index: 8
   state: up
   link-state: up
@@ -49,6 +51,13 @@ interfaces:
 ## `type`：接口类型
 
 接口的类型，例如 `veth`、`bond`、`bridge` 等。
+
+## `description` - 接口描述
+
+保存专用属性。该属性会保存在已保存状态中，并会在运行状态查询中显示，
+但不会应用到内核，也不会在验证时检查。
+
+将其设置为空字符串可清除已保存的描述。
 
 ## `iface-index` - 接口索引
 
