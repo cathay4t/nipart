@@ -15,13 +15,18 @@ from .dhcp import DHCP_SRV_NIC
 
 HWSIM0_PERM_MAC = "02:00:00:00:00:00"
 HWSIM1_PERM_MAC = "02:00:00:00:01:00"
+HWSIM2_PERM_MAC = "02:00:00:00:02:00"
 TEST_NET_NS = "wifi-test"
 TEST_WIFI_SSID = "Test-WIFI"
 TEST_WIFI_PSK = "12345678"
 TEST_WIFI_SSID_OPEN = "Test-WIFI-NOPASS"
 TEST_WIFI_SSID_WPA3 = "Test-WIFI3"
+TEST_WIFI_SSID_2 = "Test-WIFI-2"
 HOSTAPD_PID_PATH = "/tmp/nipart_test_hostapd.pid"
 HOSTAPD_CONF_PATH = "/tmp/nipart_test_hostapd.conf"
+HOSTAPD_PID_PATH_2 = "/tmp/nipart_test_hostapd2.pid"
+HOSTAPD_CONF_PATH_2 = "/tmp/nipart_test_hostapd2.conf"
+AP2_NIC = "dhcp_srv2"
 HOSTAPD_CONF = f"""
 interface={DHCP_SRV_NIC}
 driver=nl80211
@@ -42,6 +47,17 @@ driver=nl80211
 hw_mode=g
 channel=1
 ssid={TEST_WIFI_SSID_OPEN}
+
+wpa=0
+auth_algs=1
+"""
+HOSTAPD_CONF_2 = f"""
+interface={AP2_NIC}
+driver=nl80211
+
+hw_mode=g
+channel=1
+ssid={TEST_WIFI_SSID_2}
 
 wpa=0
 auth_algs=1
@@ -163,7 +179,7 @@ def has_sim_wifi_nics():
     return wlan1 and wlan2
 
 
-def start_hostapd(timeout=2):
+def start_hostapd(timeout=2, with_dhcp=True):
     phy_id = get_wifi_phy_name(DHCP_SRV_NIC)
     assert phy_id
     # Move phy2 to namespace with hostpad
@@ -182,7 +198,8 @@ def start_hostapd(timeout=2):
 
     assert retry_till_true_or_timeout(timeout, hostapd_is_up)
 
-    start_dhcp_server(TEST_NET_NS)
+    if with_dhcp:
+        start_dhcp_server(TEST_NET_NS)
 
 
 def hostapd_is_up():
@@ -195,14 +212,36 @@ def hostapd_is_up_open():
     return TEST_WIFI_SSID_OPEN in output
 
 
+def hostapd_is_up_2():
+    output = exec_cmd(f"iw {WIFI_TEST_NIC} scan".split(), check=False)[1]
+    return TEST_WIFI_SSID_2 in output
+
+
+def start_hostapd_2():
+    """Start a second open AP (`AP2_NIC`) in the test netns, next to the
+    AP already started by `start_hostapd()`."""
+    phy_id = get_wifi_phy_name(AP2_NIC)
+    assert phy_id
+    exec_cmd(f"iw phy#{phy_id} set netns name {TEST_NET_NS}".split())
+    exec_cmd(f"ip netns exec {TEST_NET_NS} ip link set {AP2_NIC} up".split())
+    with open(HOSTAPD_CONF_PATH_2, "w") as fd:
+        fd.write(HOSTAPD_CONF_2)
+
+    exec_cmd(
+        f"ip netns exec {TEST_NET_NS} "
+        f"hostapd -B -d {HOSTAPD_CONF_PATH_2} "
+        f"-P {HOSTAPD_PID_PATH_2}".split(),
+    )
+
+    assert retry_till_true_or_timeout(2, hostapd_is_up_2)
+
+
 def start_hostapd_open(net_ns):
     phy_id = get_wifi_phy_name(DHCP_SRV_NIC)
     assert phy_id
     exec_cmd(f"iw phy#{phy_id} set netns name {net_ns}".split())
     exec_cmd(f"ip link set {WIFI_TEST_NIC} up".split())
-    exec_cmd(
-        f"ip netns exec {net_ns} ip link set {DHCP_SRV_NIC} up".split()
-    )
+    exec_cmd(f"ip netns exec {net_ns} ip link set {DHCP_SRV_NIC} up".split())
     with open(HOSTAPD_CONF_PATH, "w") as fd:
         fd.write(HOSTAPD_CONF_OPEN)
 
@@ -226,9 +265,7 @@ def start_hostapd_wpa3(net_ns):
     assert phy_id
     exec_cmd(f"iw phy#{phy_id} set netns name {net_ns}".split())
     exec_cmd(f"ip link set {WIFI_TEST_NIC} up".split())
-    exec_cmd(
-        f"ip netns exec {net_ns} ip link set {DHCP_SRV_NIC} up".split()
-    )
+    exec_cmd(f"ip netns exec {net_ns} ip link set {DHCP_SRV_NIC} up".split())
     with open(HOSTAPD_CONF_PATH, "w") as fd:
         fd.write(HOSTAPD_CONF_WPA3)
 

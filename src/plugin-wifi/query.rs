@@ -38,9 +38,9 @@ impl NipartWpaConn {
     ) -> Result<(), NipartError> {
         // Without wpa_supplicant, we no longer have a persistent
         // record of configured networks.  Connection state is
-        // managed by shuli WifiClient instances spawned during
-        // apply.  Full query support will be added with the
-        // connection manager in a future release.
+        // managed by the per-phy shuli WifiClient drivers owned by
+        // the apply worker.  Full query support will be added with
+        // the connection manager in a future release.
         Ok(())
     }
 }
