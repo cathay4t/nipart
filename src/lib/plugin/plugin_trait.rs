@@ -26,15 +26,6 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
 
     /// The `&self` will cloned and move to forked thread for each connection.
     fn run() -> impl Future<Output = Result<(), NipartError>> + Send {
-        let mut log_builder = env_logger::Builder::new();
-        log_builder.filter(Some("nipart"), log::LevelFilter::Debug);
-        log_builder.filter(Some("nipart_plugin"), log::LevelFilter::Debug);
-        log_builder.filter(
-            Some(&format!("nipart-plugin-{}", Self::PLUGIN_NAME)),
-            log::LevelFilter::Debug,
-        );
-        log_builder.init();
-
         // TODO(Gris Ge): Do we need to ping daemon to make sure daemon is
         // still alive?
         async {
