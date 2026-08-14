@@ -22,6 +22,7 @@ TEST_WIFI_PSK = "12345678"
 TEST_WIFI_SSID_OPEN = "Test-WIFI-NOPASS"
 TEST_WIFI_SSID_WPA3 = "Test-WIFI3"
 TEST_WIFI_SSID_2 = "Test-WIFI-2"
+TEST_WIFI_SSID_HIDDEN = "Test-WIFI-HIDDEN"
 HOSTAPD_PID_PATH = "/tmp/nipart_test_hostapd.pid"
 HOSTAPD_CONF_PATH = "/tmp/nipart_test_hostapd.conf"
 HOSTAPD_PID_PATH_2 = "/tmp/nipart_test_hostapd2.pid"
@@ -78,6 +79,20 @@ rsn_pairwise=CCMP
 wpa_passphrase={TEST_WIFI_PSK}
 ieee80211w=2
 sae_pwe=1
+"""
+HOSTAPD_CONF_HIDDEN = f"""
+interface={DHCP_SRV_NIC}
+driver=nl80211
+
+hw_mode=g
+channel=1
+ssid={TEST_WIFI_SSID_HIDDEN}
+ignore_broadcast_ssid=1
+
+wpa=2
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=CCMP
+wpa_passphrase={TEST_WIFI_PSK}
 """
 TIMEOUT_SECS_SIM_WIFI_NICS = 30
 WIFI_TEST_NIC = "test-wlan0"
@@ -260,6 +275,17 @@ def hostapd_is_up_wpa3():
     return TEST_WIFI_SSID_WPA3 in output
 
 
+def hostapd_is_up_hidden():
+    output = exec_cmd(f"iw {WIFI_TEST_NIC} scan".split(), check=False)[1]
+    if TEST_WIFI_SSID_HIDDEN in output:
+        return False
+    output = exec_cmd(
+        f"iw {WIFI_TEST_NIC} scan ssid {TEST_WIFI_SSID_HIDDEN}".split(),
+        check=False,
+    )[1]
+    return TEST_WIFI_SSID_HIDDEN in output
+
+
 def start_hostapd_wpa3(net_ns):
     phy_id = get_wifi_phy_name(DHCP_SRV_NIC)
     assert phy_id
@@ -275,5 +301,24 @@ def start_hostapd_wpa3(net_ns):
     )
 
     assert retry_till_true_or_timeout(2, hostapd_is_up_wpa3)
+
+    start_dhcp_server(net_ns)
+
+
+def start_hostapd_hidden(net_ns):
+    phy_id = get_wifi_phy_name(DHCP_SRV_NIC)
+    assert phy_id
+    exec_cmd(f"iw phy#{phy_id} set netns name {net_ns}".split())
+    exec_cmd(f"ip link set {WIFI_TEST_NIC} up".split())
+    exec_cmd(f"ip netns exec {net_ns} ip link set {DHCP_SRV_NIC} up".split())
+    with open(HOSTAPD_CONF_PATH, "w") as fd:
+        fd.write(HOSTAPD_CONF_HIDDEN)
+
+    exec_cmd(
+        f"ip netns exec {net_ns} "
+        f"hostapd -B -d {HOSTAPD_CONF_PATH} -P {HOSTAPD_PID_PATH}".split(),
+    )
+
+    assert retry_till_true_or_timeout(2, hostapd_is_up_hidden)
 
     start_dhcp_server(net_ns)
