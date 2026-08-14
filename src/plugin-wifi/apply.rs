@@ -1,50 +1,177 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use nipart::{
     ErrorKind, Interface, InterfaceType, NipartError, NipartInterface,
     WifiConfig,
 };
+use shuli::{
+    NetworkConfig as ShuliNetworkConfig, WifiClient,
+    WifiConfig as ShuliWifiConfig, WifiState,
+};
+use tokio::{
+    sync::{
+        Notify,
+        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    },
+    task::JoinHandle,
+};
 
 use crate::NipartWpaConn;
 
-/// A live wifi connection managed by the plugin: the SSID it is
-/// connected to, the keep-alive task owning the shuli `WifiClient`,
-/// and a notification used to request a clean disconnect.
+/// A live wifi client managed by the plugin: one long-lived shuli
+/// `WifiClient` per wifi-phy interface, reused across SSID changes.
+/// The driver task owns the client; the apply worker only sends it the
+/// new network list.
 pub(crate) struct WifiConn {
-    pub(crate) ssid: String,
-    shutdown: std::sync::Arc<tokio::sync::Notify>,
-    pub(crate) task: tokio::task::JoinHandle<()>,
+    iface_name: String,
+    desired_networks: Vec<ShuliNetworkConfig>,
+    cmd_tx: UnboundedSender<WifiConnCmd>,
+    shutdown: Arc<Notify>,
+    pub(crate) task: JoinHandle<()>,
+}
+
+enum WifiConnCmd {
+    SetNetworks(Vec<ShuliNetworkConfig>),
 }
 
 impl WifiConn {
-    /// Ask the keep-alive task to cleanly disconnect from the AP and
-    /// wait until the DISCONNECT has been sent to the kernel.
+    fn new(
+        iface_name: String,
+        desired_networks: Vec<ShuliNetworkConfig>,
+        client: WifiClient,
+    ) -> Self {
+        let (cmd_tx, cmd_rx) = unbounded_channel();
+        let shutdown = Arc::new(Notify::new());
+        let task = tokio::spawn(run_driver(
+            iface_name.clone(),
+            client,
+            cmd_rx,
+            shutdown.clone(),
+        ));
+        Self {
+            iface_name,
+            desired_networks,
+            cmd_tx,
+            shutdown,
+            task,
+        }
+    }
+
+    fn has_same_networks(&self, networks: &[ShuliNetworkConfig]) -> bool {
+        self.desired_networks == networks
+    }
+
+    /// Ask the driver to replace the network list. Returns `false` when
+    /// the driver is already gone (e.g. it errored out).
+    async fn set_networks(
+        &mut self,
+        networks: Vec<ShuliNetworkConfig>,
+    ) -> bool {
+        if self
+            .cmd_tx
+            .send(WifiConnCmd::SetNetworks(networks.clone()))
+            .is_err()
+        {
+            log::warn!("WIFI driver for {} is gone", self.iface_name);
+            return false;
+        }
+        self.desired_networks = networks;
+        true
+    }
+
+    /// Ask the driver to cleanly disconnect from the AP and wait until
+    /// the DISCONNECT has been sent to the kernel.
     pub(crate) async fn disconnect(self) {
         self.shutdown.notify_one();
         let _ = self.task.await;
     }
 }
 
-/// Number of `WifiClient::run()` steps to attempt when connecting
-/// before giving up.  Each step advances the shuli state machine
-/// (scan → authenticate → connected) or waits out a retry backoff,
-/// so the wall-clock time is roughly 3+ minutes per connect attempt.
-const CONNECT_TIMEOUT_ITERS: u32 = 30;
+/// Drive one wifi-phy's `WifiClient` for the lifetime of the plugin:
+/// keep calling `run()` so the connection persists, apply network-list
+/// updates between runs, and cleanly disconnect on shutdown.
+async fn run_driver(
+    iface_name: String,
+    mut client: WifiClient,
+    mut cmd_rx: UnboundedReceiver<WifiConnCmd>,
+    shutdown: Arc<Notify>,
+) {
+    // While no network is desired, `run()` is not called at all: the
+    // client idles (and `update_networks` already disconnected).
+    let mut has_networks = true;
+    loop {
+        tokio::select! {
+            biased;
+            _ = shutdown.notified() => {
+                log::info!("Disconnecting WIFI on {iface_name}");
+                client.shutdown().await;
+                break;
+            }
+            cmd = cmd_rx.recv() => {
+                let Some(cmd) = cmd else {
+                    log::info!("WIFI driver channel closed on {iface_name}");
+                    break;
+                };
+                match cmd {
+                    WifiConnCmd::SetNetworks(networks) => {
+                        has_networks = !networks.is_empty();
+                        if let Err(e) =
+                            client.update_networks(networks).await
+                        {
+                            log::warn!(
+                                "WIFI {iface_name} failed to update \
+                                 networks: {e}"
+                            );
+                        }
+                    }
+                }
+            }
+            result = client.run(), if has_networks => {
+                match result {
+                    Ok(
+                        WifiState::ConnectedWithoutOffloadRekey
+                        | WifiState::ConnectedWithOffloadRekey,
+                    ) => {
+                        log::info!(
+                            "WIFI connected on {iface_name}: {}",
+                            client.current_ssid()
+                        );
+                    }
+                    Ok(WifiState::Failed) => {
+                        log::warn!(
+                            "WIFI {iface_name} connection failed, retrying"
+                        );
+                    }
+                    Ok(WifiState::FailedAuthentication) => {
+                        log::error!(
+                            "WIFI {iface_name} authentication failed, \
+                             retrying"
+                        );
+                    }
+                    Ok(state) => {
+                        log::trace!("WIFI {iface_name} state: {state:?}");
+                    }
+                    Err(e) => {
+                        log::warn!("WIFI {iface_name} error: {e}");
+                    }
+                }
+            }
+        }
+    }
+}
 
 impl NipartWpaConn {
     pub(crate) async fn apply(
         ifaces: &[Interface],
         wifi_conns: &mut HashMap<String, WifiConn>,
     ) -> Result<(), NipartError> {
-        // Drop entries whose keep-alive task has already ended (e.g.
-        // authentication failure): those connections are already gone.
+        // Drop entries whose driver task has already ended.
         wifi_conns.retain(|_, conn| !conn.task.is_finished());
-
-        let mut ssids_to_delete: HashSet<&str> = HashSet::new();
-        let mut iface_names_to_delete: HashSet<&str> = HashSet::new();
-        let mut wifi_cfg_to_add: Vec<(&str, &WifiConfig)> = Vec::new();
 
         let available_wifi_phys: Vec<String> = {
             let mut filter = nispor::NetStateFilter::minimum();
@@ -62,6 +189,12 @@ impl NipartWpaConn {
             ret
         };
 
+        // Group every desired wifi config by the phy it binds to. All
+        // SSIDs of one phy go into a single shuli network list.
+        let mut desired: HashMap<String, Vec<&WifiConfig>> = HashMap::new();
+        let mut iface_names_to_delete: HashSet<&str> = HashSet::new();
+        let mut ssids_to_delete: HashSet<&str> = HashSet::new();
+
         for iface in ifaces {
             let wifi_cfg = match iface {
                 Interface::WifiCfg(iface) => iface.wifi.as_ref(),
@@ -71,35 +204,17 @@ impl NipartWpaConn {
             if iface.is_absent() || iface.is_down() {
                 if iface.iface_type() == &InterfaceType::WifiPhy {
                     iface_names_to_delete.insert(iface.kernel_iface_name());
+                } else if let Some(wifi_cfg) = wifi_cfg {
+                    // wifi-cfg removal: drop the SSID from every phy
+                    // that currently has it configured.
+                    ssids_to_delete.insert(wifi_cfg.ssid.as_str());
                 } else {
-                    let ssid = if let Some(s) =
-                        wifi_cfg.as_ref().map(|w| w.ssid.as_str())
-                    {
-                        s
-                    } else {
-                        iface.name()
-                    };
-                    ssids_to_delete.insert(ssid);
+                    // An absent wifi-cfg strips its wifi section; the
+                    // profile name is the SSID it was created for.
+                    ssids_to_delete.insert(iface.name());
                 }
-            } else if iface.is_up() {
-                let Some(wifi_cfg) = wifi_cfg else {
-                    continue;
-                };
-                log::trace!("Applying {wifi_cfg}");
-                if iface.iface_type() == &InterfaceType::WifiPhy {
-                    wifi_cfg_to_add.push((iface.kernel_iface_name(), wifi_cfg));
-                } else if let Some(iface_name) = wifi_cfg.base_iface.as_ref() {
-                    wifi_cfg_to_add.push((iface_name, wifi_cfg));
-                } else if let Some(iface_name) = available_wifi_phys.first() {
-                    wifi_cfg_to_add.push((iface_name, wifi_cfg));
-                } else {
-                    log::warn!(
-                        "WifiCfg interface {} has no base_iface specified, no \
-                         wifi-phy available to bind to",
-                        iface.name()
-                    );
-                }
-            } else {
+                continue;
+            } else if !iface.is_up() {
                 return Err(NipartError::new(
                     ErrorKind::Bug,
                     format!(
@@ -108,44 +223,96 @@ impl NipartWpaConn {
                     ),
                 ));
             }
-        }
-
-        if !ssids_to_delete.is_empty() || !iface_names_to_delete.is_empty() {
-            log::info!(
-                "Disconnect requested for ssids={ssids_to_delete:?} \
-                 ifaces={iface_names_to_delete:?}"
-            );
-        }
-        for iface_name in &iface_names_to_delete {
-            disconnect_iface(iface_name, wifi_conns).await;
-        }
-        for ssid in &ssids_to_delete {
-            disconnect_ssid(ssid, wifi_conns).await;
-        }
-
-        for (iface_name, wifi_cfg) in &wifi_cfg_to_add {
-            // Idempotency: re-applying the same SSID on a live
-            // connection is a no-op.
-            if let Some(conn) = wifi_conns.get(*iface_name)
-                && conn.ssid == wifi_cfg.ssid
-            {
-                log::info!(
-                    "Already connected to WIFI SSID {} on {}",
-                    wifi_cfg.ssid,
-                    iface_name
+            let Some(wifi_cfg) = wifi_cfg else {
+                continue;
+            };
+            log::trace!("Applying {wifi_cfg}");
+            let iface_name = if iface.iface_type() == &InterfaceType::WifiPhy {
+                iface.kernel_iface_name().to_string()
+            } else if let Some(iface_name) = wifi_cfg.base_iface.as_ref() {
+                iface_name.clone()
+            } else if let Some(iface_name) = available_wifi_phys.first() {
+                iface_name.clone()
+            } else {
+                log::warn!(
+                    "WifiCfg interface {} has no base_iface specified, no \
+                     wifi-phy available to bind to",
+                    iface.name()
                 );
                 continue;
-            }
-            // A new config replaces any existing connection on the
-            // interface: disconnect the old one (waiting for its
-            // DISCONNECT to reach the kernel) before connecting.
+            };
+            desired.entry(iface_name).or_default().push(wifi_cfg);
+        }
+
+        for iface_name in &iface_names_to_delete {
             if let Some(conn) = wifi_conns.remove(*iface_name) {
+                log::info!("Disconnecting WIFI on {iface_name}");
                 conn.disconnect().await;
             }
-            let client = connect_wifi(iface_name, wifi_cfg).await?;
+        }
+
+        // Update the clients that already exist: same list is a no-op,
+        // a changed list is sent to the driver.
+        let mut stale: Vec<String> = Vec::new();
+        let iface_names: Vec<String> = wifi_conns.keys().cloned().collect();
+        for iface_name in iface_names {
+            let Some(conn) = wifi_conns.get_mut(&iface_name) else {
+                continue;
+            };
+            // An apply that does not mention this phy (e.g. the daemon
+            // re-applying the IP config of a wifi-phy after link up)
+            // must not tear the connection down: only explicit
+            // absent/down wifi-cfg entries remove SSIDs.
+            let networks = match desired.get(&iface_name) {
+                Some(wifi_cfgs) => build_shuli_networks(wifi_cfgs)?,
+                None => {
+                    let mut networks = conn.desired_networks.clone();
+                    networks.retain(|network| {
+                        !ssids_to_delete.contains(network.ssid.as_str())
+                    });
+                    networks
+                }
+            };
+            if conn.has_same_networks(&networks) {
+                log::info!("WIFI networks on {iface_name} unchanged");
+                continue;
+            }
+            if networks.is_empty() {
+                log::info!(
+                    "No WIFI network desired on {iface_name}, disconnecting"
+                );
+            }
+            if !conn.set_networks(networks).await {
+                stale.push(iface_name);
+            }
+        }
+        for iface_name in stale {
+            if let Some(conn) = wifi_conns.remove(&iface_name) {
+                conn.disconnect().await;
+            }
+        }
+
+        // Start a client for phys that appear in the desired state for
+        // the first time. The client is kept alive across later SSID
+        // changes: only its network list is updated.
+        for (iface_name, wifi_cfgs) in &desired {
+            if wifi_conns.contains_key(iface_name) {
+                continue;
+            }
+            let networks = build_shuli_networks(wifi_cfgs)?;
+            let mut shuli_cfg = ShuliWifiConfig::new(iface_name);
+            shuli_cfg.networks = networks.clone();
+            let client = match WifiClient::init(shuli_cfg).await {
+                Ok(client) => client,
+                Err(e) => {
+                    log::error!("WIFI init failed on {iface_name}: {e}");
+                    continue;
+                }
+            };
+            log::info!("Starting WIFI client on {iface_name}");
             wifi_conns.insert(
-                (*iface_name).to_string(),
-                spawn_keep_connected(iface_name, wifi_cfg.ssid.clone(), client),
+                iface_name.clone(),
+                WifiConn::new(iface_name.clone(), networks, client),
             );
         }
 
@@ -153,151 +320,69 @@ impl NipartWpaConn {
     }
 }
 
-async fn disconnect_iface(
-    iface_name: &str,
-    wifi_conns: &mut HashMap<String, WifiConn>,
-) {
-    if let Some(conn) = wifi_conns.remove(iface_name) {
-        log::info!("Disconnecting WIFI on {iface_name}");
-        conn.disconnect().await;
-    }
-}
-
-async fn disconnect_ssid(
-    ssid: &str,
-    wifi_conns: &mut HashMap<String, WifiConn>,
-) {
-    let iface_names: Vec<String> = wifi_conns
-        .iter()
-        .filter(|(_, conn)| conn.ssid == ssid)
-        .map(|(iface_name, _)| iface_name.clone())
-        .collect();
-    for iface_name in iface_names {
-        if let Some(conn) = wifi_conns.remove(&iface_name) {
-            log::info!("Disconnecting WIFI SSID {ssid} on {iface_name}");
-            conn.disconnect().await;
-        }
-    }
-}
-
-/// Connect to the WIFI network and return the live `WifiClient` on
-/// success.  The caller must keep the client alive (via
-/// [`spawn_keep_connected`]) for the connection to persist: dropping
-/// it would make shuli send `NL80211_CMD_DISCONNECT`.
-async fn connect_wifi(
-    iface_name: &str,
-    wifi_cfg: &WifiConfig,
-) -> Result<shuli::WifiClient, NipartError> {
-    let ssid = wifi_cfg.ssid.clone();
-    log::info!("Connecting to WIFI SSID {ssid} on {iface_name}");
-
-    let mut config = shuli::WifiConfig::new(iface_name);
-    config.add_network(&ssid, wifi_cfg.password.as_deref());
-
-    let mut client = shuli::WifiClient::init(config).await.map_err(|e| {
-        NipartError::new(ErrorKind::PluginFailure, format!("shuli init: {e}"))
-    })?;
-
-    for i in 0..CONNECT_TIMEOUT_ITERS {
-        match client.run().await {
-            Ok(shuli::WifiState::ConnectedWithoutOffloadRekey)
-            | Ok(shuli::WifiState::ConnectedWithOffloadRekey) => {
-                log::info!("Connected to WIFI SSID {ssid} on {iface_name}");
-                return Ok(client);
-            }
-            Ok(shuli::WifiState::Failed) => {
-                log::debug!(
-                    "WIFI connect {ssid} failed, retry {}/{}",
-                    i + 1,
-                    CONNECT_TIMEOUT_ITERS
-                );
-            }
-            Ok(shuli::WifiState::FailedAuthentication) => {
+/// Convert nipart wifi configs into one shuli network list, keeping the
+/// order of the desired interfaces and de-duplicating SSIDs. Conflicting
+/// credentials for the same SSID on the same phy are an error.
+fn build_shuli_networks(
+    wifi_cfgs: &[&WifiConfig],
+) -> Result<Vec<ShuliNetworkConfig>, NipartError> {
+    let mut ret: Vec<ShuliNetworkConfig> = Vec::new();
+    for wifi_cfg in wifi_cfgs {
+        if let Some(existing) = ret.iter().find(|n| n.ssid == wifi_cfg.ssid) {
+            if existing.password.as_deref() != wifi_cfg.password.as_deref() {
                 return Err(NipartError::new(
-                    ErrorKind::PluginFailure,
-                    format!("WIFI authentication failed for SSID {ssid}"),
+                    ErrorKind::InvalidArgument,
+                    format!(
+                        "Conflicting WIFI config for SSID {} on the same \
+                         interface",
+                        wifi_cfg.ssid
+                    ),
                 ));
             }
-            Ok(state) => {
-                log::trace!("WIFI {ssid} state: {state:?}");
-            }
-            Err(e) => {
-                log::warn!("WIFI {ssid} error: {e}");
-            }
+            log::debug!("Ignoring duplicate WIFI SSID {}", wifi_cfg.ssid);
+            continue;
+        }
+        let mut network = ShuliNetworkConfig::new(&wifi_cfg.ssid);
+        if let Some(password) = wifi_cfg.password.as_deref() {
+            network.set_password(password);
+        }
+        ret.push(network);
+    }
+    Ok(ret)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wifi_cfg(ssid: &str, password: Option<&str>) -> WifiConfig {
+        WifiConfig {
+            ssid: ssid.to_string(),
+            password: password.map(str::to_string),
+            ..Default::default()
         }
     }
 
-    Err(NipartError::new(
-        ErrorKind::PluginFailure,
-        format!("Timeout connecting to WIFI SSID {ssid} on {iface_name}"),
-    ))
-}
+    #[test]
+    fn build_shuli_networks_keeps_order_and_dedupes() {
+        let cfgs = [
+            wifi_cfg("A", None),
+            wifi_cfg("B", Some("secret")),
+            wifi_cfg("A", None),
+        ];
+        let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+        let networks = build_shuli_networks(&refs).unwrap();
+        assert_eq!(networks.len(), 2);
+        assert_eq!(networks[0].ssid, "A");
+        assert_eq!(networks[0].password, None);
+        assert_eq!(networks[1].ssid, "B");
+        assert_eq!(networks[1].password.as_deref(), Some("secret"));
+    }
 
-/// Spawn the keep-alive task for a freshly connected `WifiClient` and
-/// return its [`WifiConn`] handle.  The task owns the client and keeps
-/// calling `WifiClient::run()` so the connection persists: `run()`
-/// drains nl80211 events (GTK rekeys, disconnects) while connected,
-/// and reconnects automatically after a transient failure.  On
-/// [`WifiConn::disconnect`] (or plugin shutdown) the task sends a
-/// clean, awaited `NL80211_CMD_DISCONNECT` and exits promptly, waking
-/// out of any `run()` backoff sleep.
-fn spawn_keep_connected(
-    iface_name: &str,
-    ssid: String,
-    client: shuli::WifiClient,
-) -> WifiConn {
-    let shutdown = std::sync::Arc::new(tokio::sync::Notify::new());
-    let task_shutdown = shutdown.clone();
-    let iface_name = iface_name.to_string();
-    let task = tokio::spawn(async move {
-        let mut client = client;
-        loop {
-            // `biased` is required: the shutdown branch must be polled
-            // first so a notification is never lost to a concurrently
-            // completing `run()` (which would leave no stored permit
-            // and hang the caller's `WifiConn::disconnect()`).
-            tokio::select! {
-                biased;
-                _ = task_shutdown.notified() => {
-                    log::info!("Disconnecting WIFI on {iface_name}");
-                    client.shutdown().await;
-                    break;
-                }
-                result = client.run() => match result {
-                    Ok(shuli::WifiState::ConnectedWithoutOffloadRekey)
-                    | Ok(shuli::WifiState::ConnectedWithOffloadRekey) => {
-                        // Connection is up; run() keeps draining events.
-                    }
-                    Ok(shuli::WifiState::Failed) => {
-                        // run() already slept and reset to Init; the
-                        // next iteration will try to reconnect.
-                    }
-                    Ok(shuli::WifiState::FailedAuthentication) => {
-                        log::error!(
-                            "WIFI authentication failed on {iface_name}, \
-                             giving up"
-                        );
-                        // The client is dropped here, so shuli's `Drop`
-                        // sends the disconnect on a detached thread
-                        // (best-effort).  The connection is not up, so
-                        // this is equivalent to the clean path above.
-                        break;
-                    }
-                    Ok(state) => {
-                        log::trace!(
-                            "WIFI {iface_name} keep-alive state: {state:?}"
-                        );
-                    }
-                    Err(e) => {
-                        log::warn!("WIFI {iface_name} keep-alive error: {e}");
-                    }
-                },
-            }
-        }
-    });
-    WifiConn {
-        ssid,
-        shutdown,
-        task,
+    #[test]
+    fn build_shuli_networks_rejects_conflicting_password() {
+        let cfgs = [wifi_cfg("A", Some("one")), wifi_cfg("A", Some("two"))];
+        let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+        assert!(build_shuli_networks(&refs).is_err());
     }
 }

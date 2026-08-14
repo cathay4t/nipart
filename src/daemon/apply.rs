@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use nipart::{
-    Interface, MergedNetworkState, NetworkState, NipartApplyOption,
-    NipartError, NipartInterface, NipartIpcConnection, NipartNoDaemon,
+    Interface, InterfaceType, MergedNetworkState, NetworkState,
+    NipartApplyOption, NipartError, NipartInterface, NipartIpcConnection,
+    NipartNoDaemon,
 };
 
 use super::commander::NipartCommander;
@@ -170,21 +171,26 @@ impl NipartCommander {
             .await?;
         // The wifi config is not stored into config manager yet. In order to
         // pass the verification, we need to pretend the wifi config is stored
-        // in config manager.
-        for iface in merged_state.ifaces.user_ifaces.values().filter_map(
-            |merged_iface| {
-                if let Some(Interface::WifiCfg(iface)) =
-                    merged_iface.desired.as_ref()
-                {
-                    Some(iface)
-                } else {
-                    None
-                }
-            },
-        ) {
-            post_apply_current_state
-                .ifaces
-                .push(Interface::WifiCfg(Box::new(*iface.clone())));
+        // in config manager.  An absent/down wifi-cfg must not be injected:
+        // it is a virtual interface, so verification would reject it as
+        // still present after the removal.
+        for merged_iface in merged_state.ifaces.user_ifaces.values() {
+            let Some(Interface::WifiCfg(iface)) = merged_iface.desired.as_ref()
+            else {
+                continue;
+            };
+            if iface.is_up() {
+                post_apply_current_state
+                    .ifaces
+                    .push(Interface::WifiCfg(Box::new(*iface.clone())));
+            } else {
+                // The saved profile is only replaced after verification, so
+                // drop it from the post-apply view when it is being removed.
+                post_apply_current_state.ifaces.user_ifaces.remove(&(
+                    iface.name().to_string(),
+                    InterfaceType::WifiCfg,
+                ));
+            }
         }
 
         // The `auto-connect` is not stored into config manager yet. In order
