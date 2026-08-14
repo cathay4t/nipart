@@ -381,31 +381,6 @@ fn handle_wifi_phy_event(
     if !event.is_up && saved_iface.iface_type() == &InterfaceType::WifiPhy {
         // Already processed above to purge IP on this wifi-phy interface.
         None
-    } else if !event.is_up
-        && !event.is_delete
-        && event.iface_type == InterfaceType::WifiPhy
-        && let Interface::WifiCfg(saved_wifi_cfg) = saved_iface
-        && (saved_wifi_cfg.parent().is_none()
-            || saved_wifi_cfg.parent() == Some(event.iface_name.as_str()))
-    {
-        // When new WIFI PHY found, we should setup `bind-to-any` WIFI to
-        // it.
-        let ssid = saved_wifi_cfg.ssid()?;
-        let mut desired_iface = saved_iface.clone();
-        // WifiCfg bind to any SSID should changed to event
-        // interface only, so other interface is not impacted
-        if let Interface::WifiCfg(iface) = &mut desired_iface
-            && let Some(wifi_cfg) = iface.wifi.as_mut()
-        {
-            wifi_cfg.base_iface = Some(event.iface_name.to_string());
-        } else {
-            unreachable!();
-        }
-        log::trace!(
-            "Pending apply wifi-cfg {ssid} on wifi-phy: {}",
-            event.iface_name,
-        );
-        Some(desired_iface)
     } else if event.is_up
         && event.ssid.is_some()
         && let Interface::WifiCfg(saved_wifi_iface) = saved_iface
@@ -416,10 +391,10 @@ fn handle_wifi_phy_event(
             log::debug!("Pending apply wifi-cfg config: {new_iface}");
             Some(new_iface)
         } else {
-            // Since the WIFI interface is already up, we should not
-            // try to configure more SSID on it which should be done
-            // at link_down event. Hence we continue regardless whether
-            // SSID match or not.
+            // The wifi-phy is already up with another SSID, so the saved
+            // wifi-cfg does not match this association.  The SSID config
+            // is sent to the plugin at boot/apply time, so there is
+            // nothing to (re)configure here.
             None
         }
     } else {
@@ -438,8 +413,41 @@ mod tests {
 
     use super::{
         gen_routes_for_iface_up, handle_event_auto_connect,
-        is_route_matching_iface, is_stale_link_down_event,
+        handle_wifi_phy_event, is_route_matching_iface,
+        is_stale_link_down_event,
     };
+
+    fn gen_wifi_cfg_iface() -> Interface {
+        rmsd_yaml::from_str(
+            r#"---
+            name: Test-WIFI
+            type: wifi-cfg
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+            wifi:
+              ssid: Test-WIFI
+              base-iface: wlan0
+            "#,
+        )
+        .unwrap()
+    }
+
+    fn gen_wifi_phy_event(
+        is_up: bool,
+        ssid: Option<&str>,
+    ) -> InterfaceLinkEvent {
+        InterfaceLinkEvent {
+            iface_name: "wlan0".to_string(),
+            iface_index: 18,
+            iface_type: InterfaceType::WifiPhy,
+            is_up,
+            is_delete: false,
+            time_stamp: SystemTime::now(),
+            ssid: ssid.map(|s| s.to_string()),
+        }
+    }
 
     fn gen_saved_state() -> NetworkState {
         rmsd_yaml::from_str(
@@ -678,5 +686,60 @@ interfaces:
         );
         assert_eq!(routes.len(), 1);
         assert!(routes[0].is_absent());
+    }
+
+    #[test]
+    fn test_wifi_phy_down_event_does_not_reapply_wifi_cfg() {
+        // The SSID config is already sent to the plugin at boot/apply
+        // time: a wifi-phy link-down event must only purge IP (handled
+        // elsewhere), not re-apply the wifi-cfg, which would make the
+        // plugin switch away from its current connection.
+        let saved_iface = gen_wifi_cfg_iface();
+        let event = gen_wifi_phy_event(false, None);
+
+        assert!(handle_wifi_phy_event(&event, &saved_iface).is_none());
+    }
+
+    #[test]
+    fn test_wifi_phy_down_event_does_not_return_saved_wifi_phy() {
+        // A saved wifi-phy itself is not re-applied on link down: the IP
+        // purge is handled by the event worker before this helper.
+        let saved_iface: Interface = rmsd_yaml::from_str(
+            r#"---
+            name: wlan0
+            type: wifi-phy
+            state: up
+            "#,
+        )
+        .unwrap();
+        let event = gen_wifi_phy_event(false, None);
+
+        assert!(handle_wifi_phy_event(&event, &saved_iface).is_none());
+    }
+
+    #[test]
+    fn test_wifi_phy_up_event_applies_ip_config_of_matching_wifi_cfg() {
+        // On wifi-phy link up with the matching SSID, the IP config of
+        // the saved wifi-cfg is applied to the kernel wifi-phy.
+        let saved_iface = gen_wifi_cfg_iface();
+        let event = gen_wifi_phy_event(true, Some("Test-WIFI"));
+
+        let new_iface = handle_wifi_phy_event(&event, &saved_iface)
+            .expect("matching SSID should apply IP config");
+        assert_eq!(new_iface.iface_type(), &InterfaceType::WifiPhy);
+        assert_eq!(new_iface.kernel_iface_name(), "wlan0");
+        assert_eq!(new_iface.name(), "wlan0");
+        assert!(new_iface.base_iface().ipv4.is_some());
+    }
+
+    #[test]
+    fn test_wifi_phy_up_event_with_other_ssid_ignores_wifi_cfg() {
+        // A wifi-phy already up with a different SSID must not be
+        // reconfigured: the plugin decides which SSID to connect at
+        // boot/apply time.
+        let saved_iface = gen_wifi_cfg_iface();
+        let event = gen_wifi_phy_event(true, Some("Other-SSID"));
+
+        assert!(handle_wifi_phy_event(&event, &saved_iface).is_none());
     }
 }
