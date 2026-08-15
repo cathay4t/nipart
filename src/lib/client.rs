@@ -28,6 +28,8 @@ pub enum NipartClientCmd {
     Ping,
     QueryNetworkState(Box<NipartQueryOption>),
     ApplyNetworkState(Box<(NetworkState, NipartApplyOption)>),
+    UpInterface(String),
+    DownInterface(String),
     WaitOnline,
     WifiScan(Box<NipartWifiScanOption>),
 }
@@ -44,6 +46,8 @@ impl NipartCanIpc for NipartClientCmd {
             Self::Ping => "ping".to_string(),
             Self::QueryNetworkState(_) => "query-network-state".to_string(),
             Self::ApplyNetworkState(_) => "apply-network-state".to_string(),
+            Self::UpInterface(_) => "up-interface".to_string(),
+            Self::DownInterface(_) => "down-interface".to_string(),
             Self::WaitOnline => "wait-online".to_string(),
             Self::WifiScan(_) => "wifi-scan".to_string(),
         }
@@ -69,6 +73,9 @@ impl NipartClient {
     // ceiling: a saved `timeout-sec` larger than this (10 minutes) is still
     // capped by this IPC timeout.
     const WAIT_ONLINE_IPC_TIMEOUT_MS: u32 = 10 * 60 * 1000;
+    // Explicit up/down actions may wait for WIFI association and DHCP lease
+    // acquisition, which can exceed the default 30 second IPC timeout.
+    const IFACE_ACTION_IPC_TIMEOUT_MS: u32 = 10 * 60 * 1000;
 
     /// Create IPC connect to nipart daemon
     pub async fn new() -> Result<Self, NipartError> {
@@ -113,6 +120,34 @@ impl NipartClient {
             )))))
             .await?;
         self.ipc.recv::<NetworkState>().await
+    }
+
+    pub async fn up_interface(
+        &mut self,
+        name: &str,
+    ) -> Result<NetworkState, NipartError> {
+        let original_timeout = self.ipc.timeout_ms;
+        self.ipc.set_timeout(Self::IFACE_ACTION_IPC_TIMEOUT_MS);
+        self.ipc
+            .send(Ok(NipartClientCmd::UpInterface(name.to_string())))
+            .await?;
+        let ret = self.ipc.recv::<NetworkState>().await;
+        self.ipc.set_timeout(original_timeout);
+        ret
+    }
+
+    pub async fn down_interface(
+        &mut self,
+        name: &str,
+    ) -> Result<NetworkState, NipartError> {
+        let original_timeout = self.ipc.timeout_ms;
+        self.ipc.set_timeout(Self::IFACE_ACTION_IPC_TIMEOUT_MS);
+        self.ipc
+            .send(Ok(NipartClientCmd::DownInterface(name.to_string())))
+            .await?;
+        let ret = self.ipc.recv::<NetworkState>().await;
+        self.ipc.set_timeout(original_timeout);
+        ret
     }
 
     pub async fn wait_online(&mut self) -> Result<(), NipartError> {

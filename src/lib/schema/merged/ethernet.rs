@@ -33,18 +33,22 @@ impl MergedInterfaces {
                     EthernetInterface::new_veth(base_iface, eth_iface.name()),
                 ));
 
-                let mut new_merged_iface =
-                    match MergedInterface::new(Some(des_iface), None, None) {
-                        Ok(i) => i,
-                        Err(e) => {
-                            log::error!(
-                                "BUG: Cannot create MergedInterface for newly \
-                                 created veth peer {}: {e}",
-                                peer
-                            );
-                            continue;
-                        }
-                    };
+                let mut new_merged_iface = match MergedInterface::new(
+                    Some(des_iface),
+                    None,
+                    None,
+                    false,
+                ) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        log::error!(
+                            "BUG: Cannot create MergedInterface for newly \
+                             created veth peer {}: {e}",
+                            peer
+                        );
+                        continue;
+                    }
+                };
                 // Veth peer should be activated after creation which
                 // is holding up_priority 0
                 new_merged_iface.up_priority = Some(1);

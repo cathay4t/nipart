@@ -4,6 +4,7 @@ mod apply;
 mod diff;
 mod edit;
 mod error;
+mod iface_action;
 mod merge;
 mod show;
 mod state;
@@ -14,8 +15,13 @@ use nipart::{ErrorKind, NipartClient};
 
 pub(crate) use self::error::CliError;
 use self::{
-    apply::CommandApply, diff::CommandDiff, edit::CommandEdit,
-    merge::CommandMerge, show::CommandShow, wait_online::CommandWaitOnline,
+    apply::CommandApply,
+    diff::CommandDiff,
+    edit::CommandEdit,
+    iface_action::{CommandDown, CommandUp},
+    merge::CommandMerge,
+    show::CommandShow,
+    wait_online::CommandWaitOnline,
     wifi::CommandWifi,
 };
 
@@ -50,7 +56,9 @@ async fn main() -> Result<(), CliError> {
         .subcommand(CommandWifi::new_cmd())
         .subcommand(CommandDiff::new_cmd())
         .subcommand(CommandWaitOnline::new_cmd())
-        .subcommand(CommandMerge::new_cmd());
+        .subcommand(CommandMerge::new_cmd())
+        .subcommand(CommandUp::new_cmd())
+        .subcommand(CommandDown::new_cmd());
 
     let matches = cli_cmd.get_matches_mut();
 
@@ -112,6 +120,12 @@ async fn call_subcommand(matches: &clap::ArgMatches) -> Result<(), CliError> {
         Ok(())
     } else if let Some(matches) = matches.subcommand_matches(CommandDiff::CMD) {
         CommandDiff::handle(matches).await?;
+        Ok(())
+    } else if let Some(matches) = matches.subcommand_matches(CommandUp::CMD) {
+        CommandUp::handle(matches).await?;
+        Ok(())
+    } else if let Some(matches) = matches.subcommand_matches(CommandDown::CMD) {
+        CommandDown::handle(matches).await?;
         Ok(())
     } else if matches.subcommand_matches(CommandWaitOnline::CMD).is_some() {
         CommandWaitOnline::handle().await?;

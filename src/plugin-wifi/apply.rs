@@ -169,6 +169,7 @@ impl NipartWpaConn {
     pub(crate) async fn apply(
         ifaces: &[Interface],
         wifi_conns: &mut HashMap<String, WifiConn>,
+        force: bool,
     ) -> Result<(), NipartError> {
         // Drop entries whose driver task has already ended.
         wifi_conns.retain(|_, conn| !conn.task.is_finished());
@@ -273,9 +274,20 @@ impl NipartWpaConn {
                     networks
                 }
             };
-            if conn.has_same_networks(&networks) {
+            if conn.has_same_networks(&networks)
+                && (!force || networks.is_empty())
+            {
                 log::info!("WIFI networks on {iface_name} unchanged");
                 continue;
+            }
+            if force && !networks.is_empty() {
+                log::info!(
+                    "Restarting WIFI on {iface_name} to force connection"
+                );
+                if !conn.set_networks(Vec::new()).await {
+                    stale.push(iface_name);
+                    continue;
+                }
             }
             if networks.is_empty() {
                 log::info!(

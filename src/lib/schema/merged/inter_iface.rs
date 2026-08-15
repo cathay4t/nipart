@@ -151,6 +151,20 @@ impl MergedInterfaces {
         current: Interfaces,
         saved: Option<Interfaces>,
     ) -> Result<Self, NipartError> {
+        Self::new_with_force(desired, current, saved, false)
+    }
+
+    /// Same as [`MergedInterfaces::new`], but when `force` is true every
+    /// desired interface uses its full merged config for apply even when the
+    /// kernel already matches it. This is used by explicit `npt up`/`npt down`
+    /// actions which must restart services (DHCP, WIFI) rather than only
+    /// applying differences.
+    pub fn new_with_force(
+        desired: Interfaces,
+        current: Interfaces,
+        saved: Option<Interfaces>,
+        force: bool,
+    ) -> Result<Self, NipartError> {
         let mut desired = desired;
         let mut current = current;
         let mut ret = Self {
@@ -303,6 +317,7 @@ impl MergedInterfaces {
                 Some(des_iface),
                 cur_iface.cloned(),
                 saved_iface.cloned(),
+                force,
             )?;
             ret.push(merged_iface);
         }
@@ -317,7 +332,7 @@ impl MergedInterfaces {
                 // config, hence no reason to search saved config for
                 // undesired interface.
                 let merged_iface =
-                    MergedInterface::new(None, Some(cur_iface), None)?;
+                    MergedInterface::new(None, Some(cur_iface), None, false)?;
                 ret.push(merged_iface);
             }
         }
@@ -329,8 +344,12 @@ impl MergedInterfaces {
                     saved_iface.name().to_string(),
                     saved_iface.iface_type().clone(),
                 )) {
-                    let merged_iface =
-                        MergedInterface::new(None, None, Some(saved_iface))?;
+                    let merged_iface = MergedInterface::new(
+                        None,
+                        None,
+                        Some(saved_iface),
+                        false,
+                    )?;
                     ret.push(merged_iface);
                 }
             }

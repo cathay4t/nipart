@@ -37,6 +37,64 @@ fn test_resolve_mac_identifier_basic_with_mac() {
     assert_eq!(for_apply.base_iface().kernel_iface_name.as_str(), "eth0");
 }
 
+/// Test that the force apply option keeps the full desired config even when
+/// the current kernel state already matches it, so explicit up/down actions
+/// can restart DHCP/WIFI instead of being treated as a no-op.
+#[test]
+fn test_force_apply_keeps_full_desired_when_unchanged() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+        "#,
+    )
+    .unwrap();
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth0
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+        "#,
+    )
+    .unwrap();
+
+    let normal =
+        MergedInterfaces::new(desired.clone(), current.clone(), None).unwrap();
+    assert!(
+        normal
+            .kernel_ifaces
+            .get("eth0")
+            .unwrap()
+            .for_apply
+            .is_none()
+    );
+
+    let forced =
+        MergedInterfaces::new_with_force(desired, current, None, true).unwrap();
+    let forced_apply = forced
+        .kernel_ifaces
+        .get("eth0")
+        .unwrap()
+        .for_apply
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        forced_apply
+            .base_iface()
+            .ipv4
+            .as_ref()
+            .map(|ipv4| ipv4.dhcp),
+        Some(Some(true))
+    );
+}
+
 /// Test MAC address matching with `permanent-mac-address`.
 #[test]
 fn test_resolve_mac_identifier_perm_mac() {

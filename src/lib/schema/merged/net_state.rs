@@ -42,10 +42,11 @@ impl MergedNetworkState {
             None => (None, None),
         };
 
-        let merged_ifaces = MergedInterfaces::new(
+        let merged_ifaces = MergedInterfaces::new_with_force(
             desired.ifaces,
             current.ifaces,
             saved_ifaces,
+            option.force,
         )?;
         let merged_routes = MergedRoutes::new(
             desired.routes,

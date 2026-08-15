@@ -82,6 +82,74 @@ pub(crate) async fn process_api_connection(
                 drop(lock);
                 conn.send(result).await?;
             }
+            NipartClientCmd::UpInterface(name) => {
+                log_info(
+                    Some(&mut conn),
+                    format!(
+                        "Client process {peer_pid} acquiring lock before \
+                         bringing interface {name} up"
+                    ),
+                )
+                .await;
+                if let Some(cur_locker) = NipartLockManager::cur_locker_pid() {
+                    log_info(
+                        Some(&mut conn),
+                        format!(
+                            "Waiting on-going transaction by PID {cur_locker}"
+                        ),
+                    )
+                    .await;
+                }
+
+                let lock = NipartLockManager::lock(peer_pid).await;
+                log_info(
+                    Some(&mut conn),
+                    format!("Client process {peer_pid} acquired lock"),
+                )
+                .await;
+                let result = commander.up_interface(&name).await;
+                log_info(
+                    Some(&mut conn),
+                    format!("Client process {peer_pid} released lock"),
+                )
+                .await;
+                drop(lock);
+                conn.send(result).await?;
+            }
+            NipartClientCmd::DownInterface(name) => {
+                log_info(
+                    Some(&mut conn),
+                    format!(
+                        "Client process {peer_pid} acquiring lock before \
+                         bringing interface {name} down"
+                    ),
+                )
+                .await;
+                if let Some(cur_locker) = NipartLockManager::cur_locker_pid() {
+                    log_info(
+                        Some(&mut conn),
+                        format!(
+                            "Waiting on-going transaction by PID {cur_locker}"
+                        ),
+                    )
+                    .await;
+                }
+
+                let lock = NipartLockManager::lock(peer_pid).await;
+                log_info(
+                    Some(&mut conn),
+                    format!("Client process {peer_pid} acquired lock"),
+                )
+                .await;
+                let result = commander.down_interface(&name).await;
+                log_info(
+                    Some(&mut conn),
+                    format!("Client process {peer_pid} released lock"),
+                )
+                .await;
+                drop(lock);
+                conn.send(result).await?;
+            }
             NipartClientCmd::WaitOnline => {
                 let result = commander.wait_online().await;
                 conn.send(result).await?;

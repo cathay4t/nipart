@@ -51,6 +51,7 @@ impl MergedInterface {
         desired: Option<Interface>,
         current: Option<Interface>,
         saved: Option<Interface>,
+        force: bool,
     ) -> Result<Self, NipartError> {
         let saved = saved.as_ref();
         let for_save = if let Some(desired) = desired.as_ref() {
@@ -75,7 +76,11 @@ impl MergedInterface {
         let for_apply = if let Some(current) = current.as_ref()
             && let Some(for_save) = for_save.as_ref()
         {
-            for_save.gen_diff_for_apply(current)?
+            if force {
+                Some(for_save.clone())
+            } else {
+                for_save.gen_diff_for_apply(current)?
+            }
         } else if desired.is_some() {
             for_save.clone()
         } else {

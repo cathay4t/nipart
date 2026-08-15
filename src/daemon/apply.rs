@@ -15,9 +15,32 @@ const RETRY_INTERVAL_MS: u64 = 500;
 impl NipartCommander {
     pub(crate) async fn apply_network_state(
         &mut self,
+        conn: Option<&mut NipartIpcConnection>,
+        desired_state: NetworkState,
+        opt: NipartApplyOption,
+    ) -> Result<NetworkState, NipartError> {
+        let saved_config = self.conf_manager.query_state().await?;
+        self.apply_network_state_with_saved_config(
+            conn,
+            desired_state,
+            opt,
+            Some(saved_config),
+        )
+        .await
+    }
+
+    /// Apply desired state using an explicit saved state.
+    ///
+    /// `None` is used by explicit `npt up`/`npt down` actions: their desired
+    /// state already contains the full saved profile, and passing the saved
+    /// state here would re-inherit properties such as `auto-connect` and
+    /// prevent the explicit action from overriding conditional activation.
+    pub(crate) async fn apply_network_state_with_saved_config(
+        &mut self,
         mut conn: Option<&mut NipartIpcConnection>,
         desired_state: NetworkState,
         opt: NipartApplyOption,
+        saved_config: Option<NetworkState>,
     ) -> Result<NetworkState, NipartError> {
         if desired_state.is_empty() {
             log_info(
@@ -36,12 +59,10 @@ impl NipartCommander {
             .query_network_state(conn.as_deref_mut(), Default::default())
             .await?;
 
-        let saved_config = self.conf_manager.query_state().await?;
-
         let merged_state = MergedNetworkState::new(
             desired_state,
             pre_apply_current_state,
-            Some(saved_config),
+            saved_config,
             opt.clone(),
         )?;
 

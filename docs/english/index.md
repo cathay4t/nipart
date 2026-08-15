@@ -129,3 +129,15 @@ sudo npt wifi scan
 # This command will ask you to input your wifi password
 sudo npt wifi connect <SSID>
 ```
+
+### Bring an interface or saved profile up/down
+
+```bash
+# Apply the saved config, restart DHCP, and reconnect WIFI if needed
+sudo npt up <interface_name_or_profile_name>
+# Bring the interface down, purge IP/routes, remove virtual interfaces, or
+# switch WIFI to the next best saved SSID
+sudo npt down <interface_name_or_profile_name>
+```
+
+The saved configuration is not modified by `npt up`/`npt down`.
