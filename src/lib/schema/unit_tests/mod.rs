@@ -10,6 +10,7 @@ mod inter_ifaces;
 mod ip;
 mod loopback;
 mod net_state;
+mod route;
 mod serializer;
 mod vrf;
 mod vxlan;
