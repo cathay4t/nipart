@@ -8,6 +8,7 @@ from .testlib.cmdlib import exec_cmd
 from .testlib.dhcp import DHCP_SRV_IP4
 from .testlib.dhcp import DHCP_SRV_IP4_PREFIX
 from .testlib.env import has_kernel_module
+from .testlib.env import npt_path
 from .testlib.retry import retry_till_true_or_timeout
 from .testlib.statelib import load_yaml
 from .testlib.wifi import TEST_NET_NS
@@ -44,6 +45,13 @@ def ping_peer():
     except Exception:
         return False
     return True
+
+
+def link_is_up():
+    output = exec_cmd(
+        f"ip -br link show {WIFI_TEST_NIC}".split(), check=False
+    )[1]
+    return "UP" in output
 
 
 @pytest.mark.skipif(
@@ -85,3 +93,42 @@ class TestWifiHidden:
                       enabled: true
                       dhcp: true"""))
         assert retry_till_true_or_timeout(10, ping_peer)
+
+    def test_wifi_scan_hides_hidden_ssid(
+        self, clean_up, wifi_hidden_env  # noqa: F811
+    ):
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                  - name: {WIFI_TEST_NIC}
+                    type: wifi-phy
+                    state: up
+                    wifi:
+                      ssid: {TEST_WIFI_SSID_HIDDEN}
+                      password: {TEST_WIFI_PSK}
+                    ipv4:
+                      enabled: true
+                      dhcp: false
+                      address:
+                        - ip: {DHCP_SRV_IP4_PREFIX}.99
+                          prefix-length: 24"""))
+        assert retry_till_true_or_timeout(10, ping_peer)
+
+        # Disconnect the shuli client before scanning: a standalone scan
+        # can hit EBUSY while the client is connected.  The kernel BSS
+        # cache keeps the hidden SSID from the connection.
+        nipart.apply(
+            load_yaml(f"""---
+                interfaces:
+                  - name: {WIFI_TEST_NIC}
+                    type: wifi-phy
+                    state: down"""),
+            verify_change=False,
+        )
+        exec_cmd(f"ip link set {WIFI_TEST_NIC} up".split())
+        retry_till_true_or_timeout(5, link_is_up)
+
+        output = exec_cmd([npt_path(), "wifi", "scan"])[1]
+        assert TEST_WIFI_SSID_HIDDEN not in output
+
+        output = exec_cmd([npt_path(), "wifi", "scan", "--show-hidden"])[1]
+        assert TEST_WIFI_SSID_HIDDEN in output
