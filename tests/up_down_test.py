@@ -26,6 +26,16 @@ def test_npt_up_down_virtual_iface():
               - name: {TEST_DUMMY}
                 type: dummy
                 state: up
+                ipv4:
+                  enabled: true
+                  dhcp: false
+                  address:
+                    - ip: 198.51.100.1
+                      prefix-length: 24
+            routes:
+              config:
+                - destination: 198.51.100.0/24
+                  next-hop-interface: {TEST_DUMMY}
             """))
     try:
         assert retry_till_true_or_timeout(10, _dummy_up)

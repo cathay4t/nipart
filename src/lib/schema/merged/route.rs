@@ -555,8 +555,14 @@ fn build_merged_and_changed_routes(
                             && iface_lists
                                 .ipv4_disabled
                                 .contains(&via.as_str())));
-                if iface_lists.absent.contains(&via.as_str())
-                    || via_ip_disabled
+                if iface_lists.absent.contains(&via.as_str()) {
+                    // The next hop interface is being deleted: kernel
+                    // purges its routes on deletion, so there is no need
+                    // (nor ability, once the link is gone) to remove them
+                    // explicitly.
+                    continue;
+                }
+                if via_ip_disabled
                     || desired_routes
                         .iter()
                         .filter(|r| r.is_absent())

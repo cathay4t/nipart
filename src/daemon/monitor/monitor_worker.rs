@@ -24,7 +24,7 @@ use rtnetlink::{
     },
     sys::SocketAddr,
 };
-use wl_nl80211::{Nl80211Element, Nl80211Elements, packet_core::Parseable};
+use wl_nl80211::{Ieee80211Element, Ieee80211Elements, packet_core::Parseable};
 
 use super::super::{daemon::NipartManagerCmd, task::TaskWorker};
 
@@ -579,11 +579,11 @@ fn parse_link_msg(
             return Some((event, mac));
         };
 
-        match Nl80211Elements::parse(wifi_ie.as_slice()) {
+        match Ieee80211Elements::parse(wifi_ie.as_slice()) {
             Ok(elements) => {
                 log::trace!("{iface_name}: Got WIFI IE: {elements:?}");
                 for ie in elements.0.into_iter() {
-                    if let Nl80211Element::Ssid(ssid) = ie
+                    if let Ieee80211Element::Ssid(ssid) = ie
                         && !ssid.is_empty()
                     {
                         event.ssid = Some(ssid);

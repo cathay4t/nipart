@@ -8,7 +8,8 @@ use nipart::{
 };
 use rtnetlink::packet_core::Parseable;
 use wl_nl80211::{
-    Nl80211AkmSuite, Nl80211CipherSuite, Nl80211Element, Nl80211Elements,
+    Ieee80211AkmSuite, Ieee80211CipherSuite, Ieee80211Element,
+    Ieee80211Elements,
 };
 
 use crate::NipartWpaConn;
@@ -143,12 +144,12 @@ fn extract_ssid(ies: &[u8]) -> Option<String> {
 /// Detect the detailed auth type of the AP from its RSNE(Robust Security
 /// Network Element). Returns `OPEN` when the network has no RSNE.
 fn detect_auth_type(ies: &[u8]) -> WifiAuthTypeDetailed {
-    let Ok(parsed) = Nl80211Elements::parse(ies) else {
+    let Ok(parsed) = Ieee80211Elements::parse(ies) else {
         return open_auth_type();
     };
     let elems = parsed.0;
     let rsn = elems.iter().find_map(|ie| match ie {
-        Nl80211Element::Rsn(rsn) => Some(rsn),
+        Ieee80211Element::Rsn(rsn) => Some(rsn),
         _ => None,
     });
     let Some(rsn) = rsn else {
@@ -156,7 +157,7 @@ fn detect_auth_type(ies: &[u8]) -> WifiAuthTypeDetailed {
         // which has no simplified `WifiAuthType`. Detect the WPA1 vendor
         // IE so such networks are not mislabeled as `OPEN`.
         if elems.iter().any(|ie| match ie {
-            Nl80211Element::Vendor(payload) => is_wpa1_vendor_ie(payload),
+            Ieee80211Element::Vendor(payload) => is_wpa1_vendor_ie(payload),
             _ => false,
         }) {
             // WPA1 is deprecated and has no simplified `WifiAuthType`.
@@ -201,25 +202,25 @@ fn is_wpa1_vendor_ie(payload: &[u8]) -> bool {
 }
 
 /// Map the AKM suites advertised by the AP to the simplified auth type.
-fn auth_type_from_akm(akm_suits: &[Nl80211AkmSuite]) -> WifiAuthType {
+fn auth_type_from_akm(akm_suits: &[Ieee80211AkmSuite]) -> WifiAuthType {
     if akm_suits.iter().any(|akm| {
         matches!(
             akm,
-            Nl80211AkmSuite::Sae
-                | Nl80211AkmSuite::FtSae
-                | Nl80211AkmSuite::SaeGroupDependentHash
-                | Nl80211AkmSuite::FtSaeGroupDependentHash
+            Ieee80211AkmSuite::Sae
+                | Ieee80211AkmSuite::FtSae
+                | Ieee80211AkmSuite::SaeGroupDependentHash
+                | Ieee80211AkmSuite::FtSaeGroupDependentHash
         )
     }) {
         WifiAuthType::Wpa3Personal
     } else if akm_suits.iter().any(|akm| {
         matches!(
             akm,
-            Nl80211AkmSuite::Psk
-                | Nl80211AkmSuite::FtPsk
-                | Nl80211AkmSuite::PskSha256
-                | Nl80211AkmSuite::PskSha384
-                | Nl80211AkmSuite::FtPskSha384
+            Ieee80211AkmSuite::Psk
+                | Ieee80211AkmSuite::FtPsk
+                | Ieee80211AkmSuite::PskSha256
+                | Ieee80211AkmSuite::PskSha384
+                | Ieee80211AkmSuite::FtPskSha384
         )
     }) {
         WifiAuthType::Wpa2Personal
@@ -229,77 +230,83 @@ fn auth_type_from_akm(akm_suits: &[Nl80211AkmSuite]) -> WifiAuthType {
     }
 }
 
-fn akm_to_string(akm: Nl80211AkmSuite) -> String {
+fn akm_to_string(akm: Ieee80211AkmSuite) -> String {
     match akm {
-        Nl80211AkmSuite::Ieee8021x => "802.1X".into(),
-        Nl80211AkmSuite::Psk => "PSK".into(),
-        Nl80211AkmSuite::FtIeee8021x => "FT-802.1X".into(),
-        Nl80211AkmSuite::FtPsk => "FT-PSK".into(),
-        Nl80211AkmSuite::Ieee8021xSha256 => "802.1X-SHA256".into(),
-        Nl80211AkmSuite::PskSha256 => "PSK-SHA256".into(),
-        Nl80211AkmSuite::Tdls => "TDLS".into(),
-        Nl80211AkmSuite::Sae => "SAE".into(),
-        Nl80211AkmSuite::FtSae => "FT-SAE".into(),
-        Nl80211AkmSuite::ApPeerKey => "AP-PEER-KEY".into(),
-        Nl80211AkmSuite::Ieee8021xSuiteB => "802.1X-SUITE-B".into(),
-        Nl80211AkmSuite::Ieee8021xCnsa => "802.1X-CNSA".into(),
-        Nl80211AkmSuite::FtIeee8021xSha384 => "FT-802.1X-SHA384".into(),
-        Nl80211AkmSuite::FilsSha256AesSiv256OrIeee8021x => "FILS-SHA256".into(),
-        Nl80211AkmSuite::FilsSha384AesSiv512OrIeee8021x => "FILS-SHA384".into(),
-        Nl80211AkmSuite::FtFilsSha256AesSiv256OrIeee8021x => {
+        Ieee80211AkmSuite::Ieee8021x => "802.1X".into(),
+        Ieee80211AkmSuite::Psk => "PSK".into(),
+        Ieee80211AkmSuite::FtIeee8021x => "FT-802.1X".into(),
+        Ieee80211AkmSuite::FtPsk => "FT-PSK".into(),
+        Ieee80211AkmSuite::Ieee8021xSha256 => "802.1X-SHA256".into(),
+        Ieee80211AkmSuite::PskSha256 => "PSK-SHA256".into(),
+        Ieee80211AkmSuite::Tdls => "TDLS".into(),
+        Ieee80211AkmSuite::Sae => "SAE".into(),
+        Ieee80211AkmSuite::FtSae => "FT-SAE".into(),
+        Ieee80211AkmSuite::ApPeerKey => "AP-PEER-KEY".into(),
+        Ieee80211AkmSuite::Ieee8021xSuiteB => "802.1X-SUITE-B".into(),
+        Ieee80211AkmSuite::Ieee8021xCnsa => "802.1X-CNSA".into(),
+        Ieee80211AkmSuite::FtIeee8021xSha384 => "FT-802.1X-SHA384".into(),
+        Ieee80211AkmSuite::FilsSha256AesSiv256OrIeee8021x => {
+            "FILS-SHA256".into()
+        }
+        Ieee80211AkmSuite::FilsSha384AesSiv512OrIeee8021x => {
+            "FILS-SHA384".into()
+        }
+        Ieee80211AkmSuite::FtFilsSha256AesSiv256OrIeee8021x => {
             "FT-FILS-SHA256".into()
         }
-        Nl80211AkmSuite::FtFilsSha384AesSiv512OrIeee8021x => {
+        Ieee80211AkmSuite::FtFilsSha384AesSiv512OrIeee8021x => {
             "FT-FILS-SHA384".into()
         }
-        Nl80211AkmSuite::Owe => "OWE".into(),
-        Nl80211AkmSuite::FtPskSha384 => "FT-PSK-SHA384".into(),
-        Nl80211AkmSuite::PskSha384 => "PSK-SHA384".into(),
-        Nl80211AkmSuite::SaeGroupDependentHash => "SAE-GROUP-HASH".into(),
-        Nl80211AkmSuite::FtSaeGroupDependentHash => "FT-SAE-GROUP-HASH".into(),
-        Nl80211AkmSuite::Other(d) => format!("0x{d:08x}"),
+        Ieee80211AkmSuite::Owe => "OWE".into(),
+        Ieee80211AkmSuite::FtPskSha384 => "FT-PSK-SHA384".into(),
+        Ieee80211AkmSuite::PskSha384 => "PSK-SHA384".into(),
+        Ieee80211AkmSuite::SaeGroupDependentHash => "SAE-GROUP-HASH".into(),
+        Ieee80211AkmSuite::FtSaeGroupDependentHash => {
+            "FT-SAE-GROUP-HASH".into()
+        }
+        Ieee80211AkmSuite::Other(d) => format!("0x{d:08x}"),
         _ => "UNKNOWN".into(),
     }
 }
 
-fn cipher_to_string(cipher: Nl80211CipherSuite) -> String {
+fn cipher_to_string(cipher: Ieee80211CipherSuite) -> String {
     match cipher {
-        Nl80211CipherSuite::UseGroup => "USE-GROUP".into(),
-        Nl80211CipherSuite::Wep40 => "WEP-40".into(),
-        Nl80211CipherSuite::Tkip => "TKIP".into(),
-        Nl80211CipherSuite::Ccmp128 => "CCMP".into(),
-        Nl80211CipherSuite::Wep104 => "WEP-104".into(),
-        Nl80211CipherSuite::BipCmac128 => "BIP-CMAC-128".into(),
-        Nl80211CipherSuite::GroupAddressedTrafficNotAllowed => {
+        Ieee80211CipherSuite::UseGroup => "USE-GROUP".into(),
+        Ieee80211CipherSuite::Wep40 => "WEP-40".into(),
+        Ieee80211CipherSuite::Tkip => "TKIP".into(),
+        Ieee80211CipherSuite::Ccmp128 => "CCMP".into(),
+        Ieee80211CipherSuite::Wep104 => "WEP-104".into(),
+        Ieee80211CipherSuite::BipCmac128 => "BIP-CMAC-128".into(),
+        Ieee80211CipherSuite::GroupAddressedTrafficNotAllowed => {
             "GAT-NOT-ALLOWED".into()
         }
-        Nl80211CipherSuite::Gcmp128 => "GCMP".into(),
-        Nl80211CipherSuite::Gcmp256 => "GCMP-256".into(),
-        Nl80211CipherSuite::Ccmp256 => "CCMP-256".into(),
-        Nl80211CipherSuite::BipGmac128 => "BIP-GMAC-128".into(),
-        Nl80211CipherSuite::BipGmac256 => "BIP-GMAC-256".into(),
-        Nl80211CipherSuite::BipCmac256 => "BIP-CMAC-256".into(),
-        Nl80211CipherSuite::Other(d) => format!("0x{d:08x}"),
+        Ieee80211CipherSuite::Gcmp128 => "GCMP".into(),
+        Ieee80211CipherSuite::Gcmp256 => "GCMP-256".into(),
+        Ieee80211CipherSuite::Ccmp256 => "CCMP-256".into(),
+        Ieee80211CipherSuite::BipGmac128 => "BIP-GMAC-128".into(),
+        Ieee80211CipherSuite::BipGmac256 => "BIP-GMAC-256".into(),
+        Ieee80211CipherSuite::BipCmac256 => "BIP-CMAC-256".into(),
+        Ieee80211CipherSuite::Other(d) => format!("0x{d:08x}"),
         _ => "UNKNOWN".into(),
     }
 }
 
 fn detect_generation(ies: &[u8]) -> Option<u32> {
-    if let Ok(parsed) = Nl80211Elements::parse(ies) {
+    if let Ok(parsed) = Ieee80211Elements::parse(ies) {
         let elems = parsed.0;
         if elems
             .iter()
-            .any(|ie| matches!(ie, Nl80211Element::HeCapability(_)))
+            .any(|ie| matches!(ie, Ieee80211Element::HeCapability(_)))
         {
             return Some(6);
         } else if elems
             .iter()
-            .any(|ie| matches!(ie, Nl80211Element::VhtCapability(_)))
+            .any(|ie| matches!(ie, Ieee80211Element::VhtCapability(_)))
         {
             return Some(5);
         } else if elems
             .iter()
-            .any(|ie| matches!(ie, Nl80211Element::HtCapability(_)))
+            .any(|ie| matches!(ie, Ieee80211Element::HtCapability(_)))
         {
             return Some(4);
         }
