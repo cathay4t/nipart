@@ -34,14 +34,17 @@ class NipartApplyOption:
         version=LATEST_SCHEMA_VERSION,
         verify_change=True,
         memory_only=False,
+        force=False,
     ):
         self.version = version
         self.no_verify = not verify_change
         self.memory_only = memory_only
+        self.force = force
 
     def to_dict(self):
         return {
             "version": self.version,
             "no-verify": self.no_verify,
             "memory-only": self.memory_only,
+            "force": self.force,
         }

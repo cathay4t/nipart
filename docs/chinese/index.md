@@ -126,3 +126,14 @@ sudo npt wifi scan
 # 此命令会要求你输入 WiFi 密码
 sudo npt wifi connect <SSID>
 ```
+
+### 启用或停用接口/已保存配置
+
+```bash
+# 应用已保存配置，必要时重启 DHCP 并重新连接 WIFI
+sudo npt up <接口名或配置名>
+# 停用接口、清理 IP/路由、删除虚拟接口，或切换到下一个最佳 WIFI
+sudo npt down <接口名或配置名>
+```
+
+`npt up`/`npt down` 不会修改已保存配置。

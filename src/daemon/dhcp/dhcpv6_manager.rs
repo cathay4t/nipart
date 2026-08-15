@@ -124,15 +124,31 @@ impl NipartDhcpV6Manager {
                     .map(|i| i.dhcp == Some(true))
                 {
                     if dhcp_enabled {
-                        log_debug(
-                            conn.as_deref_mut(),
-                            format!(
-                                "Starting DHCPv6 on interface {}({})",
-                                apply_iface.name(),
-                                apply_iface.iface_type()
-                            ),
-                        )
-                        .await;
+                        if merged_state.option.force {
+                            log_debug(
+                                conn.as_deref_mut(),
+                                format!(
+                                    "Restarting DHCPv6 on interface {}({})",
+                                    apply_iface.name(),
+                                    apply_iface.iface_type()
+                                ),
+                            )
+                            .await;
+                            self.stop_iface_dhcp(
+                                apply_iface.kernel_iface_name(),
+                            )
+                            .await?;
+                        } else {
+                            log_debug(
+                                conn.as_deref_mut(),
+                                format!(
+                                    "Starting DHCPv6 on interface {}({})",
+                                    apply_iface.name(),
+                                    apply_iface.iface_type()
+                                ),
+                            )
+                            .await;
+                        }
                         self.start_iface_dhcp(apply_iface.base_iface()).await?;
                     } else {
                         log_debug(

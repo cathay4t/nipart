@@ -18,6 +18,36 @@ class NipartCmdPing:
         )
 
 
+class NipartCmdUpInterface:
+    IPC_KIND = "up-interface"
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def to_json(self):
+        return json.dumps(
+            {
+                "kind": NipartCmdUpInterface.IPC_KIND,
+                "data": {NipartCmdUpInterface.IPC_KIND: self.name},
+            }
+        )
+
+
+class NipartCmdDownInterface:
+    IPC_KIND = "down-interface"
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def to_json(self):
+        return json.dumps(
+            {
+                "kind": NipartCmdDownInterface.IPC_KIND,
+                "data": {NipartCmdDownInterface.IPC_KIND: self.name},
+            }
+        )
+
+
 class NipartCmdQueryNetworkState:
     IPC_KIND = "query-network-state"
 

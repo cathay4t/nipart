@@ -8,6 +8,7 @@ import time
 import nipart
 import pytest
 
+from .conftest import CLI_PATH
 from .testlib.cmdlib import exec_cmd
 from .testlib.env import has_kernel_module
 from .testlib.retry import retry_till_true_or_timeout
@@ -215,3 +216,30 @@ class TestWifiMultiSsid:
         assert retry_till_true_or_timeout(
             10, lambda: ping_peer(AP_IPS[TEST_WIFI_SSID])
         )
+
+    def test_npt_up_down_wifi_cfg(self, multi_ap_env):
+        both = load_yaml(
+            wifi_cfg_state_yaml(
+                (TEST_WIFI_SSID, TEST_WIFI_PSK, "up"),
+                (TEST_WIFI_SSID_2, None, "up"),
+            )
+        )
+        nipart.apply(both)
+        assert wait_for_ssid(TEST_WIFI_SSID) or wait_for_ssid(TEST_WIFI_SSID_2)
+        connected = connected_ssid()
+        assert connected in (TEST_WIFI_SSID, TEST_WIFI_SSID_2)
+        other = (
+            TEST_WIFI_SSID_2 if connected == TEST_WIFI_SSID else TEST_WIFI_SSID
+        )
+
+        rc, out, err = exec_cmd([CLI_PATH, "down", connected], check=False)
+        assert rc == 0, f"npt down failed:\n{out}\n{err}"
+        assert wait_for_ssid(
+            other
+        ), f"expected wifi to move from {connected} to {other}"
+
+        rc, out, err = exec_cmd([CLI_PATH, "up", connected], check=False)
+        assert rc == 0, f"npt up failed:\n{out}\n{err}"
+        assert wait_for_ssid(
+            connected
+        ), f"expected wifi to reconnect to {connected}"

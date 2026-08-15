@@ -4,8 +4,10 @@ import json
 import socket
 
 from .cmd import NipartCmdApplyNetworkState
+from .cmd import NipartCmdDownInterface
 from .cmd import NipartCmdPing
 from .cmd import NipartCmdQueryNetworkState
+from .cmd import NipartCmdUpInterface
 from .error import NipartError
 from .log import NipartLogEntry
 from .schema.state_option import NipartApplyOption
@@ -67,3 +69,9 @@ class NipartClient:
         if not opt:
             opt = NipartApplyOption()
         return self._conn.exec(NipartCmdApplyNetworkState(desired_state, opt))
+
+    def up_interface(self, name):
+        return self._conn.exec(NipartCmdUpInterface(name))
+
+    def down_interface(self, name):
+        return self._conn.exec(NipartCmdDownInterface(name))

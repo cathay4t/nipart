@@ -7,6 +7,7 @@ mod conf;
 mod daemon;
 mod dhcp;
 mod event;
+mod iface_action;
 mod lock;
 mod logger;
 mod monitor;

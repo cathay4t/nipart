@@ -563,6 +563,7 @@ impl MergedInterfaces {
                         ))),
                         None,
                         None,
+                        false,
                     )?,
                 );
                 self.insert_order.push((

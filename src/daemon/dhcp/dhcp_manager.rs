@@ -117,15 +117,31 @@ impl NipartDhcpV4Manager {
                     apply_iface.base_iface().ipv4.as_ref().map(|i| i.is_auto())
                 {
                     if dhcp_enabled {
-                        log_debug(
-                            conn.as_deref_mut(),
-                            format!(
-                                "Starting DHCPv4 on interface {}({})",
-                                apply_iface.name(),
-                                apply_iface.iface_type()
-                            ),
-                        )
-                        .await;
+                        if merged_state.option.force {
+                            log_debug(
+                                conn.as_deref_mut(),
+                                format!(
+                                    "Restarting DHCPv4 on interface {}({})",
+                                    apply_iface.name(),
+                                    apply_iface.iface_type()
+                                ),
+                            )
+                            .await;
+                            self.stop_iface_dhcp(
+                                apply_iface.kernel_iface_name(),
+                            )
+                            .await?;
+                        } else {
+                            log_debug(
+                                conn.as_deref_mut(),
+                                format!(
+                                    "Starting DHCPv4 on interface {}({})",
+                                    apply_iface.name(),
+                                    apply_iface.iface_type()
+                                ),
+                            )
+                            .await;
+                        }
                         self.start_iface_dhcp(apply_iface.base_iface()).await?;
                     } else {
                         log_debug(

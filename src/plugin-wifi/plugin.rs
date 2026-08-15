@@ -13,7 +13,8 @@ use crate::{NipartWpaConn, apply::WifiConn};
 
 #[derive(Debug)]
 pub(crate) struct NipartPluginWifi {
-    apply_tx: tokio::sync::mpsc::UnboundedSender<Vec<Interface>>,
+    apply_tx:
+        tokio::sync::mpsc::UnboundedSender<(Vec<Interface>, NipartApplyOption)>,
 }
 
 /// Dedicated worker processing wifi apply requests serially in arrival
@@ -23,11 +24,14 @@ pub(crate) struct NipartPluginWifi {
 /// on-going apply.  The worker also owns every live wifi connection
 /// ([`WifiConn`]): when the daemon connection is gone it tears them all
 /// down.
-async fn apply_worker(mut rx: UnboundedReceiver<Vec<Interface>>) {
+async fn apply_worker(
+    mut rx: UnboundedReceiver<(Vec<Interface>, NipartApplyOption)>,
+) {
     let mut wifi_conns: HashMap<String, WifiConn> = HashMap::new();
-    while let Some(ifaces) = rx.recv().await {
+    while let Some((ifaces, opt)) = rx.recv().await {
         if let Err(e) =
-            NipartWpaConn::apply(ifaces.as_slice(), &mut wifi_conns).await
+            NipartWpaConn::apply(ifaces.as_slice(), &mut wifi_conns, opt.force)
+                .await
         {
             log::error!("WIFI plugin failed to apply state: {e}");
         }
@@ -84,7 +88,7 @@ impl NipartPlugin for NipartPluginWifi {
         // Never block: enqueue the request to the dedicated apply worker
         // and return immediately. The daemon verification stage waits and
         // retries until the applied state matches the desired state.
-        plugin.apply_tx.send(ifaces).map_err(|e| {
+        plugin.apply_tx.send((ifaces, _opt.clone())).map_err(|e| {
             NipartError::new(
                 ErrorKind::Bug,
                 format!("Failed to enqueue wifi apply request: {e}"),
