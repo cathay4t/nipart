@@ -104,8 +104,8 @@ async fn call_subcommand(matches: &clap::ArgMatches) -> Result<(), CliError> {
     } else if let Some(matches) = matches.subcommand_matches(CommandShow::CMD) {
         CommandShow::handle(matches).await?;
         Ok(())
-    } else if matches.subcommand_matches(CommandEdit::CMD).is_some() {
-        CommandEdit::handle().await?;
+    } else if let Some(matches) = matches.subcommand_matches(CommandEdit::CMD) {
+        CommandEdit::handle(matches).await?;
         Ok(())
     } else if let Some(matches) = matches.subcommand_matches(CommandApply::CMD)
     {

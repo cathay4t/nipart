@@ -214,7 +214,7 @@ fn permission_check(
             }
             _ => Err(NipartError::new(
                 ErrorKind::PermissionDeny,
-                "Command {command} need to root permission".into(),
+                format!("Command {command} need to root permission"),
             )),
         }
     }
