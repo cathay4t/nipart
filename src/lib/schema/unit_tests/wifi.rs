@@ -23,6 +23,22 @@ fn sanitize_wifi_phy(
 }
 
 #[test]
+fn test_wifi_phy_mac_identifier_supported() {
+    let iface: WifiPhyInterface = rmsd_yaml::from_str(
+        r#"---
+        name: HomeWiFi
+        type: wifi-phy
+        identifier: mac-address
+        mac-address: 02:00:00:00:00:10
+        state: up
+        "#,
+    )
+    .unwrap();
+
+    assert!(sanitize_wifi_phy(&iface, None).is_ok());
+}
+
+#[test]
 fn test_wifi_phy_hold_wifi_cfg_with_other_base_iface() {
     let iface: WifiPhyInterface = rmsd_yaml::from_str(
         r#"---
