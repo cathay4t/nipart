@@ -19,7 +19,7 @@ futures-util = { workspace = true }
 futures-channel = { workspace = true }
 uuid = { workspace = true }
 clap = { workspace = true }
-nix = { workspace = true, features = ["term"] }
+nix = { workspace = true, features = ["term", "user"] }
 unicode-width = { workspace = true }
 
 [[bin]]
