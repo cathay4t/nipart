@@ -3,6 +3,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use futures_channel::{
@@ -228,10 +229,69 @@ async fn dhcp_thread(
                         );
                     }
                     Err(e) => {
-                        break Err(NipartError::new(
-                            ErrorKind::Bug,
-                            format!("Unhandled DHCPv6 error: {e}"),
-                        ));
+                        log::warn!(
+                            "DHCPv6 on {}({}) failed, restarting client: {e}",
+                            base_iface.name,
+                            base_iface.iface_type,
+                        );
+                        set_state(
+                            &share_data,
+                            DhcpState::Running,
+                            &base_iface,
+                        )?;
+                        // A single transient error must not kill the
+                        // client permanently: right after wifi association
+                        // the IPv6 link-local address may still be
+                        // tentative, making the UDP socket bind fail even
+                        // though `DhcpV6Client::init()` succeeded. Give
+                        // the kernel a moment, then re-resolve the
+                        // interface (fresh link-local address) and retry.
+                        dhcp_client.clean_up();
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                            _ = quit_indicator.next() => {
+                                log::info!(
+                                    "Stopped DHCPv6 on {}({}) after error",
+                                    base_iface.name,
+                                    base_iface.iface_type,
+                                );
+                                return Ok(());
+                            }
+                        }
+                        if let Err(wait_err) = NipartNoDaemon::wait_link_carrier_up(
+                            base_iface.name.as_str(),
+                        )
+                        .await
+                        {
+                            set_state(
+                                &share_data,
+                                DhcpState::Error(wait_err.to_string()),
+                                &base_iface,
+                            )?;
+                            break Err(wait_err);
+                        }
+                        match init_dhcp_client(
+                            &base_iface,
+                            &mut quit_indicator,
+                        )
+                        .await
+                        {
+                            Ok(Some(new_client)) => {
+                                dhcp_client = new_client;
+                            }
+                            Ok(None) => {
+                                // Quit requested during client init.
+                                return Ok(());
+                            }
+                            Err(init_err) => {
+                                set_state(
+                                    &share_data,
+                                    DhcpState::Error(init_err.to_string()),
+                                    &base_iface,
+                                )?;
+                                break Err(init_err);
+                            }
+                        }
                     }
                 }
             }

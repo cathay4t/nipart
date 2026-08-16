@@ -138,10 +138,51 @@ async fn get_lease_v6<'a>(
     // The DHCPv6 client needs the IPv6 link-local address as its source
     // address, enable IPv6 first if it was previously disabled.
     NipartNoDaemon::enable_ipv6(kernel_iface_name).await?;
+    let mut dhcp_client =
+        init_dhcp_v6_client(kernel_iface_name, iface_type).await?;
+    loop {
+        let state = match dhcp_client.run().await {
+            Ok(state) => state,
+            Err(e) => {
+                // A single transient error (e.g. UDP socket bind while the
+                // IPv6 link-local address is still tentative right after
+                // wifi association) must not abort the whole DHCPv6
+                // acquisition. Reset the client, wait for the link to be
+                // usable again, then re-resolve the interface and retry.
+                log::warn!(
+                    "DHCPv6 on interface {kernel_iface_name}/{iface_type} \
+                     failed, restarting client: {e}"
+                );
+                dhcp_client.clean_up();
+                NipartNoDaemon::wait_link_carrier_up(kernel_iface_name).await?;
+                dhcp_client =
+                    init_dhcp_v6_client(kernel_iface_name, iface_type).await?;
+                continue;
+            }
+        };
+        if let DhcpV6State::Done(lease) = state {
+            log::info!(
+                "DHCPv6 on interface acquired lease: {}/{}",
+                lease.address,
+                lease.prefix_len
+            );
+            return Ok((kernel_iface_name, *lease));
+        } else {
+            log::info!(
+                "DHCPv6 on interface {kernel_iface_name}/{iface_type} reach \
+                 {state} state",
+            );
+        }
+    }
+}
+
+async fn init_dhcp_v6_client(
+    kernel_iface_name: &str,
+    iface_type: &InterfaceType,
+) -> Result<DhcpV6Client, NipartError> {
     // Whether we already forced the kernel to regenerate the IPv6 link-local
     // address for this round of init attempts.
     let mut link_local_regenerated = false;
-    let mut dhcp_client = None;
     // The DHCPv6 client init resolves the interface index and link-local
     // address via netlink, retry a few times to cover the window between
     // link carrier up and the link-local address being assigned on the
@@ -153,8 +194,7 @@ async fn get_lease_v6<'a>(
         );
         match DhcpV6Client::init(dhcp_config, None).await {
             Ok(cli) => {
-                dhcp_client = Some(cli);
-                break;
+                return Ok(cli);
             }
             Err(e) => {
                 // The init failure is usually caused by the interface holding
@@ -203,28 +243,7 @@ async fn get_lease_v6<'a>(
             }
         }
     }
-    let mut dhcp_client = dhcp_client.unwrap();
-    loop {
-        let state = dhcp_client.run().await.map_err(|e| {
-            NipartError::new(
-                ErrorKind::InvalidArgument,
-                format!("DHCPv6 failed: {e}"),
-            )
-        })?;
-        if let DhcpV6State::Done(lease) = state {
-            log::info!(
-                "DHCPv6 on interface acquired lease: {}/{}",
-                lease.address,
-                lease.prefix_len
-            );
-            return Ok((kernel_iface_name, *lease));
-        } else {
-            log::info!(
-                "DHCPv6 on interface {kernel_iface_name}/{iface_type} reach \
-                 {state} state",
-            );
-        }
-    }
+    unreachable!()
 }
 
 /// Apply DHCPv6 lease to kernel directly.
