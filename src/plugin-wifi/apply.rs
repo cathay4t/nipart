@@ -29,6 +29,12 @@ use crate::NipartWpaConn;
 /// new network list.
 pub(crate) struct WifiConn {
     iface_name: String,
+    /// Kernel if_index of the phy the client was bound to at creation.
+    /// When the phy is recreated (e.g. wifi driver module reload), the
+    /// cached client targets a device that no longer exists, so this
+    /// value is compared against the current kernel if_index on each
+    /// apply and the client is restarted on mismatch.
+    if_index: u32,
     desired_networks: Vec<ShuliNetworkConfig>,
     cmd_tx: UnboundedSender<WifiConnCmd>,
     shutdown: Arc<Notify>,
@@ -42,6 +48,7 @@ enum WifiConnCmd {
 impl WifiConn {
     fn new(
         iface_name: String,
+        if_index: u32,
         desired_networks: Vec<ShuliNetworkConfig>,
         client: WifiClient,
     ) -> Self {
@@ -55,6 +62,7 @@ impl WifiConn {
         ));
         Self {
             iface_name,
+            if_index,
             desired_networks,
             cmd_tx,
             shutdown,
@@ -89,6 +97,15 @@ impl WifiConn {
     pub(crate) async fn disconnect(self) {
         self.shutdown.notify_one();
         let _ = self.task.await;
+    }
+
+    /// Ask the driver to stop without waiting for it to finish: the phy
+    /// was recreated (if_index changed) or is gone, so the cached client
+    /// can only error out and may be stuck retrying on the dead device.
+    /// Dropping the `JoinHandle` detaches the task; it exits once it
+    /// observes the shutdown notification.
+    fn shutdown_and_detach(self) {
+        self.shutdown.notify_one();
     }
 }
 
@@ -174,21 +191,27 @@ impl NipartWpaConn {
         // Drop entries whose driver task has already ended.
         wifi_conns.retain(|_, conn| !conn.task.is_finished());
 
-        let available_wifi_phys: Vec<String> = {
+        let mut available_wifi_phys: Vec<String> = Vec::new();
+        // Map of wifi-phy name to its current kernel if_index, used to
+        // detect a phy that was recreated (e.g. wifi driver module
+        // reload): the cached shuli client is then bound to a dead
+        // device and must be restarted.
+        let mut wifi_phys_if_index: HashMap<String, u32> = HashMap::new();
+        {
             let mut filter = nispor::NetStateFilter::minimum();
             filter.iface = Some(nispor::NetStateIfaceFilter::minimum());
-            let mut ret = Vec::new();
             if let Ok(np_state) =
                 nispor::NetState::retrieve_with_filter_async(&filter).await
             {
                 for np_iface in np_state.ifaces.values() {
                     if np_iface.iface_type == nispor::IfaceType::Wifi {
-                        ret.push(np_iface.name.to_string());
+                        available_wifi_phys.push(np_iface.name.to_string());
+                        wifi_phys_if_index
+                            .insert(np_iface.name.to_string(), np_iface.index);
                     }
                 }
             }
-            ret
-        };
+        }
 
         // Group every desired wifi config by the phy it binds to. All
         // SSIDs of one phy go into a single shuli network list.
@@ -260,6 +283,22 @@ impl NipartWpaConn {
             let Some(conn) = wifi_conns.get_mut(&iface_name) else {
                 continue;
             };
+            // The phy may have been recreated (e.g. wifi driver module
+            // reload): the cached WifiClient targets the old if_index and
+            // would fail every nl80211 command with "No such device",
+            // entering a long retry backoff. Drop it and let the client
+            // be started again on the current device below.
+            if wifi_phys_if_index
+                .get(&iface_name)
+                .is_none_or(|if_index| *if_index != conn.if_index)
+            {
+                log::warn!(
+                    "WIFI {iface_name} device changed or gone, restarting \
+                     client"
+                );
+                stale.push(iface_name);
+                continue;
+            }
             // An apply that does not mention this phy (e.g. the daemon
             // re-applying the IP config of a wifi-phy after link up)
             // must not tear the connection down: only explicit
@@ -300,7 +339,10 @@ impl NipartWpaConn {
         }
         for iface_name in stale {
             if let Some(conn) = wifi_conns.remove(&iface_name) {
-                conn.disconnect().await;
+                // Do not wait for the old driver: its device is gone or
+                // was recreated, so it may be stuck retrying on the dead
+                // device. The client on the new device is started below.
+                conn.shutdown_and_detach();
             }
         }
 
@@ -321,10 +363,12 @@ impl NipartWpaConn {
                     continue;
                 }
             };
+            let if_index =
+                wifi_phys_if_index.get(iface_name).copied().unwrap_or(0);
             log::info!("Starting WIFI client on {iface_name}");
             wifi_conns.insert(
                 iface_name.clone(),
-                WifiConn::new(iface_name.clone(), networks, client),
+                WifiConn::new(iface_name.clone(), if_index, networks, client),
             );
         }
 
