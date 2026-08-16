@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::super::value::{copy_undefined_value, gen_diff_json_value};
-use crate::{Interface, InterfaceState, NipartError, NipartInterface};
+use crate::{
+    Interface, InterfaceIdentifier, InterfaceState, NipartError,
+    NipartInterface,
+};
 
 impl Interface {
     /// Generate a diff between self and old, returning a new Interface that
@@ -24,6 +27,17 @@ impl Interface {
                 let mut new_iface =
                     serde_json::from_value::<Self>(new_iface_value)?;
                 Self::include_diff_context(&mut new_iface, self, old);
+                if self.base_iface().identifier
+                    == Some(InterfaceIdentifier::MacAddress)
+                {
+                    new_iface.base_iface_mut().identifier =
+                        Some(InterfaceIdentifier::MacAddress);
+                    if let Some(mac) = self.base_iface().mac_address.as_deref()
+                    {
+                        new_iface.base_iface_mut().mac_address =
+                            Some(mac.to_string());
+                    }
+                }
                 Ok(Some(new_iface))
             } else {
                 Ok(None)

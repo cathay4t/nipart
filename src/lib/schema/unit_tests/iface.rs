@@ -244,3 +244,38 @@ fn test_iface_de_absent_keeps_identifier_properties() {
     assert_eq!(base.kernel_iface_name, "eth1");
     assert_eq!(base.profile_name.as_deref(), Some("prof1"));
 }
+
+#[test]
+fn test_iface_gen_diff_mac_identifier_includes_mac_address() {
+    let desired: Interface = rmsd_yaml::from_str(
+        r#"---
+        name: wan0
+        type: ethernet
+        identifier: mac-address
+        mac-address: 02:00:00:00:00:01
+        state: up
+        mtu: 1500
+        "#,
+    )
+    .unwrap();
+    let current: Interface = rmsd_yaml::from_str(
+        r#"---
+        name: eth0
+        type: ethernet
+        mac-address: 02:00:00:00:00:01
+        state: up
+        mtu: 9000
+        "#,
+    )
+    .unwrap();
+
+    let diff = desired.gen_diff(&current).unwrap().unwrap();
+    assert_eq!(
+        diff.base_iface().identifier,
+        Some(InterfaceIdentifier::MacAddress)
+    );
+    assert_eq!(
+        diff.base_iface().mac_address.as_deref(),
+        Some("02:00:00:00:00:01")
+    );
+}
