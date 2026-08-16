@@ -573,8 +573,8 @@ fn parse_link_msg(
             // to process it later where event_worker will check current
             // interface state for SSID
             log::trace!(
-                "{iface_name}: Cannot get SSID of out wifi-phy event \
-                 {link_msg:?}"
+                "{iface_name}: No SSID out wifi-phy event, delay_notify() \
+                 will try to resolve it later"
             );
             return Some((event, mac));
         };
