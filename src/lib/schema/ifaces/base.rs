@@ -230,13 +230,17 @@ impl BaseInterface {
 
         desired.validate_mtu(current)?;
         if desired.identifier == Some(InterfaceIdentifier::MacAddress)
-            && desired.iface_type != InterfaceType::Ethernet
+            && !matches!(
+                desired.iface_type,
+                InterfaceType::Ethernet | InterfaceType::WifiPhy
+            )
         {
             return Err(NipartError::new(
                 ErrorKind::InvalidArgument,
                 format!(
                     "The `identifier: mac-address` is only supported on \
-                     ethernet interfaces, but interface {} is of type {}",
+                     ethernet and wifi-phy interfaces, but interface {} is of \
+                     type {}",
                     desired.name, desired.iface_type
                 ),
             ));

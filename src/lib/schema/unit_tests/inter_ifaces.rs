@@ -37,6 +37,36 @@ fn test_resolve_mac_identifier_basic_with_mac() {
     assert_eq!(for_apply.base_iface().kernel_iface_name.as_str(), "eth0");
 }
 
+/// Test MAC address matching for `wifi-phy` interfaces.
+#[test]
+fn test_resolve_mac_identifier_wifi_phy() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: HomeWiFi
+          type: wifi-phy
+          identifier: mac-address
+          mac-address: 02:00:00:00:00:01
+        "#,
+    )
+    .unwrap();
+
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: wlan0
+          type: wifi-phy
+          mac-address: 02:00:00:00:00:01
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+
+    assert!(merged.kernel_ifaces.contains_key("wlan0"));
+    let merged_iface = merged.kernel_ifaces.get("wlan0").unwrap();
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    assert_eq!(for_apply.base_iface().kernel_iface_name.as_str(), "wlan0");
+}
+
 /// Test that the force apply option keeps the full desired config even when
 /// the current kernel state already matches it, so explicit up/down actions
 /// can restart DHCP/WIFI instead of being treated as a no-op.
