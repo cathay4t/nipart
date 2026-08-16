@@ -1,8 +1,92 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    Interface, InterfaceState, InterfaceType, MergedInterfaces, NipartInterface,
+    Interface, InterfaceIdentifier, InterfaceLinkState, InterfaceState,
+    InterfaceType, Interfaces, MergedInterfaces, NipartInterface,
 };
+
+/// Expand the IP config of a `wifi-cfg` onto its already-connected
+/// `wifi-phy`.
+///
+/// A `wifi-cfg` is userspace-only, so its IP config is normally applied by
+/// the link-up event after shuli associates. When the wifi-phy is already
+/// up and connected to that SSID at apply time, no link event will fire and
+/// the IP/DHCP change would be silently stored but never applied. Generate a
+/// synthetic `wifi-phy` desired interface carrying the wifi-cfg's IP config
+/// so the normal apply path (including DHCP client startup) handles it
+/// immediately.
+pub(crate) fn expand_wifi_cfg_to_connected_phy(
+    desired: &mut Interfaces,
+    current: &Interfaces,
+) {
+    let mut extra_ifaces: Vec<Interface> = Vec::new();
+    for iface in desired.iter() {
+        let Interface::WifiCfg(wifi_cfg) = iface else {
+            continue;
+        };
+        if !wifi_cfg.is_up() {
+            continue;
+        }
+        let Some(wifi) = wifi_cfg.wifi.as_ref() else {
+            continue;
+        };
+        if wifi_cfg.base_iface().ipv4.is_none()
+            && wifi_cfg.base_iface().ipv6.is_none()
+        {
+            continue;
+        }
+        let Some(cur_phy) = current.kernel_ifaces.values().find(|cur_iface| {
+            if cur_iface.iface_type() != &InterfaceType::WifiPhy {
+                return false;
+            }
+            let ssid_match = matches!(
+                cur_iface,
+                Interface::WifiPhy(phy)
+                    if phy.ssid() == Some(wifi.ssid.as_str())
+            );
+            let base_match =
+                wifi.base_iface.as_deref().is_some_and(|base_iface| {
+                    base_iface == cur_iface.kernel_iface_name()
+                        || base_iface == cur_iface.name()
+                });
+            (base_match || wifi.base_iface.is_none()) && ssid_match
+        }) else {
+            continue;
+        };
+        if cur_phy.base_iface().link_state != Some(InterfaceLinkState::Up) {
+            continue;
+        }
+        let phy_name = cur_phy.kernel_iface_name().to_string();
+        if desired.kernel_ifaces.contains_key(&phy_name) {
+            continue;
+        }
+        let cur_base = cur_phy.base_iface();
+        let mut base = wifi_cfg.base_iface().clone();
+        base.name = cur_base.name.clone();
+        base.kernel_iface_name = cur_base.kernel_iface_name.clone();
+        base.iface_type = InterfaceType::WifiPhy;
+        base.state = InterfaceState::Up;
+        // Copy the identifier from the current kernel interface so the
+        // synthetic desired interface matches the same saved config (e.g. a
+        // MAC-identified wifi-phy) instead of clobbering it on save.
+        base.identifier = Some(InterfaceIdentifier::MacAddress);
+        base.mac_address = cur_base.mac_address.clone();
+        base.permanent_mac_address = None;
+        if base.profile_name.is_none() {
+            base.profile_name = cur_base.profile_name.clone();
+        }
+        log::debug!(
+            "Expanding wifi-cfg {}/{} IP config to connected wifi-phy {}",
+            wifi_cfg.name(),
+            wifi_cfg.iface_type(),
+            phy_name,
+        );
+        extra_ifaces.push(base.into());
+    }
+    for iface in extra_ifaces {
+        desired.push(iface);
+    }
+}
 
 impl MergedInterfaces {
     /// For WIFI bind to any interface, we should mark all suitable wifi-phy up
@@ -38,5 +122,89 @@ impl MergedInterfaces {
                 false
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expand_wifi_cfg_to_connected_phy;
+    use crate::{Interface, InterfaceType, Interfaces, NipartInterface};
+
+    fn wifi_cfg_desired() -> Interfaces {
+        rmsd_yaml::from_str(
+            r#"---
+            - name: HomeWiFi
+              type: wifi-cfg
+              state: up
+              ipv4:
+                enabled: true
+                dhcp: true
+              ipv6:
+                enabled: true
+                dhcp: true
+                autoconf: true
+              wifi:
+                ssid: HomeWiFi
+            "#,
+        )
+        .unwrap()
+    }
+
+    fn connected_wifi_phy() -> Interfaces {
+        rmsd_yaml::from_str(
+            r#"---
+            - name: wlan0
+              type: wifi-phy
+              state: up
+              link-state: up
+              mac-address: 02:00:00:00:00:01
+              permanent-mac-address: 02:00:00:00:00:01
+              profile-name: wlan0
+              wifi:
+                ssid: HomeWiFi
+            "#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_expand_wifi_cfg_ip_to_connected_phy() {
+        let mut desired = wifi_cfg_desired();
+        expand_wifi_cfg_to_connected_phy(&mut desired, &connected_wifi_phy());
+
+        let phy = desired.kernel_ifaces.get("wlan0").unwrap();
+        assert!(matches!(phy, Interface::WifiPhy(_)));
+        assert_eq!(phy.iface_type(), &InterfaceType::WifiPhy);
+        assert_eq!(
+            phy.base_iface().ipv6.as_ref().and_then(|ipv6| ipv6.dhcp),
+            Some(true)
+        );
+        assert!(
+            desired.user_ifaces.contains_key(&(
+                "HomeWiFi".to_string(),
+                InterfaceType::WifiCfg
+            ))
+        );
+    }
+
+    #[test]
+    fn test_no_expand_when_wifi_phy_not_connected() {
+        let mut desired = wifi_cfg_desired();
+        let current: Interfaces = rmsd_yaml::from_str(
+            r#"---
+            - name: wlan0
+              type: wifi-phy
+              state: up
+              link-state: down
+              mac-address: 02:00:00:00:00:01
+              wifi:
+                ssid: HomeWiFi
+            "#,
+        )
+        .unwrap();
+
+        expand_wifi_cfg_to_connected_phy(&mut desired, &current);
+
+        assert!(!desired.kernel_ifaces.contains_key("wlan0"));
     }
 }

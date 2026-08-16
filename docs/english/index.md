@@ -96,6 +96,23 @@ TODO: Upload to COPR
 
 ## Usage
 
+### List configured interfaces
+
+```bash
+# Show npc-style brief info of configured interfaces
+sudo npt
+# Show brief info of a specific configured interface or profile
+sudo npt brief <interface_or_profile>
+# Show brief info of all running interfaces
+sudo npt brief --running
+# Short option of `--running`
+sudo npt brief -r
+# Alias of `brief`
+sudo npt b <interface_or_profile>
+# Short option of `--running` with the `brief` alias
+sudo npt b -r
+```
+
 ### Show current network state
 
 ```bash

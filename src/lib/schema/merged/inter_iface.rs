@@ -179,6 +179,8 @@ impl MergedInterfaces {
         desired.unify_veth_and_ethernet();
         current.unify_veth_and_ethernet();
 
+        super::wifi::expand_wifi_cfg_to_connected_phy(&mut desired, &current);
+
         // TODO: Remove ignore interface
         // TODO: Resolve `type: unknown` in desired based on current state
         for mut des_iface in desired.drain() {

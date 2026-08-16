@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod apply;
+mod brief;
 mod diff;
 mod edit;
 mod error;
@@ -16,6 +17,7 @@ use nipart::{ErrorKind, NipartClient};
 pub(crate) use self::error::CliError;
 use self::{
     apply::CommandApply,
+    brief::CommandBrief,
     diff::CommandDiff,
     edit::CommandEdit,
     iface_action::{CommandDown, CommandUp},
@@ -33,8 +35,6 @@ const RC_TIMEOUT: i32 = 124;
 async fn main() -> Result<(), CliError> {
     let mut cli_cmd = clap::Command::new("npt")
         .about("nipart CLI")
-        .arg_required_else_help(true)
-        .subcommand_required(true)
         .arg(
             clap::Arg::new("quiet")
                 .short('q')
@@ -50,6 +50,7 @@ async fn main() -> Result<(), CliError> {
                 .global(true),
         )
         .subcommand(clap::Command::new("ping").about("Check daemon connection"))
+        .subcommand(CommandBrief::new_cmd())
         .subcommand(CommandShow::new_cmd())
         .subcommand(CommandEdit::new_cmd())
         .subcommand(CommandApply::new_cmd())
@@ -101,6 +102,10 @@ async fn call_subcommand(matches: &clap::ArgMatches) -> Result<(), CliError> {
         let mut cli = NipartClient::new().await?;
         println!("{}", cli.ping().await?);
         Ok(())
+    } else if let Some(matches) = matches.subcommand_matches(CommandBrief::CMD)
+    {
+        CommandBrief::handle(matches).await?;
+        Ok(())
     } else if let Some(matches) = matches.subcommand_matches(CommandShow::CMD) {
         CommandShow::handle(matches).await?;
         Ok(())
@@ -131,6 +136,6 @@ async fn call_subcommand(matches: &clap::ArgMatches) -> Result<(), CliError> {
         CommandWaitOnline::handle().await?;
         Ok(())
     } else {
-        Err(CliError::from("Unknown command"))
+        brief::handle(false, None).await
     }
 }
