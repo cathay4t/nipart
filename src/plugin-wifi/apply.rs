@@ -154,9 +154,11 @@ async fn run_driver(
                         WifiState::ConnectedWithoutOffloadRekey
                         | WifiState::ConnectedWithOffloadRekey,
                     ) => {
+                        let ssid = client.current_ssid();
+                        let bssid = mac_to_string(&client.current_bssid());
                         log::info!(
-                            "WIFI connected on {iface_name}: {}",
-                            client.current_ssid()
+                            "WIFI connected on {iface_name}: SSID {ssid}, \
+                             BSSID {bssid}"
                         );
                     }
                     Ok(WifiState::Failed) => {
@@ -180,6 +182,13 @@ async fn run_driver(
             }
         }
     }
+}
+
+fn mac_to_string(mac: &[u8; 6]) -> String {
+    mac.iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 impl NipartWpaConn {
