@@ -89,6 +89,8 @@ pub(crate) fn np_iface_to_base_iface(
         iface_type: np_iface_type_to_nipart(&np_iface.iface_type),
         mac_address: Some(np_iface.mac_address.to_uppercase()),
         permanent_mac_address: get_permanent_mac_address(np_iface),
+        driver: np_iface.driver.clone(),
+        pci_address: np_iface.pci_address.map(|p| p.to_string()),
         controller: np_iface.controller.as_ref().map(|c| c.to_string()),
         mtu: if np_iface.mtu >= 0 {
             Some(np_iface.mtu as u64)

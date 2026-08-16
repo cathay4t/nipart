@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{BaseInterface, JsonDisplay, NipartError, NipartInterface};
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, JsonDisplay)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonDisplay,
+)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 /// Holder for interface with unknown interface type defined.
@@ -13,8 +15,6 @@ use crate::{BaseInterface, JsonDisplay, NipartError, NipartInterface};
 pub struct UnknownInterface {
     #[serde(flatten)]
     pub base: BaseInterface,
-    #[serde(flatten)]
-    pub(crate) other: serde_json::Value,
 }
 
 impl UnknownInterface {
@@ -35,7 +35,7 @@ impl NipartInterface for UnknownInterface {
         &mut self.base
     }
 
-    /// Not sure is kernel interface or user space interface, return true
+    /// Not sure is physical or kernel virtual interface, treat as virtual
     /// always.
     fn is_virtual(&self) -> bool {
         true
@@ -53,40 +53,37 @@ impl NipartInterface for UnknownInterface {
     }
 }
 
-impl<'de> Deserialize<'de> for UnknownInterface {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let mut ret = UnknownInterface::default();
-        let mut v = serde_json::Map::deserialize(deserializer)?;
-        let mut base_value = serde_json::map::Map::new();
-        if let Some(n) = v.remove("name") {
-            base_value.insert("name".to_string(), n);
-        }
-        if let Some(s) = v.remove("state") {
-            base_value.insert("state".to_string(), s);
-        }
-        if let Some(s) = v.remove("identifier") {
-            base_value.insert("identifier".to_string(), s);
-        }
-        if let Some(s) = v.remove("mac-address") {
-            base_value.insert("mac-address".to_string(), s);
-        }
-        if let Some(s) = v.remove("kernel-iface-name") {
-            base_value.insert("kernel-iface-name".to_string(), s);
-        }
-        if let Some(s) = v.remove("profile-name") {
-            base_value.insert("profile-name".to_string(), s);
-        }
-        if let Some(s) = v.remove("type") {
-            base_value.insert("type".to_string(), s);
-        }
-        ret.base = BaseInterface::deserialize(
-            serde_json::value::Value::Object(base_value),
-        )
-        .map_err(serde::de::Error::custom)?;
-        ret.other = serde_json::Value::Object(v);
-        Ok(ret)
+#[cfg(test)]
+mod tests {
+    use super::UnknownInterface;
+    use crate::{
+        BaseInterface, InterfaceLinkState, InterfaceState, InterfaceType,
+    };
+
+    #[test]
+    fn test_deserialize_preserves_query_only_base_fields() {
+        let base = BaseInterface {
+            name: "vnet0".to_string(),
+            iface_type: InterfaceType::Tun,
+            state: InterfaceState::Ignore,
+            iface_index: Some(6),
+            mtu: Some(1500),
+            mac_address: Some("FE:54:00:D9:4F:3E".to_string()),
+            controller: Some("virbr0".to_string()),
+            link_state: Some(InterfaceLinkState::Unknown),
+            ..Default::default()
+        };
+        let iface = UnknownInterface::new(base);
+        let value = serde_json::to_value(&iface).unwrap();
+
+        let roundtrip: UnknownInterface =
+            serde_json::from_value(value).unwrap();
+        assert_eq!(roundtrip.base.iface_index, Some(6));
+        assert_eq!(roundtrip.base.mtu, Some(1500));
+        assert_eq!(roundtrip.base.controller.as_deref(), Some("virbr0"));
+        assert_eq!(
+            roundtrip.base.link_state,
+            Some(InterfaceLinkState::Unknown)
+        );
     }
 }

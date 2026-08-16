@@ -84,6 +84,12 @@ pub struct BaseInterface {
     /// Ignored during apply.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permanent_mac_address: Option<String>,
+    /// Driver name of the network device. Query only property.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub driver: Option<String>,
+    /// PCI address of the network device. Query only property.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "pci-address")]
+    pub pci_address: Option<String>,
     /// Maximum transmission unit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mtu: Option<u64>,
@@ -149,6 +155,14 @@ impl BaseInterface {
         for_apply.permanent_mac_address = None;
         for_save.permanent_mac_address = None;
         for_verify.permanent_mac_address = None;
+        // driver and pci_address are query-only, should not be applied,
+        // persisted, nor verified.
+        for_apply.driver = None;
+        for_save.driver = None;
+        for_verify.driver = None;
+        for_apply.pci_address = None;
+        for_save.pci_address = None;
+        for_verify.pci_address = None;
 
         if let Some(ipv4) = for_apply.ipv4.as_mut() {
             ipv4.sanitize(current.and_then(|c| c.ipv4.as_ref()))?;
