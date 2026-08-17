@@ -94,9 +94,15 @@ impl NipartInterface for WifiPhyInterface {
             }
         }
         if for_apply.wifi.is_some() {
-            for_save.wifi = for_apply.wifi.clone();
-            for_verify.wifi = for_apply.wifi.clone();
-            merged.wifi = for_apply.wifi.clone();
+            if let Some(for_save_wifi) = for_save.wifi.as_mut() {
+                for_save_wifi.sanitize();
+                for_verify.wifi = Some(for_save_wifi.clone());
+                merged.wifi = Some(for_save_wifi.clone());
+            } else {
+                for_save.wifi = for_apply.wifi.clone();
+                for_verify.wifi = for_apply.wifi.clone();
+                merged.wifi = for_apply.wifi.clone();
+            }
         }
         Ok(())
     }
@@ -367,9 +373,15 @@ impl NipartInterface for WifiCfgInterface {
             wifi_cfg.sanitize();
         }
         if for_apply.wifi.is_some() {
-            for_save.wifi = for_apply.wifi.clone();
-            for_verify.wifi = for_apply.wifi.clone();
-            merged.wifi = for_apply.wifi.clone();
+            if let Some(for_save_wifi) = for_save.wifi.as_mut() {
+                for_save_wifi.sanitize();
+                for_verify.wifi = Some(for_save_wifi.clone());
+                merged.wifi = Some(for_save_wifi.clone());
+            } else {
+                for_save.wifi = for_apply.wifi.clone();
+                for_verify.wifi = for_apply.wifi.clone();
+                merged.wifi = for_apply.wifi.clone();
+            }
         }
         Ok(())
     }

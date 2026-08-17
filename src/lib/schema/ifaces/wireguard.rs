@@ -98,9 +98,18 @@ impl NipartInterface for WireguardInterface {
             ));
         }
         if for_apply.wireguard.is_some() {
-            for_save.wireguard = for_apply.wireguard.clone();
-            for_verify.wireguard = for_apply.wireguard.clone();
-            merged.wireguard = for_apply.wireguard.clone();
+            if let Some(for_save_wg) = for_save.wireguard.as_mut() {
+                for_save_wg.sanitize(
+                    current.and_then(|c| c.wireguard.as_ref()),
+                    desired.base.name.as_str(),
+                )?;
+                for_verify.wireguard = Some(for_save_wg.clone());
+                merged.wireguard = Some(for_save_wg.clone());
+            } else {
+                for_save.wireguard = for_apply.wireguard.clone();
+                for_verify.wireguard = for_apply.wireguard.clone();
+                merged.wireguard = for_apply.wireguard.clone();
+            }
         }
         Ok(())
     }
