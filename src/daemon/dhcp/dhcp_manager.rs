@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use nipart::{
-    BaseInterface, MergedNetworkState, NetworkState, NipartError,
-    NipartInterface, NipartIpcConnection,
+    BaseInterface, Interface, MergedNetworkState, NetworkState, NipartError,
+    NipartInterface, NipartIpcConnection, NipartNoDaemon,
 };
 
-use super::{NipartDhcpCmd, NipartDhcpReply, NipartDhcpV4Worker};
+use super::{
+    NipartDhcpCmd, NipartDhcpReply, NipartDhcpV4Worker, wait_wifi_ssid,
+};
 use crate::{TaskManager, log_debug};
 
 #[derive(Debug, Clone)]
@@ -113,17 +115,32 @@ impl NipartDhcpV4Manager {
             apply_iface.base_iface_mut().iface_index =
                 merged_iface.merged.base_iface().iface_index;
             if apply_iface.is_up() {
+                let ssid_changed = matches!(
+                    (
+                        merged_iface.current.as_ref(),
+                        merged_iface.desired.as_ref(),
+                    ),
+                    (
+                        Some(Interface::WifiPhy(cur)),
+                        Some(Interface::WifiPhy(des)),
+                    ) if cur.ssid() != des.ssid()
+                );
                 if let Some(dhcp_enabled) =
                     apply_iface.base_iface().ipv4.as_ref().map(|i| i.is_auto())
                 {
                     if dhcp_enabled {
-                        if merged_state.option.force {
+                        if merged_state.option.force || ssid_changed {
                             log_debug(
                                 conn.as_deref_mut(),
                                 format!(
-                                    "Restarting DHCPv4 on interface {}({})",
+                                    "Restarting DHCPv4 on interface {}({}){}",
                                     apply_iface.name(),
-                                    apply_iface.iface_type()
+                                    apply_iface.iface_type(),
+                                    if ssid_changed {
+                                        " due to SSID change"
+                                    } else {
+                                        ""
+                                    },
                                 ),
                             )
                             .await;
@@ -131,6 +148,26 @@ impl NipartDhcpV4Manager {
                                 apply_iface.kernel_iface_name(),
                             )
                             .await?;
+                            if ssid_changed {
+                                NipartNoDaemon::purge_iface_ip(
+                                    merged_iface.merged.base_iface(),
+                                    merged_iface
+                                        .current
+                                        .as_ref()
+                                        .map(|i| i.base_iface()),
+                                )
+                                .await?;
+                                if let Some(Interface::WifiPhy(des_iface)) =
+                                    merged_iface.desired.as_ref()
+                                    && let Some(ssid) = des_iface.ssid()
+                                {
+                                    wait_wifi_ssid(
+                                        apply_iface.kernel_iface_name(),
+                                        ssid,
+                                    )
+                                    .await?;
+                                }
+                            }
                         } else {
                             log_debug(
                                 conn.as_deref_mut(),
