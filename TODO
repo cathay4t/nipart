@@ -1,9 +1,6 @@
  * OVS bridge
- * VxLAN
- * VRF
  * MacSec
  * HSR
- * Loopback
  * MacVlan
  * Infiniband
  * SRIOV
