@@ -5,6 +5,7 @@ use std::{net::IpAddr, str::FromStr};
 use super::iface::init_np_iface;
 use crate::{
     BaseInterface, InterfaceIpAddr, InterfaceIpv4, InterfaceIpv6, NipartError,
+    NipartNoDaemon,
 };
 
 pub(crate) fn np_ipv4_to_nipart(
@@ -303,6 +304,33 @@ fn is_replacing(
                     && des_addr.prefix_length == cur_addr.prefix_length
             })
         })
+}
+
+impl NipartNoDaemon {
+    /// Purge all IPv4 and IPv6 addresses from the interface.
+    ///
+    /// Used before restarting DHCP when the wifi-phy switches to a
+    /// different SSID, so the previous network's lease cannot survive
+    /// the switch.
+    pub async fn purge_iface_ip(
+        base_iface: &BaseInterface,
+        current: Option<&BaseInterface>,
+    ) -> Result<(), NipartError> {
+        let mut purge_iface = base_iface.clone_name_type_only();
+        purge_iface.ipv4 = Some(InterfaceIpv4::new_disabled());
+        purge_iface.ipv6 = Some(InterfaceIpv6::new_disabled());
+        if let Some(np_iface) = apply_iface_ip_changes(&purge_iface, current)? {
+            let mut net_conf = nispor::NetConf::default();
+            net_conf.ifaces = Some(vec![np_iface]);
+            net_conf.apply_async().await.map_err(|e| {
+                NipartError::new(
+                    crate::ErrorKind::Bug,
+                    format!("Failed to purge IP addresses: {e}"),
+                )
+            })?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
