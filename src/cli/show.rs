@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use nipart::{
-    NetworkState, NipartClient, NipartInterface, NipartNoDaemon,
+    Interface, NetworkState, NipartClient, NipartInterface, NipartNoDaemon,
     NipartQueryOption, RouteEntry,
 };
 
@@ -17,9 +17,9 @@ impl CommandShow {
             .alias("s")
             .about("Query network state")
             .arg(
-                clap::Arg::new("IFNAME")
+                clap::Arg::new("IFNAME_OR_PROFILE")
                     .index(1)
-                    .help("Show specific interface only"),
+                    .help("Show specific interface or profile only"),
             )
             .arg(
                 clap::Arg::new("NO_DAEMON")
@@ -60,19 +60,20 @@ impl CommandShow {
             let mut opt = if matches.get_flag("SAVED") {
                 NipartQueryOption::saved()
             } else {
-                NipartQueryOption::running()
+                NipartQueryOption::running_and_saved()
             };
             if matches.get_flag("SHOW_SECRETS") {
                 opt = opt.include_secrets(true);
             }
             cli.query_network_state(opt).await?
         };
-        let mut net_state =
-            if let Some(ifname) = matches.get_one::<String>("IFNAME") {
-                filter_net_state(&net_state, ifname)
-            } else {
-                net_state
-            };
+        let mut net_state = if let Some(name) =
+            matches.get_one::<String>("IFNAME_OR_PROFILE")
+        {
+            filter_net_state(&net_state, name)
+        } else {
+            net_state
+        };
 
         if !matches.get_flag("SHOW_SECRETS") {
             net_state.hide_secrets();
@@ -84,33 +85,51 @@ impl CommandShow {
     }
 }
 
-fn filter_net_state(
-    net_state: &NetworkState,
-    iface_name: &str,
-) -> NetworkState {
+fn filter_net_state(net_state: &NetworkState, name: &str) -> NetworkState {
     let mut ret = NetworkState::new();
+    let mut matched_ifaces: Vec<&Interface> = Vec::new();
     for iface in net_state.ifaces.iter() {
-        if iface.kernel_iface_name() == iface_name {
-            ret.ifaces.push(iface.clone())
+        if iface_matches_name(iface, name) {
+            matched_ifaces.push(iface);
+            ret.ifaces.push(iface.clone());
         }
     }
-    ret.routes.running =
-        filter_routes(net_state.routes.running.as_deref(), iface_name);
-    ret.routes.config =
-        filter_routes(net_state.routes.config.as_deref(), iface_name);
+    ret.routes.running = filter_routes(
+        net_state.routes.running.as_deref(),
+        name,
+        &matched_ifaces,
+    );
+    ret.routes.config = filter_routes(
+        net_state.routes.config.as_deref(),
+        name,
+        &matched_ifaces,
+    );
     ret
 }
 
-/// Keep only route entries whose next hop interface matches `iface_name`.
-/// Returns `None` when no route remains so the YAML output stays clean.
+fn iface_matches_name(iface: &Interface, name: &str) -> bool {
+    iface.name() == name
+        || iface.kernel_iface_name() == name
+        || iface.base_iface().profile_name.as_deref() == Some(name)
+}
+
+/// Keep only route entries whose next hop interface matches `name` or one of
+/// the matched interfaces. Returns `None` when no route remains so the YAML
+/// output stays clean.
 fn filter_routes(
     routes: Option<&[RouteEntry]>,
-    iface_name: &str,
+    name: &str,
+    matched_ifaces: &[&Interface],
 ) -> Option<Vec<RouteEntry>> {
     let filtered: Vec<RouteEntry> = routes
         .map(|rts| {
             rts.iter()
-                .filter(|rt| rt.next_hop_iface.as_deref() == Some(iface_name))
+                .filter(|rt| {
+                    route_matches_name(rt, name)
+                        || matched_ifaces
+                            .iter()
+                            .any(|iface| route_matches_iface(rt, iface))
+                })
                 .cloned()
                 .collect()
         })
@@ -120,6 +139,19 @@ fn filter_routes(
     } else {
         Some(filtered)
     }
+}
+
+fn route_matches_name(rt: &RouteEntry, name: &str) -> bool {
+    rt.next_hop_iface.as_deref() == Some(name)
+}
+
+fn route_matches_iface(rt: &RouteEntry, iface: &Interface) -> bool {
+    let Some(next_hop_iface) = rt.next_hop_iface.as_deref() else {
+        return false;
+    };
+    next_hop_iface == iface.kernel_iface_name()
+        || next_hop_iface == iface.name()
+        || iface.base_iface().profile_name.as_deref() == Some(next_hop_iface)
 }
 
 #[cfg(test)]
@@ -144,17 +176,23 @@ mod tests {
         )))
     }
 
+    fn new_iface_with_profile(name: &str, profile_name: &str) -> Interface {
+        let mut iface = new_iface(name);
+        iface.base_iface_mut().profile_name = Some(profile_name.to_string());
+        iface
+    }
+
     fn net_state_with_two_ifaces_and_routes() -> NetworkState {
         let mut net_state = NetworkState::new();
         net_state.ifaces =
-            Interfaces::new(vec![new_iface("cunet"), new_iface("eth1")]);
+            Interfaces::new(vec![new_iface("mynet"), new_iface("eth1")]);
         net_state.routes.running = Some(vec![
-            new_route("0.0.0.0/0", "cunet"),
+            new_route("0.0.0.0/0", "mynet"),
             new_route("192.0.2.0/24", "eth1"),
-            new_route("198.51.100.0/24", "cunet"),
+            new_route("198.51.100.0/24", "mynet"),
         ]);
         net_state.routes.config = Some(vec![
-            new_route("10.0.0.0/8", "cunet"),
+            new_route("10.0.0.0/8", "mynet"),
             new_route("172.16.0.0/12", "eth1"),
         ]);
         net_state
@@ -163,12 +201,12 @@ mod tests {
     #[test]
     fn test_filter_net_state_keeps_iface_and_its_routes() {
         let net_state = net_state_with_two_ifaces_and_routes();
-        let filtered = filter_net_state(&net_state, "cunet");
+        let filtered = filter_net_state(&net_state, "mynet");
 
         assert_eq!(filtered.ifaces.iter().count(), 1);
         assert_eq!(
             filtered.ifaces.iter().next().unwrap().kernel_iface_name(),
-            "cunet"
+            "mynet"
         );
 
         let running = filtered.routes.running.unwrap();
@@ -176,7 +214,7 @@ mod tests {
         assert!(
             running
                 .iter()
-                .all(|rt| rt.next_hop_iface.as_deref() == Some("cunet"))
+                .all(|rt| rt.next_hop_iface.as_deref() == Some("mynet"))
         );
 
         let config = filtered.routes.config.unwrap();
@@ -187,10 +225,10 @@ mod tests {
     #[test]
     fn test_filter_net_state_no_routes_yields_none() {
         let mut net_state = NetworkState::new();
-        net_state.ifaces = Interfaces::new(vec![new_iface("cunet")]);
+        net_state.ifaces = Interfaces::new(vec![new_iface("mynet")]);
         net_state.routes.config = Some(vec![new_route("0.0.0.0/0", "eth1")]);
 
-        let filtered = filter_net_state(&net_state, "cunet");
+        let filtered = filter_net_state(&net_state, "mynet");
 
         assert_eq!(filtered.ifaces.iter().count(), 1);
         assert!(filtered.routes.running.is_none());
@@ -198,8 +236,33 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_net_state_by_profile_name() {
+        let mut net_state = NetworkState::new();
+        net_state.ifaces =
+            Interfaces::new(vec![new_iface_with_profile("eth0", "mynet")]);
+        net_state.routes.running = Some(vec![
+            new_route("0.0.0.0/0", "eth0"),
+            new_route("192.0.2.0/24", "eth1"),
+        ]);
+        net_state.routes.config = Some(vec![new_route("10.0.0.0/8", "mynet")]);
+
+        let filtered = filter_net_state(&net_state, "mynet");
+
+        assert_eq!(filtered.ifaces.iter().count(), 1);
+        assert_eq!(filtered.ifaces.iter().next().unwrap().name(), "eth0");
+
+        let running = filtered.routes.running.unwrap();
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0].next_hop_iface.as_deref(), Some("eth0"));
+
+        let config = filtered.routes.config.unwrap();
+        assert_eq!(config.len(), 1);
+        assert_eq!(config[0].next_hop_iface.as_deref(), Some("mynet"));
+    }
+
+    #[test]
     fn test_filter_routes_empty_input() {
-        assert!(filter_routes(None, "cunet").is_none());
-        assert!(filter_routes(Some(&[]), "cunet").is_none());
+        assert!(filter_routes(None, "mynet", &[]).is_none());
+        assert!(filter_routes(Some(&[]), "mynet", &[]).is_none());
     }
 }

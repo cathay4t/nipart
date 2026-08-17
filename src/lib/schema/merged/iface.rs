@@ -54,6 +54,9 @@ impl MergedInterface {
         force: bool,
     ) -> Result<Self, NipartError> {
         let saved = saved.as_ref();
+        let saved_only = desired
+            .as_ref()
+            .is_some_and(|d| d.base_iface().state.is_saved());
         let for_save = if let Some(desired) = desired.as_ref() {
             if let Some(saved) = saved {
                 Some(saved.merge(desired)?)
@@ -109,6 +112,22 @@ impl MergedInterface {
         };
 
         ret.sanitize(saved)?;
+
+        if saved_only {
+            // `state: saved` requests save-only: the config is persisted but
+            // nothing is applied to kernel, verified or reverted.
+            ret.for_apply = None;
+            ret.for_verify = None;
+            ret.for_revert = None;
+            if let Some(for_save) = ret.for_save.as_mut() {
+                // `state: saved` is not a persistent state: keep the
+                // previous saved state (or default to up) so the profile
+                // can be activated later.
+                for_save.base_iface_mut().state = saved
+                    .map(|s| s.base_iface().state)
+                    .unwrap_or(InterfaceState::Up);
+            }
+        }
 
         Ok(ret)
     }

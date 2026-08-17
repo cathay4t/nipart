@@ -10,10 +10,14 @@ pub struct NipartQueryOption {
     /// Schema version for output
     #[serde(default)]
     pub version: u32,
-    /// Which kind of NetworkState to query, default:
-    /// [NipartStateKind::RunningNetworkState]
+    /// Whether to include current kernel interfaces and activated saved
+    /// profiles. Default to true.
+    #[serde(default = "default_true")]
+    pub running: bool,
+    /// Whether to include saved profiles. Inactive profiles are marked as
+    /// `state: saved`; activated profiles as `state: up`. Default to false.
     #[serde(default)]
-    pub kind: NipartStateKind,
+    pub saved: bool,
     /// Whether include secrets/passwords, default to false.
     #[serde(default)]
     pub include_secrets: bool,
@@ -23,7 +27,8 @@ impl Default for NipartQueryOption {
     fn default() -> Self {
         Self {
             version: CUR_SCHEMA_VERSION,
-            kind: NipartStateKind::default(),
+            running: true,
+            saved: false,
             include_secrets: false,
         }
     }
@@ -31,15 +36,21 @@ impl Default for NipartQueryOption {
 
 impl NipartQueryOption {
     pub fn running() -> Self {
-        Self {
-            kind: NipartStateKind::RunningNetworkState,
-            ..Default::default()
-        }
+        Self::default()
     }
 
     pub fn saved() -> Self {
         Self {
-            kind: NipartStateKind::SavedNetworkState,
+            running: false,
+            saved: true,
+            ..Default::default()
+        }
+    }
+
+    pub fn running_and_saved() -> Self {
+        Self {
+            running: true,
+            saved: true,
             ..Default::default()
         }
     }
@@ -50,17 +61,8 @@ impl NipartQueryOption {
     }
 }
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, JsonDisplay,
-)]
-#[non_exhaustive]
-#[serde(rename_all = "kebab-case")]
-pub enum NipartStateKind {
-    /// The current running network state
-    #[default]
-    RunningNetworkState,
-    /// Network state stored in daemon
-    SavedNetworkState,
+fn default_true() -> bool {
+    true
 }
 
 #[derive(

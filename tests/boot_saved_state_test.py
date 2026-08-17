@@ -3,13 +3,15 @@
 import os
 import time
 
-from .conftest import DAEMON_LOG, start_daemon, stop_daemon
+from .conftest import CLI_PATH, DAEMON_LOG, start_daemon, stop_daemon
 from .testlib.cmdlib import exec_cmd
 from .testlib.retry import retry_till_true_or_timeout
+from .testlib.statelib import show_only
 
 SAVED_STATE_FILE = "/etc/nipart/states/internal/applied.yml"
 TEST_VETH = "veth-saved-mac0"
 TEST_VETH_PEER = "veth-saved-mac1"
+TEST_SAVED_ONLY_NIC = "saved-name-only0"
 TEST_MAC = "02:00:00:00:00:02"
 TEST_IP = "192.0.2.99"
 TEST_MTU = 1280
@@ -71,6 +73,12 @@ def _route_exists():
     return rc == 0 and "198.51.100.0/24" in out
 
 
+def _show(iface_name):
+    rc, out, err = exec_cmd([CLI_PATH, "s", iface_name], check=False)
+    assert rc == 0, f"npt s failed:\n{out}\n{err}"
+    return out
+
+
 def _log_since(pos, text):
     if not os.path.exists(DAEMON_LOG):
         return False
@@ -122,6 +130,21 @@ def test_saved_config_without_nic_not_blocking_boot_and_activated_on_hotplug():
             not _route_exists()
         ), "Route via the missing NIC should not exist before plug-in"
 
+        # The saved-only profile must stay visible in the running query,
+        # marked as `state: saved`, while its NIC is absent.
+        assert "state: saved" in _show(
+            "wan0"
+        ), "npt s should report the saved-only profile as `state: saved`"
+        assert show_only("wan0") is None, (
+            "Default running query must stay kernel truth: the absent-NIC "
+            "profile should not appear without the saved-only option"
+        )
+        rc, out, err = exec_cmd([CLI_PATH, "show"], check=False)
+        assert rc == 0, f"npt show failed:\n{out}\n{err}"
+        assert (
+            "state: saved" in out
+        ), "npt show should include saved but not activated config"
+
         # Now the NIC appears (well after the boot grace period): the
         # monitor worker emits the link event and the saved config (IP,
         # MTU and route) is applied.
@@ -137,9 +160,51 @@ def test_saved_config_without_nic_not_blocking_boot_and_activated_on_hotplug():
         assert retry_till_true_or_timeout(
             DEFAULT_TIMEOUT, _iface_has_route, TEST_VETH
         ), f"Route via {TEST_VETH} not added after plug-in"
+
+        # Once activated, the profile is reported with the running state
+        # instead of `state: saved`.
+        show_out = _show("wan0")
+        assert "state: saved" not in show_out, show_out
+        assert "state: up" in show_out, show_out
     finally:
         exec_cmd(["ip", "link", "del", TEST_VETH], check=False)
         # Remove the test saved state so later tests start clean.
+        if os.path.exists(SAVED_STATE_FILE):
+            os.remove(SAVED_STATE_FILE)
+        stop_daemon()
+        start_daemon()
+
+
+def test_saved_name_based_profile_without_nic_shown_as_saved():
+    exec_cmd(["ip", "link", "del", TEST_SAVED_ONLY_NIC], check=False)
+    stop_daemon()
+
+    try:
+        # A plain name-based profile (the `npt s <profile>` case) whose
+        # interface is absent from the kernel.
+        os.makedirs(os.path.dirname(SAVED_STATE_FILE), exist_ok=True)
+        with open(SAVED_STATE_FILE, "w") as state_f:
+            state_f.write(f"""---
+version: 1
+interfaces:
+- name: {TEST_SAVED_ONLY_NIC}
+  type: dummy
+  state: up
+  auto-connect: false
+""")
+
+        start_daemon()
+
+        out = _show(TEST_SAVED_ONLY_NIC)
+        assert "state: saved" in out, (
+            f"npt s {TEST_SAVED_ONLY_NIC} should report `state: saved`: "
+            f"{out}"
+        )
+        assert show_only(TEST_SAVED_ONLY_NIC) is None, (
+            "Default running query must stay kernel truth for the "
+            "saved-only name-based profile"
+        )
+    finally:
         if os.path.exists(SAVED_STATE_FILE):
             os.remove(SAVED_STATE_FILE)
         stop_daemon()

@@ -231,7 +231,7 @@ impl InterfaceIpv4 {
     pub(crate) fn sanitize_before_verify(&mut self, current: &mut Self) {
         self.auto_gateway = None;
         if let Some(addrs) = self.addresses.as_mut() {
-            for addr in addrs {
+            for addr in addrs.iter_mut() {
                 if let Some(cur_addr) =
                     current.addresses.as_ref().and_then(|cur_addrs| {
                         cur_addrs.iter().find(|cur_addr| {
@@ -433,13 +433,13 @@ impl InterfaceIpv6 {
     ///   be latency after applied and query back.
     /// * Set current DHCP none to false.
     /// * Set current address none to empty array.
-    /// * Remove link-local addresses from current state as they are
-    ///   auto-assigned by kernel.
+    /// * Remove link-local addresses from both desired and current state as
+    ///   they are auto-assigned by kernel.
     /// * Sort addresses in both desired and current state to canonical order so
     ///   that verification is order-independent.
     pub(crate) fn sanitize_before_verify(&mut self, current: &mut Self) {
         if let Some(addrs) = self.addresses.as_mut() {
-            for addr in addrs {
+            for addr in addrs.iter_mut() {
                 if let Some(cur_addr) =
                     current.addresses.as_ref().and_then(|cur_addrs| {
                         cur_addrs.iter().find(|cur_addr| {
@@ -453,6 +453,11 @@ impl InterfaceIpv6 {
                         cur_addr.preferred_life_time.clone();
                 }
             }
+            addrs.retain(|addr| match addr.ip {
+                IpAddr::V6(ip_addr) => !ip_addr.is_unicast_link_local(),
+                IpAddr::V4(_) => true,
+            });
+            addrs.sort();
         }
         if let Some(addrs) = current.addresses.as_mut() {
             addrs.retain(|addr| match addr.ip {
@@ -713,6 +718,34 @@ mod test {
         desired.sanitize_before_verify(&mut current);
 
         assert_eq!(current.addresses.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_link_local_removed_from_desired() {
+        let link_local_addr = InterfaceIpAddr {
+            ip: IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
+            prefix_length: 64,
+            valid_life_time: None,
+            preferred_life_time: None,
+        };
+        let global_addr = InterfaceIpAddr {
+            ip: IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+            prefix_length: 64,
+            valid_life_time: None,
+            preferred_life_time: None,
+        };
+        let mut desired = InterfaceIpv6 {
+            enabled: Some(true),
+            dhcp: Some(false),
+            dhcp_state: None,
+            autoconf: Some(false),
+            addresses: Some(vec![link_local_addr, global_addr.clone()]),
+        };
+        let mut current = InterfaceIpv6::default();
+
+        desired.sanitize_before_verify(&mut current);
+
+        assert_eq!(desired.addresses.unwrap(), vec![global_addr]);
     }
 
     #[test]

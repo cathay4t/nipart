@@ -17,7 +17,9 @@ use crate::{
 const SUPPORTED_ROUTE_SCOPE: [nispor::RouteScope; 2] =
     [nispor::RouteScope::Universe, nispor::RouteScope::Link];
 
-const SUPPORTED_ROUTE_PROTOCOL: [nispor::RouteProtocol; 7] = [
+const SUPPORTED_ROUTE_PROTOCOL: [nispor::RouteProtocol; 8] = [
+    // Connected routes created by the kernel when an address is assigned.
+    nispor::RouteProtocol::Kernel,
     nispor::RouteProtocol::Boot,
     nispor::RouteProtocol::Static,
     nispor::RouteProtocol::Ra,
@@ -29,6 +31,10 @@ const SUPPORTED_ROUTE_PROTOCOL: [nispor::RouteProtocol; 7] = [
 
 const SUPPORTED_STATIC_ROUTE_PROTOCOL: [nispor::RouteProtocol; 2] =
     [nispor::RouteProtocol::Boot, nispor::RouteProtocol::Static];
+
+// Table used by the kernel for local and broadcast routes; these are
+// derived from the interface itself and not part of the route config.
+const LOCAL_ROUTE_TABLE: u32 = 255;
 
 const IPV4_DEFAULT_GATEWAY: &str = "0.0.0.0/0";
 const IPV6_DEFAULT_GATEWAY: &str = "::/0";
@@ -67,10 +73,10 @@ pub(crate) async fn get_routes(_ifaces: &Interfaces) -> Routes {
     }
 
     let mut running_routes = Vec::new();
-    for np_route in np_routes
-        .iter()
-        .filter(|np_route| SUPPORTED_ROUTE_SCOPE.contains(&np_route.scope))
-    {
+    for np_route in np_routes.iter().filter(|np_route| {
+        np_route.table != LOCAL_ROUTE_TABLE
+            && SUPPORTED_ROUTE_SCOPE.contains(&np_route.scope)
+    }) {
         if is_multipath(np_route) {
             for route in flat_multipath_route(np_route) {
                 running_routes.push(route);
@@ -85,7 +91,8 @@ pub(crate) async fn get_routes(_ifaces: &Interfaces) -> Routes {
 
     let mut config_routes = Vec::new();
     for np_route in np_routes.iter().filter(|np_route| {
-        SUPPORTED_ROUTE_SCOPE.contains(&np_route.scope)
+        np_route.table != LOCAL_ROUTE_TABLE
+            && SUPPORTED_ROUTE_SCOPE.contains(&np_route.scope)
             && SUPPORTED_STATIC_ROUTE_PROTOCOL.contains(&np_route.protocol)
     }) {
         if is_multipath(np_route) {

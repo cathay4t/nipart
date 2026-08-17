@@ -269,6 +269,9 @@ pub enum RouteState {
     Absent,
     /// Mark a route as ignored
     Ignore,
+    /// Mark a route as saved only: persisted in saved config but not
+    /// applied to kernel. Query and desired state both support this value.
+    Saved,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonDisplay)]
@@ -429,6 +432,10 @@ impl RouteEntry {
 
     pub(crate) fn is_ignore(&self) -> bool {
         matches!(self.state, Some(RouteState::Ignore))
+    }
+
+    pub fn is_saved(&self) -> bool {
+        matches!(self.state, Some(RouteState::Saved))
     }
 
     /// Whether the desired route (self) matches with another
