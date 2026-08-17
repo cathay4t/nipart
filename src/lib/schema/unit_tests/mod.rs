@@ -15,5 +15,6 @@ mod serializer;
 mod vrf;
 mod vxlan;
 mod wifi;
+mod wireguard;
 mod yaml_roundtrip;
 mod yaml_stringified;

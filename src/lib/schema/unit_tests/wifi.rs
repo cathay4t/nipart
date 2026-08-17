@@ -2,7 +2,7 @@
 
 use crate::{
     ErrorKind, Interface, InterfaceType, NetworkState, NipartInterface,
-    WifiPhyInterface,
+    WifiCfgInterface, WifiPhyInterface,
 };
 
 fn sanitize_wifi_phy(
@@ -59,6 +59,114 @@ fn test_wifi_phy_hold_wifi_cfg_with_other_base_iface() {
         assert_eq!(e.kind(), ErrorKind::InvalidArgument);
         assert!(e.msg.contains("wlan1"));
     }
+}
+
+#[test]
+fn test_wifi_cfg_sanitize_keeps_full_saved_config_on_diff_apply() {
+    let desired: WifiCfgInterface = rmsd_yaml::from_str(
+        r#"---
+        name: Test-WIFI
+        type: wifi-cfg
+        state: up
+        wifi:
+          ssid: Test-WIFI
+          password: <_hidden_>
+          base-iface: wlan0
+        "#,
+    )
+    .unwrap();
+    let mut for_save: WifiCfgInterface = rmsd_yaml::from_str(
+        r#"---
+        name: Test-WIFI
+        type: wifi-cfg
+        state: up
+        wifi:
+          ssid: Test-WIFI
+          password: '12345678'
+          base-iface: wlan0
+        "#,
+    )
+    .unwrap();
+    let mut for_apply: WifiCfgInterface = rmsd_yaml::from_str(
+        r#"---
+        name: Test-WIFI
+        type: wifi-cfg
+        state: up
+        wifi:
+          ssid: Test-WIFI
+        "#,
+    )
+    .unwrap();
+    let mut for_verify = desired.clone();
+    let mut merged = for_save.clone();
+
+    desired
+        .sanitize(
+            None,
+            &mut for_save,
+            &mut for_apply,
+            &mut for_verify,
+            &mut merged,
+        )
+        .unwrap();
+
+    let wifi = for_save.wifi.as_ref().unwrap();
+    assert_eq!(wifi.password.as_deref(), Some("12345678"));
+    assert_eq!(wifi.base_iface.as_deref(), Some("wlan0"));
+}
+
+#[test]
+fn test_wifi_phy_sanitize_keeps_full_saved_config_on_diff_apply() {
+    let desired: WifiPhyInterface = rmsd_yaml::from_str(
+        r#"---
+        name: wlan0
+        type: wifi-phy
+        state: up
+        wifi:
+          ssid: Test-WIFI
+          password: <_hidden_>
+          base-iface: wlan0
+        "#,
+    )
+    .unwrap();
+    let mut for_save: WifiPhyInterface = rmsd_yaml::from_str(
+        r#"---
+        name: wlan0
+        type: wifi-phy
+        state: up
+        wifi:
+          ssid: Test-WIFI
+          password: '12345678'
+          base-iface: wlan0
+        "#,
+    )
+    .unwrap();
+    let mut for_apply: WifiPhyInterface = rmsd_yaml::from_str(
+        r#"---
+        name: wlan0
+        type: wifi-phy
+        state: up
+        wifi:
+          ssid: Test-WIFI
+        "#,
+    )
+    .unwrap();
+    let mut for_verify = desired.clone();
+    let mut merged = for_save.clone();
+
+    desired
+        .sanitize(
+            None,
+            &mut for_save,
+            &mut for_apply,
+            &mut for_verify,
+            &mut merged,
+        )
+        .unwrap();
+
+    let wifi = for_save.wifi.as_ref().unwrap();
+    assert_eq!(wifi.password.as_deref(), Some("12345678"));
+    assert_eq!(wifi.base_iface.as_deref(), Some("wlan0"));
 }
 
 fn gen_wifi_phy_state_with_password() -> NetworkState {
@@ -179,6 +287,28 @@ fn test_wifi_phy_password_in_merge() {
 }
 
 #[test]
+fn test_wifi_phy_hidden_password_in_merge_keeps_old_secret() {
+    let mut safe_state = gen_wifi_phy_state_with_password();
+    let hidden_state = gen_wifi_phy_state_with_hidden_password();
+
+    safe_state.merge(&hidden_state).unwrap();
+
+    let wifi_iface = safe_state
+        .ifaces
+        .kernel_ifaces
+        .get("wlan0")
+        .and_then(|i| {
+            if let Interface::WifiPhy(w) = i {
+                w.wifi.as_ref()
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(wifi_iface.password.as_deref(), Some("12345678"));
+}
+
+#[test]
 fn test_wifi_phy_password_in_gen_diff() {
     let safe_state = gen_wifi_phy_state_with_hidden_password();
     let plain_state = gen_wifi_phy_state_with_password();
@@ -198,6 +328,20 @@ fn test_wifi_phy_password_in_gen_diff() {
         })
         .unwrap();
     assert_eq!(diff_wifi.password.as_deref(), Some("12345678"));
+}
+
+#[test]
+fn test_wifi_phy_hidden_password_in_gen_diff_no_diff() {
+    let plain_state = gen_wifi_phy_state_with_password();
+    let hidden_state = gen_wifi_phy_state_with_hidden_password();
+
+    let diff_state = hidden_state.gen_diff(&plain_state).unwrap();
+
+    assert!(
+        !diff_state.ifaces.kernel_ifaces.contains_key("wlan0"),
+        "Hidden password should not generate a diff, but got: {:?}",
+        diff_state.ifaces.kernel_ifaces.get("wlan0")
+    );
 }
 
 #[test]
@@ -260,6 +404,28 @@ fn test_wifi_cfg_password_in_merge() {
 }
 
 #[test]
+fn test_wifi_cfg_hidden_password_in_merge_keeps_old_secret() {
+    let mut safe_state = gen_wifi_cfg_state_with_password();
+    let hidden_state = gen_wifi_cfg_state_with_hidden_password();
+
+    safe_state.merge(&hidden_state).unwrap();
+
+    let wifi_iface = safe_state
+        .ifaces
+        .user_ifaces
+        .get(&("Test-WIFI".to_string(), InterfaceType::WifiCfg))
+        .and_then(|i| {
+            if let Interface::WifiCfg(w) = i {
+                w.wifi.as_ref()
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(wifi_iface.password.as_deref(), Some("12345678"));
+}
+
+#[test]
 fn test_wifi_cfg_password_in_gen_diff() {
     let safe_state = gen_wifi_cfg_state_with_hidden_password();
     let plain_state = gen_wifi_cfg_state_with_password();
@@ -279,6 +445,26 @@ fn test_wifi_cfg_password_in_gen_diff() {
         })
         .unwrap();
     assert_eq!(diff_wifi.password.as_deref(), Some("12345678"));
+}
+
+#[test]
+fn test_wifi_cfg_hidden_password_in_gen_diff_no_diff() {
+    let plain_state = gen_wifi_cfg_state_with_password();
+    let hidden_state = gen_wifi_cfg_state_with_hidden_password();
+
+    let diff_state = hidden_state.gen_diff(&plain_state).unwrap();
+
+    assert!(
+        !diff_state
+            .ifaces
+            .user_ifaces
+            .contains_key(&("Test-WIFI".to_string(), InterfaceType::WifiCfg)),
+        "Hidden password should not generate a diff, but got: {:?}",
+        diff_state
+            .ifaces
+            .user_ifaces
+            .get(&("Test-WIFI".to_string(), InterfaceType::WifiCfg))
+    );
 }
 
 #[test]

@@ -5,6 +5,7 @@ import pytest
 import nipart
 
 from .testlib.cmdlib import exec_cmd
+from .testlib.env import npt_path
 from .testlib.statelib import load_yaml
 
 WG_TEST_NIC = "wg0"
@@ -129,6 +130,38 @@ def test_wireguard_iface_static_ip(clean_up):
                   protocol-version: 1
         """)
     nipart.apply(desired_state)
+
+
+def test_apply_show_state_keeps_hidden_private_key(clean_up):
+    private_key = "6LTHiAM4vgKEgi5vm30f/EBIEWFDmySkTc9EWCcIqEs="
+    nipart.apply(
+        load_yaml(f"""---
+        interfaces:
+          - name: {WG_TEST_NIC}
+            type: wireguard
+            state: up
+            wireguard:
+              private-key: "{private_key}"
+              listen-port: 51820
+        """)
+    )
+
+    output = exec_cmd(
+        f"{npt_path()} show --saved {WG_TEST_NIC}".split()
+    )[1]
+    shown_state = load_yaml(output)
+    shown_wg = shown_state["interfaces"][0]["wireguard"]
+    assert shown_wg["private-key"] == "<_hidden_>"
+
+    nipart.apply(shown_state)
+
+    state = nipart.NipartClient().query_network_state(
+        nipart.NipartQueryOption(saved=True, include_secrets=True)
+    )
+    wg = next(
+        i for i in state["interfaces"] if i["name"] == WG_TEST_NIC
+    )
+    assert wg["wireguard"]["private-key"] == private_key
 
 
 def test_absent_wireguard_deleted_by_other_tool(clean_up):

@@ -13,12 +13,20 @@ pub(crate) fn copy_undefined_value(
     if let (Some(dst), Some(src)) = (dst.as_object_mut(), src.as_object()) {
         for (src_key, src_value) in src.iter() {
             if let Some(dst_value) = dst.get_mut(src_key) {
-                copy_undefined_value(dst_value, src_value);
+                if is_hide_secret_str(dst_value) {
+                    *dst_value = src_value.clone();
+                } else {
+                    copy_undefined_value(dst_value, src_value);
+                }
             } else {
                 dst.insert(src_key.clone(), src_value.clone());
             }
         }
     }
+}
+
+fn is_hide_secret_str(value: &Value) -> bool {
+    value.as_str() == Some(crate::NetworkState::HIDE_SECRET_STR)
 }
 
 fn _get_json_value_difference<'a, 'b>(
@@ -43,7 +51,7 @@ fn _get_json_value_difference<'a, 'b>(
         }
         (Value::String(des), Value::String(cur)) => {
             if des != cur {
-                if des == crate::NetworkState::HIDE_SECRET_STR {
+                if is_hide_secret_str(desire) {
                     None
                 } else {
                     Some((reference, desire, current))
@@ -144,7 +152,7 @@ pub(crate) fn gen_diff_json_value(
         }
         // For Array, we always override, hence diff should be just use desired.
         _ => {
-            if desired != current {
+            if desired != current && !is_hide_secret_str(desired) {
                 Some(desired.clone())
             } else {
                 None
