@@ -31,7 +31,7 @@ futures-util = "0.3.11"
 futures-channel = "0.3.11"
 clap = { version = "4.5", features = [ "cargo"] }
 wl-nl80211 = "0.6.0"
-shuli = "0.2.0"
+shuli = { git = "https://github.com/cathay4t/shuli.git" }
 chrono = { version = "0.4" , features = ["serde"] }
 rand = { version = "0.10" }
 syn = { version = "3.0", default-features = false, features = [ "derive" ] }

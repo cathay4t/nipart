@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use nipart::{
     ErrorKind, Interface, InterfaceType, NetworkState, NipartApplyOption,
@@ -9,7 +9,7 @@ use nipart::{
 };
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
-use crate::{NipartWpaConn, apply::WifiConn};
+use crate::{NipartWpaConn, apply::WifiClientState};
 
 #[derive(Debug)]
 pub(crate) struct NipartPluginWifi {
@@ -22,23 +22,39 @@ pub(crate) struct NipartPluginWifi {
 /// performed here so that `apply_network_state()` never blocks the daemon
 /// connection handling, and `query_network_state()` is never stalled by an
 /// on-going apply.  The worker also owns every live wifi connection
-/// ([`WifiConn`]): when the daemon connection is gone it tears them all
-/// down.
+/// ([`WifiClientState`]): when the daemon connection is gone it tears
+/// the single client down.
 async fn apply_worker(
     mut rx: UnboundedReceiver<(Vec<Interface>, NipartApplyOption)>,
 ) {
-    let mut wifi_conns: HashMap<String, WifiConn> = HashMap::new();
-    while let Some((ifaces, opt)) = rx.recv().await {
-        if let Err(e) =
-            NipartWpaConn::apply(ifaces.as_slice(), &mut wifi_conns, opt.force)
-                .await
-        {
-            log::error!("WIFI plugin failed to apply state: {e}");
+    let mut wifi_state = WifiClientState::default();
+    loop {
+        tokio::select! {
+            biased;
+            maybe = rx.recv() => {
+                match maybe {
+                    Some((ifaces, opt)) => {
+                        if let Err(e) = wifi_state
+                            .apply(ifaces.as_slice(), opt.force)
+                            .await
+                        {
+                            log::error!(
+                                "WIFI plugin failed to apply state: {e}"
+                            );
+                        }
+                    }
+                    None => {
+                        wifi_state.shutdown().await;
+                        break;
+                    }
+                }
+            }
+            result = wifi_state.run_once(), if wifi_state.has_client() => {
+                if let Err(e) = result {
+                    log::error!("WIFI plugin failed to drive client: {e}");
+                }
+            }
         }
-    }
-    // Daemon connection gone: tear down all managed connections.
-    for (_, conn) in wifi_conns.drain() {
-        conn.disconnect().await;
     }
 }
 
