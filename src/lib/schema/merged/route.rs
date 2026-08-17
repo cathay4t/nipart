@@ -25,6 +25,9 @@ struct IfaceLists<'a> {
     ipv6_disabled: HashSet<&'a str>,
     dhcpv4_enabled: HashSet<&'a str>,
     will_delete: HashSet<&'a str>,
+    // Profiles requested with `state: saved`: their routes are persisted
+    // but never applied.
+    saved_only: HashSet<&'a str>,
     // Kernel interfaces present in the desired state. Only these may have
     // their current routes removed due to IPv4/IPv6 being disabled: a
     // partial apply (e.g. a link event) must not infer route removal from
@@ -393,6 +396,13 @@ fn collect_iface_lists(merged_ifaces: &MergedInterfaces) -> IfaceLists<'_> {
         .map(|i| i.merged.kernel_iface_name())
         .collect();
 
+    let saved_only: HashSet<&str> = merged_ifaces
+        .kernel_ifaces
+        .values()
+        .filter(|i| i.merged.base_iface().state.is_saved())
+        .flat_map(|i| [i.merged.kernel_iface_name(), i.merged.name()])
+        .collect();
+
     let desired_ifaces: HashSet<&str> = merged_ifaces
         .kernel_ifaces
         .values()
@@ -406,6 +416,7 @@ fn collect_iface_lists(merged_ifaces: &MergedInterfaces) -> IfaceLists<'_> {
         ipv6_disabled,
         dhcpv4_enabled,
         will_delete,
+        saved_only,
         desired_ifaces,
     }
 }
@@ -420,6 +431,17 @@ fn resolve_desired_routes(
         for rt in rts {
             let mut rt = rt.clone();
             rt.sanitize()?;
+            // Routes marked `state: saved`, or routes of profiles requested
+            // with `state: saved`, are persisted but not applied: skip
+            // kernel resolution and change collection for them.
+            if rt.is_saved()
+                || rt
+                    .next_hop_iface
+                    .as_deref()
+                    .is_some_and(|name| iface_lists.saved_only.contains(name))
+            {
+                continue;
+            }
             if let Some(name) = rt.next_hop_iface.as_ref() {
                 if let Some(kernel_iface_name) =
                     merged_ifaces.resolve_route_next_hop_iface(name)
@@ -510,14 +532,17 @@ fn collect_absent_route_changes<'a>(
     changed_ifaces: &mut HashSet<&'a str>,
 ) {
     for absent_rt in desired_routes.iter().filter(|rt| rt.is_absent()) {
-        if let Some(cur_rts) = current.config.as_ref() {
-            for rt in cur_rts {
-                if absent_rt.is_match(rt) {
-                    if let Some(via) = rt.next_hop_iface.as_ref() {
-                        changed_ifaces.insert(via.as_str());
-                    } else {
-                        changed_ifaces.insert(LOOPBACK_IFACE_NAME);
-                    }
+        for rt in current
+            .config
+            .iter()
+            .flatten()
+            .chain(current.running.iter().flatten())
+        {
+            if absent_rt.is_match(rt) {
+                if let Some(via) = rt.next_hop_iface.as_ref() {
+                    changed_ifaces.insert(via.as_str());
+                } else {
+                    changed_ifaces.insert(LOOPBACK_IFACE_NAME);
                 }
             }
         }
@@ -588,20 +613,31 @@ fn build_merged_and_changed_routes(
             // treat desired routes as new.
             changed_routes.insert(rt.clone());
             merged_routes.push(rt.clone());
-        } else if let Some(cur_rts) = current.config.as_ref() {
-            if !cur_rts.iter().any(|cur_rt| rt.is_match(cur_rt)) {
-                changed_routes.insert(rt.clone());
-                merged_routes.push(rt.clone());
-            }
-        } else {
+        } else if !current_route_matches(current, rt) {
             changed_routes.insert(rt.clone());
             merged_routes.push(rt.clone());
+        } else {
+            // The route already exists in the running or config state
+            // (e.g. a kernel connected route materialized by an address
+            // assignment), so there is nothing to change.
         }
     }
 
     merged_routes.sort_unstable();
     merged_routes.dedup();
     merged_routes
+}
+
+/// Whether the desired route is already present in the current running or
+/// config routes. Kernel connected routes (`proto kernel`) are only reported
+/// under `running`, so both lists must be checked for idempotent applies.
+fn current_route_matches(current: &Routes, rt: &RouteEntry) -> bool {
+    current
+        .config
+        .iter()
+        .flatten()
+        .chain(current.running.iter().flatten())
+        .any(|cur_rt| rt.is_match(cur_rt))
 }
 
 fn group_by_next_hop_iface(

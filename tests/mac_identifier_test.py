@@ -5,6 +5,7 @@ import time
 import pytest
 
 import nipart
+from .conftest import CLI_PATH
 from .testlib.cmdlib import exec_cmd
 from .testlib.statelib import (
     load_yaml,
@@ -101,6 +102,53 @@ def test_mac_identifier_profile_name_in_running_state(veth_env):
             identifier: mac-address
             mac-address: {mac_address}
             state: absent"""))
+
+
+def test_npt_show_by_profile_name(veth_env):
+    iface_state = show_only(MAC_TEST_VETH)
+    mac_address = iface_state["mac-address"]
+
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+          - name: {MAC_TEST_PROFILE}
+            type: ethernet
+            identifier: mac-address
+            mac-address: {mac_address}
+            state: up"""))
+
+    try:
+        rc, out, err = exec_cmd([CLI_PATH, "show"], check=False)
+        assert rc == 0, f"npt show failed:\n{out}\n{err}"
+        assert MAC_TEST_PROFILE in out, (
+            "Running state should carry profile-name for `npt show`: " f"{out}"
+        )
+        for cmd in (
+            [CLI_PATH, "show", MAC_TEST_PROFILE],
+            [CLI_PATH, "s", MAC_TEST_PROFILE],
+        ):
+            rc, out, err = exec_cmd(cmd, check=False)
+            assert rc == 0, f"npt show failed:\n{out}\n{err}"
+            assert MAC_TEST_VETH in out, out
+            assert MAC_TEST_PROFILE in out, out
+            assert "type: veth" in out, out
+
+        rc, out, err = exec_cmd(
+            [CLI_PATH, "show", "--saved", MAC_TEST_PROFILE], check=False
+        )
+        assert rc == 0, f"npt show --saved failed:\n{out}\n{err}"
+        assert MAC_TEST_PROFILE in out, out
+        assert MAC_TEST_VETH not in out, (
+            "Saved state should keep the logical profile name, "
+            f"not the kernel name: {out}"
+        )
+    finally:
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {MAC_TEST_PROFILE}
+                type: ethernet
+                identifier: mac-address
+                mac-address: {mac_address}
+                state: absent"""))
 
 
 def test_name_identifier_auto_connect_in_running_state(veth_env):

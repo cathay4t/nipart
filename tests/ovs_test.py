@@ -6,7 +6,7 @@ import time
 import pytest
 
 import nipart
-from nipart import NipartClient, NipartStateKind, NipartQueryOption
+from nipart import NipartClient, NipartQueryOption
 
 from .testlib.cmdlib import exec_cmd
 from .testlib.statelib import load_yaml, state_match
@@ -21,9 +21,7 @@ RETRY_TIMEOUT = 30
 
 def _get_ifaces_by_name(name):
     client = NipartClient()
-    state = client.query_network_state(
-        NipartQueryOption(kind=NipartStateKind.RUNNING)
-    )
+    state = client.query_network_state(NipartQueryOption.running())
     return [i for i in state["interfaces"] if i["name"] == name]
 
 
@@ -142,9 +140,9 @@ def test_ovs_apply_dependency_error_plugin_not_found(
     """)
     with pytest.raises(nipart.NipartError) as err:
         nipart.apply(desired_state)
-    assert err.value.kind == "dependency-error", (
-        f"Expected dependency-error, got {err.value.kind}: {err.value.msg}"
-    )
+    assert (
+        err.value.kind == "dependency-error"
+    ), f"Expected dependency-error, got {err.value.kind}: {err.value.msg}"
 
 
 def test_ovs_apply_dependency_error_daemon_not_running(no_ovs_db_socket):
@@ -156,6 +154,6 @@ def test_ovs_apply_dependency_error_daemon_not_running(no_ovs_db_socket):
     """)
     with pytest.raises(nipart.NipartError) as err:
         nipart.apply(desired_state)
-    assert err.value.kind == "dependency-error", (
-        f"Expected dependency-error, got {err.value.kind}: {err.value.msg}"
-    )
+    assert (
+        err.value.kind == "dependency-error"
+    ), f"Expected dependency-error, got {err.value.kind}: {err.value.msg}"

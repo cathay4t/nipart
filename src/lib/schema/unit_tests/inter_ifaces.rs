@@ -6,6 +6,104 @@ use crate::{
     MergedNetworkState, NetworkState, NipartInterface,
 };
 
+/// Desired `state: saved` must persist the profile without applying or
+/// verifying anything in the kernel.
+#[test]
+fn test_desired_state_saved_only_persists_without_apply() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: cunet
+          type: ethernet
+          state: saved
+          ipv4:
+            enabled: true
+            dhcp: false
+            address:
+            - ip: 192.0.2.1
+              prefix-length: 24
+        "#,
+    )
+    .unwrap();
+
+    let merged =
+        MergedInterfaces::new(desired, Interfaces::default(), None).unwrap();
+
+    let merged_iface = merged.kernel_ifaces.get("cunet").unwrap();
+    assert!(merged_iface.for_apply.is_none());
+    assert!(merged_iface.for_verify.is_none());
+    assert!(merged_iface.for_revert.is_none());
+    assert!(merged_iface.merged.base_iface().state.is_saved());
+
+    let for_save = merged_iface.for_save.as_ref().unwrap();
+    assert_eq!(for_save.base_iface().state, InterfaceState::Up);
+    assert_eq!(for_save.name(), "cunet");
+}
+
+/// Desired `state: saved` keeps the previous saved state when updating an
+/// existing profile.
+#[test]
+fn test_desired_state_saved_keeps_previous_saved_state() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: cunet
+          type: ethernet
+          state: saved
+          mtu: 1280
+        "#,
+    )
+    .unwrap();
+    let saved: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: cunet
+          type: ethernet
+          state: down
+        "#,
+    )
+    .unwrap();
+
+    let merged =
+        MergedInterfaces::new(desired, Interfaces::default(), Some(saved))
+            .unwrap();
+
+    let merged_iface = merged.kernel_ifaces.get("cunet").unwrap();
+    assert!(merged_iface.for_apply.is_none());
+    let for_save = merged_iface.for_save.as_ref().unwrap();
+    assert_eq!(for_save.base_iface().state, InterfaceState::Down);
+    assert_eq!(for_save.base_iface().mtu, Some(1280));
+}
+
+/// Desired `state: saved` on an existing running interface must not change
+/// the kernel, only the persisted config.
+#[test]
+fn test_desired_state_saved_does_not_change_current() {
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: cunet
+          type: ethernet
+          state: saved
+          mtu: 1280
+        "#,
+    )
+    .unwrap();
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: cunet
+          type: ethernet
+          state: up
+          mtu: 1500
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+
+    let merged_iface = merged.kernel_ifaces.get("cunet").unwrap();
+    assert!(merged_iface.for_apply.is_none());
+    assert!(merged_iface.for_verify.is_none());
+    let for_save = merged_iface.for_save.as_ref().unwrap();
+    assert_eq!(for_save.base_iface().mtu, Some(1280));
+}
+
 /// Test basic MAC address matching with MAC provided.
 #[test]
 fn test_resolve_mac_identifier_basic_with_mac() {

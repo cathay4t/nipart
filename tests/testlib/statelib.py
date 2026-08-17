@@ -13,7 +13,12 @@ RETRY_COUNT = 100
 
 def show_only(iface_name, kind=NipartStateKind.RUNNING):
     client = NipartClient()
-    state = client.query_network_state(NipartQueryOption(kind=kind))
+    state = client.query_network_state(
+        NipartQueryOption(
+            running=kind == NipartStateKind.RUNNING,
+            saved=kind == NipartStateKind.SAVED,
+        )
+    )
     for iface in state["interfaces"]:
         if iface["name"] == iface_name:
             return iface

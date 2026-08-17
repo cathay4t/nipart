@@ -13,19 +13,30 @@ class NipartStateKind(enum.StrEnum):
 
 class NipartQueryOption:
     def __init__(
-        self, version=LATEST_SCHEMA_VERSION, kind=NipartStateKind.DEFAULT
+        self,
+        version=LATEST_SCHEMA_VERSION,
+        running=True,
+        saved=False,
+        include_secrets=False,
     ):
         self.version = version
-        self.kind = kind
+        self.running = running
+        self.saved = saved
+        self.include_secrets = include_secrets
 
     def to_dict(self):
-        return {"version": self.version, "kind": self.kind}
+        return {
+            "version": self.version,
+            "running": self.running,
+            "saved": self.saved,
+            "include_secrets": self.include_secrets,
+        }
 
     def running():
-        return NipartQueryOption(kind=NipartStateKind.RUNNING)
+        return NipartQueryOption(running=True, saved=False)
 
     def saved():
-        return NipartQueryOption(kind=NipartStateKind.SAVED)
+        return NipartQueryOption(running=False, saved=True)
 
 
 class NipartApplyOption:
