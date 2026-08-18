@@ -358,6 +358,7 @@ fn build_shuli_networks(
             continue;
         }
         let mut network = ShuliNetworkConfig::new(&wifi_cfg.ssid);
+        network.set_hidden(wifi_cfg.hidden);
         if let Some(password) = wifi_cfg.password.as_deref() {
             network.set_password(password);
         }

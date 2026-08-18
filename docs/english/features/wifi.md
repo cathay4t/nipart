@@ -5,6 +5,7 @@
     * [`state`: Wifi state](#state-wifi-state)
     * [`bssid`: BSSID](#bssid-bssid)
     * [`password`: Password](#password-password)
+    * [`hidden`: Hidden network](#hidden-hidden-network)
     * [`base-iface`: Base interface](#base-iface-base-interface)
     * [`auth-type`: Authentication type](#auth-type-authentication-type)
     * [`generation`: Wifi generation](#generation-wifi-generation)
@@ -78,6 +79,12 @@ may be used.
 
 The password or pre-shared key for authentication. This field is replaced
 with `<_hidden_>` when querying current state.
+
+## `hidden`: Hidden network
+
+Set to `true` when the AP does not include its SSID in beacons. Nipart
+then asks shuli to probe the SSID with a directed probe request, so
+hidden networks can be discovered and connected.
 
 ## `base-iface`: Base interface
 

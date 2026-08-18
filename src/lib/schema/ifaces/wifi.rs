@@ -120,6 +120,7 @@ impl NipartInterface for WifiPhyInterface {
         if let Some(wifi_cfg) = desired.wifi.as_mut() {
             wifi_cfg.base_iface = None;
             wifi_cfg.remove_secrets();
+            wifi_cfg.hidden = false;
         }
         current.hide_secrets()
     }
@@ -401,6 +402,7 @@ impl NipartInterface for WifiCfgInterface {
         desired.base.ipv6 = None;
         if let Some(wifi_cfg) = desired.wifi.as_mut() {
             wifi_cfg.remove_secrets();
+            wifi_cfg.hidden = false;
         }
         current.hide_secrets()
     }
@@ -473,6 +475,10 @@ pub struct WifiConfig {
         deserialize_with = "option_number_as_string"
     )]
     pub password: Option<String>,
+    /// Hidden network: the AP does not include its SSID in beacons.
+    /// Requires a directed probe request to discover and connect.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
     /// Whether this WiFi configuration only for specified interface or not.
     /// If undefined, it means any WiFi network interface can be used for
     /// connecting this WiFi.
@@ -498,6 +504,10 @@ pub struct WifiConfig {
 // Align with Microsoft `WLAN_ASSOCIATION_ATTRIBUTES`
 const NOISE_FLOOR_DBM: i16 = -100;
 const SIGNAL_MAX_DBM: i16 = -50;
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 impl WifiConfig {
     /// Use `signal_dbm` to calculate out `signal_percent`
@@ -575,6 +585,7 @@ struct WifiConfigHideSecrets {
     ssid: String,
     bssid: Option<String>,
     password: Option<String>,
+    hidden: bool,
     auth_type: Option<WifiAuthType>,
     base_iface: Option<String>,
     frequency_mhz: Option<u32>,
@@ -590,6 +601,7 @@ impl From<&WifiConfig> for WifiConfigHideSecrets {
             ssid,
             bssid,
             password,
+            hidden,
             auth_type,
             base_iface,
             state,
@@ -608,6 +620,7 @@ impl From<&WifiConfig> for WifiConfigHideSecrets {
             },
             ssid,
             bssid,
+            hidden,
             base_iface,
             auth_type,
             state,

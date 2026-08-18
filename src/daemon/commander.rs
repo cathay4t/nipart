@@ -191,8 +191,30 @@ impl NipartCommander {
 
     pub(crate) async fn wifi_scan(
         &mut self,
-        opt: NipartWifiScanOption,
+        mut opt: NipartWifiScanOption,
     ) -> Result<Vec<WifiScanResult>, NipartError> {
+        if let Ok(saved_state) = self.conf_manager.query_state().await {
+            for iface in saved_state.ifaces.iter() {
+                let ssid = match iface {
+                    Interface::WifiCfg(iface) => iface
+                        .wifi
+                        .as_ref()
+                        .filter(|w| w.hidden)
+                        .map(|w| w.ssid.clone()),
+                    Interface::WifiPhy(iface) => iface
+                        .wifi
+                        .as_ref()
+                        .filter(|w| w.hidden)
+                        .map(|w| w.ssid.clone()),
+                    _ => None,
+                };
+                if let Some(ssid) = ssid
+                    && !opt.hidden_ssids.contains(&ssid)
+                {
+                    opt.hidden_ssids.push(ssid);
+                }
+            }
+        }
         self.plugin_manager.wifi_scan(opt).await
     }
 

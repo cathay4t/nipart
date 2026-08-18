@@ -119,7 +119,17 @@ impl NipartPlugin for NipartPluginWifi {
     ) -> Result<Vec<WifiScanResult>, NipartError> {
         conn.log_trace(format!("WIFI plugin wifi_scan with option {opt}"))
             .await;
-        NipartWpaConn::wifi_scan(opt.iface_name.as_deref(), opt.show_hidden)
-            .await
+        let NipartWifiScanOption {
+            iface_name,
+            show_hidden,
+            hidden_ssids,
+            ..
+        } = opt;
+        NipartWpaConn::wifi_scan(
+            iface_name.as_deref(),
+            show_hidden,
+            hidden_ssids,
+        )
+        .await
     }
 }
