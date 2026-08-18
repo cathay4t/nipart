@@ -49,7 +49,6 @@ features = ["feature", "hostname", "socket"]
 
 [workspace.dependencies.nispor]
 git = "https://github.com/nispor/nispor"
-#path = "../nispor/src/lib"
 
 [workspace.dependencies.mozim]
 version = "0.3.2"

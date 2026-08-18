@@ -121,15 +121,9 @@ impl NipartPlugin for NipartPluginWifi {
             .await;
         let NipartWifiScanOption {
             iface_name,
-            show_hidden,
             hidden_ssids,
             ..
         } = opt;
-        NipartWpaConn::wifi_scan(
-            iface_name.as_deref(),
-            show_hidden,
-            hidden_ssids,
-        )
-        .await
+        NipartWpaConn::wifi_scan(iface_name.as_deref(), hidden_ssids).await
     }
 }

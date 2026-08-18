@@ -276,14 +276,16 @@ def hostapd_is_up_wpa3():
 
 
 def hostapd_is_up_hidden():
-    output = exec_cmd(f"iw {WIFI_TEST_NIC} scan".split(), check=False)[1]
-    if TEST_WIFI_SSID_HIDDEN in output:
-        return False
+    # Check the AP side instead of scanning on the client interface:
+    # shuli keeps the test NIC busy with its own scan loop while a
+    # hidden network is configured, so `iw scan` on the client either
+    # returns -EBUSY or hangs waiting for results.
     output = exec_cmd(
-        f"iw {WIFI_TEST_NIC} scan ssid {TEST_WIFI_SSID_HIDDEN}".split(),
+        f"ip netns exec {TEST_NET_NS} "
+        f"iw dev {DHCP_SRV_NIC} info".split(),
         check=False,
     )[1]
-    return TEST_WIFI_SSID_HIDDEN in output
+    return "type AP" in output and TEST_WIFI_SSID_HIDDEN in output
 
 
 def start_hostapd_wpa3(net_ns):
@@ -305,7 +307,7 @@ def start_hostapd_wpa3(net_ns):
     start_dhcp_server(net_ns)
 
 
-def start_hostapd_hidden(net_ns):
+def start_hostapd_hidden(net_ns, timeout=2):
     phy_id = get_wifi_phy_name(DHCP_SRV_NIC)
     assert phy_id
     exec_cmd(f"iw phy#{phy_id} set netns name {net_ns}".split())
@@ -319,6 +321,6 @@ def start_hostapd_hidden(net_ns):
         f"hostapd -B -d {HOSTAPD_CONF_PATH} -P {HOSTAPD_PID_PATH}".split(),
     )
 
-    assert retry_till_true_or_timeout(2, hostapd_is_up_hidden)
+    assert retry_till_true_or_timeout(timeout, hostapd_is_up_hidden)
 
     start_dhcp_server(net_ns)

@@ -17,24 +17,21 @@ use crate::NipartWpaConn;
 impl NipartWpaConn {
     pub(crate) async fn wifi_scan(
         iface_name: Option<&str>,
-        show_hidden: bool,
         hidden_ssids: Vec<String>,
     ) -> Result<Vec<WifiScanResult>, NipartError> {
-        if let Ok(r) =
-            _wifi_scan(iface_name, show_hidden, hidden_ssids.clone()).await
+        if let Ok(r) = _wifi_scan(iface_name, hidden_ssids.clone()).await
             && !r.is_empty()
         {
             return Ok(r);
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        _wifi_scan(iface_name, show_hidden, hidden_ssids).await
+        _wifi_scan(iface_name, hidden_ssids).await
     }
 }
 
 async fn _wifi_scan(
     iface_name: Option<&str>,
-    show_hidden: bool,
-    hidden_ssids: Vec<String>,
+    mut hidden_ssids: Vec<String>,
 ) -> Result<Vec<WifiScanResult>, NipartError> {
     // Keep one entry per SSID, merging auth types from all BSSes of the
     // same SSID and keeping the strongest signal.
@@ -45,17 +42,21 @@ async fn _wifi_scan(
     let np_state =
         nispor::NetState::retrieve_with_filter_async(&filter).await?;
 
-    let wifi_phys: Vec<&str> = np_state
-        .ifaces
-        .values()
-        .filter_map(|np_iface| {
-            if np_iface.iface_type == nispor::IfaceType::Wifi {
-                Some(np_iface.name.as_str())
-            } else {
-                None
-            }
-        })
-        .collect();
+    let mut wifi_phys: Vec<&str> = Vec::new();
+    for np_iface in np_state.ifaces.values() {
+        if np_iface.iface_type != nispor::IfaceType::Wifi {
+            continue;
+        }
+        wifi_phys.push(np_iface.name.as_str());
+        // Also probe the SSID we are currently connected to, so a hidden
+        // network we are attached to still appears in the results.
+        if let Some(ssid) = np_iface.wifi.as_ref().and_then(|w| w.ssid.clone())
+            && !ssid.is_empty()
+            && !hidden_ssids.contains(&ssid)
+        {
+            hidden_ssids.push(ssid);
+        }
+    }
 
     let scan_ifaces = if let Some(iface_name) = iface_name {
         if !wifi_phys.contains(&iface_name) {
@@ -81,12 +82,18 @@ async fn _wifi_scan(
                 })?;
 
         for (bss_info, ies) in &scan_results {
-            if bss_info.hidden && !show_hidden {
-                continue;
-            }
             let Some(ssid) = extract_ssid(ies) else {
                 continue;
             };
+            if ssid.is_empty() {
+                continue;
+            }
+            // A network that hides its SSID is only reported when we were
+            // asked to probe for it (e.g. --with-hidden, or it is the SSID
+            // we are currently connected to).
+            if bss_info.hidden && !hidden_ssids.contains(&ssid) {
+                continue;
+            }
 
             let signal_dbm = signal_mbm_to_dbm(bss_info.signal_dbm);
             let scan_res = WifiScanResult::new(
