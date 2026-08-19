@@ -114,6 +114,14 @@ impl NipartDhcpV4Manager {
             }
             apply_iface.base_iface_mut().iface_index =
                 merged_iface.merged.base_iface().iface_index;
+            // `for_apply` is a diff against the current state, so unchanged
+            // DHCP settings may be omitted even when the SSID changed and
+            // the DHCP client must be restarted. Fall back to the merged
+            // IP configuration to decide whether DHCP is enabled.
+            if apply_iface.base_iface().ipv4.is_none() {
+                apply_iface.base_iface_mut().ipv4 =
+                    merged_iface.merged.base_iface().ipv4.clone();
+            }
             if apply_iface.is_up() {
                 let ssid_changed = matches!(
                     (

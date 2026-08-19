@@ -173,7 +173,7 @@ impl TaskWorker for NipartMonitorWorker {
             }
             NipartMonitorCmd::AddIface(iface) => {
                 self.iface_monitor_list.insert(iface);
-                if self.netlink_msg_receiver.is_none() && !self.manual_paused {
+                if self.should_start_netlink() {
                     self.resume().await?;
                 }
             }
@@ -185,7 +185,7 @@ impl TaskWorker for NipartMonitorWorker {
             }
             NipartMonitorCmd::AddMacWatch(mac) => {
                 self.mac_watch_list.insert(mac.to_ascii_uppercase());
-                if self.netlink_msg_receiver.is_none() && !self.manual_paused {
+                if self.should_start_netlink() {
                     self.resume().await?;
                 }
             }
@@ -197,7 +197,7 @@ impl TaskWorker for NipartMonitorWorker {
             }
             NipartMonitorCmd::EnableWifiMonitor => {
                 self.wifi_monitor_enabled = true;
-                if self.netlink_msg_receiver.is_none() && !self.manual_paused {
+                if self.should_start_netlink() {
                     self.resume().await?;
                 }
             }
@@ -213,7 +213,7 @@ impl TaskWorker for NipartMonitorWorker {
             }
             NipartMonitorCmd::Resume => {
                 self.manual_paused = false;
-                if self.should_resume() {
+                if self.should_resume() && self.should_start_netlink() {
                     self.resume().await?;
                 }
             }
@@ -296,9 +296,26 @@ impl NipartMonitorWorker {
             || self.wifi_monitor_enabled
     }
 
+    /// Whether a new netlink multicast connection should be created.
+    ///
+    /// `netlink_msg_receiver` is temporarily moved out of the worker while
+    /// `run()` polls it with `tokio::select!`, so it cannot be used as the
+    /// "socket is active" check from `process_cmd()`. The handle remains
+    /// set for the whole active period.
+    fn should_start_netlink(&self) -> bool {
+        !self.manual_paused && self.netlink_handle.is_none()
+    }
+
     fn pause(&mut self) {
         self.netlink_handle = None;
         self.netlink_msg_receiver = None;
+        // The monitor session is over: stale last-event/MAC observations
+        // from a previous session must not suppress the fresh link dump
+        // emitted after the next resume (e.g. the same wifi-phy up event
+        // seen again after a daemon-managed reconnect).
+        self.emited.clear();
+        self.delay_queue.clear();
+        self.iface_mac.clear();
     }
 
     async fn notify(
@@ -706,6 +723,8 @@ fn is_wifi_phy_nic(iface_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use futures_channel::mpsc::unbounded;
     use nipart::{InterfaceLinkEvent, InterfaceType};
 
@@ -806,5 +825,29 @@ mod tests {
         // Removing the last watch pauses again.
         worker.mac_watch_list.clear();
         assert!(worker.should_pause());
+    }
+
+    #[test]
+    fn test_pause_clears_monitor_session_state() {
+        let mut worker = gen_worker();
+        worker
+            .emited
+            .insert("enp1s0".to_string(), gen_event("enp1s0"));
+        worker.delay_queue.insert(
+            "enp2s0".to_string(),
+            (
+                gen_event("enp2s0"),
+                Instant::now() + Duration::from_secs(10),
+            ),
+        );
+        worker
+            .iface_mac
+            .insert("enp3s0".to_string(), "02:00:00:00:00:03".to_string());
+
+        worker.pause();
+
+        assert!(worker.emited.is_empty());
+        assert!(worker.delay_queue.is_empty());
+        assert!(worker.iface_mac.is_empty());
     }
 }
