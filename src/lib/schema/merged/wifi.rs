@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashSet;
+
 use crate::{
     Interface, InterfaceIdentifier, InterfaceLinkState, InterfaceState,
     InterfaceType, Interfaces, MergedInterfaces, NipartInterface,
@@ -91,20 +93,63 @@ pub(crate) fn expand_wifi_cfg_to_connected_phy(
 impl MergedInterfaces {
     /// For WIFI bind to any interface, we should mark all suitable wifi-phy up
     pub(crate) fn post_merge_sanitize_wifi(&mut self) {
+        let mut phy_names_to_bring_up: HashSet<String> = HashSet::new();
         if self.has_any_bind_wifi() {
-            for merged_iface in
-                self.kernel_ifaces.values_mut().filter(|merged_iface| {
-                    merged_iface.merged.iface_type() == &InterfaceType::WifiPhy
-                        && merged_iface.desired.as_ref().map(|i| {
-                            i.is_absent() || i.is_down() || i.is_ignore()
-                        }) != Some(true)
-                        && merged_iface.current.is_some()
-                })
-            {
-                merged_iface.mark_as_changed();
-                if let Some(iface) = merged_iface.for_apply.as_mut() {
-                    iface.base_iface_mut().state = InterfaceState::Up;
-                }
+            phy_names_to_bring_up.extend(
+                self.kernel_ifaces
+                    .iter()
+                    .filter(|(_, merged_iface)| {
+                        merged_iface.merged.iface_type()
+                            == &InterfaceType::WifiPhy
+                            && merged_iface.current.is_some()
+                    })
+                    .map(|(name, _)| name.clone()),
+            );
+        }
+        // A `wifi-cfg` with an explicit `base-iface` must also bring its
+        // referenced wifi-phy up, otherwise the client starts on a down
+        // interface (e.g. after the phy was brought down by a previous
+        // apply).
+        for merged_iface in self.user_ifaces.values() {
+            let Some(Interface::WifiCfg(wifi_cfg)) =
+                merged_iface.for_apply.as_ref()
+            else {
+                continue;
+            };
+            if !wifi_cfg.is_up() {
+                continue;
+            }
+            let Some(base_iface) =
+                wifi_cfg.wifi.as_ref().and_then(|w| w.base_iface.as_deref())
+            else {
+                continue;
+            };
+            let phy_name = self
+                .iface_search
+                .search_name(base_iface)
+                .unwrap_or_else(|| base_iface.to_string());
+            phy_names_to_bring_up.insert(phy_name);
+        }
+
+        if phy_names_to_bring_up.is_empty() {
+            return;
+        }
+        for merged_iface in
+            self.kernel_ifaces.values_mut().filter(|merged_iface| {
+                merged_iface.merged.iface_type() == &InterfaceType::WifiPhy
+                    && merged_iface
+                        .desired
+                        .as_ref()
+                        .map(|i| i.is_absent() || i.is_down() || i.is_ignore())
+                        != Some(true)
+                    && merged_iface.current.is_some()
+                    && phy_names_to_bring_up
+                        .contains(merged_iface.merged.kernel_iface_name())
+            })
+        {
+            merged_iface.mark_as_changed();
+            if let Some(iface) = merged_iface.for_apply.as_mut() {
+                iface.base_iface_mut().state = InterfaceState::Up;
             }
         }
     }

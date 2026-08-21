@@ -113,19 +113,71 @@ impl NipartCommander {
                 let nic_ready_state =
                     remove_ready_state(&mut saved_state, &kernel_iface_names);
 
-                if !nic_ready_state.is_empty() {
+                // `wifi-cfg` profiles must be applied together with a
+                // wifi-phy: the plugin binds them to the phy when the client
+                // starts, so applying them before the phy is ready leaves the
+                // network list behind when the phy is later applied/renamed.
+                // Defer them to a later boot round (or the monitor worker)
+                // when no wifi-phy is ready yet.
+                let mut nic_ready_state = nic_ready_state;
+                let has_ready_wifi_phy = nic_ready_state
+                    .ifaces
+                    .iter()
+                    .any(|iface| iface.iface_type() == &InterfaceType::WifiPhy);
+                if !has_ready_wifi_phy
+                    && nic_ready_state.ifaces.iter().any(|iface| {
+                        iface.iface_type() == &InterfaceType::WifiCfg
+                    })
+                {
+                    let mut wifi_cfg_state = NetworkState::default();
+                    let mut non_wifi_cfg_state = NetworkState::default();
+                    non_wifi_cfg_state.routes = nic_ready_state.routes.clone();
                     for iface in nic_ready_state.ifaces.iter() {
+                        if iface.iface_type() == &InterfaceType::WifiCfg {
+                            wifi_cfg_state.ifaces.push(iface.clone());
+                        } else {
+                            non_wifi_cfg_state.ifaces.push(iface.clone());
+                        }
+                    }
+                    log::debug!(
+                        "Deferring {} wifi-cfg profile(s) until a wifi-phy is \
+                         ready",
+                        wifi_cfg_state.ifaces.iter().count()
+                    );
+                    saved_state.merge(&wifi_cfg_state)?;
+                    nic_ready_state = non_wifi_cfg_state;
+                }
+
+                // `wifi-cfg` profiles are userspace-only and the wifi plugin
+                // is a fresh process after a daemon restart, so they must be
+                // (re)applied even when the saved profile already appears in
+                // the running state. Apply them with `force` after the
+                // wifi-phy itself has been brought up.
+                let mut wifi_cfg_state = NetworkState::default();
+                let mut non_wifi_cfg_state = NetworkState::default();
+                non_wifi_cfg_state.routes = nic_ready_state.routes.clone();
+                for iface in nic_ready_state.ifaces.iter() {
+                    if iface.iface_type() == &InterfaceType::WifiCfg {
+                        wifi_cfg_state.ifaces.push(iface.clone());
+                    } else {
+                        non_wifi_cfg_state.ifaces.push(iface.clone());
+                    }
+                }
+
+                let mut boot_round_applied: Vec<Interface> = Vec::new();
+                if !non_wifi_cfg_state.is_empty() {
+                    for iface in non_wifi_cfg_state.ifaces.iter() {
                         log::debug!(
                             "Applying saved state for interface {}/{}",
                             iface.name(),
                             iface.iface_type()
                         );
                     }
-                    log::debug!("Applying saved state: {nic_ready_state}");
+                    log::debug!("Applying saved state: {non_wifi_cfg_state}");
                     if let Err(e) = self
                         .apply_network_state(
                             None,
-                            nic_ready_state.clone(),
+                            non_wifi_cfg_state.clone(),
                             NipartApplyOption::new().no_verify().memory_only(),
                         )
                         .await
@@ -136,18 +188,61 @@ impl NipartCommander {
                         log::warn!(
                             "Failed to apply saved state, will retry: {e}"
                         );
-                        if let Err(e) = saved_state.merge(&nic_ready_state) {
+                        if let Err(e) = saved_state.merge(&non_wifi_cfg_state) {
                             log::error!(
                                 "BUG: Failed to merge back unapplied saved \
                                  state: {e}"
                             );
                         }
+                        if !wifi_cfg_state.is_empty()
+                            && let Err(e) = saved_state.merge(&wifi_cfg_state)
+                        {
+                            log::error!(
+                                "BUG: Failed to merge back unapplied wifi-cfg \
+                                 saved state: {e}"
+                            );
+                        }
+                        wifi_cfg_state = NetworkState::default();
                     } else {
-                        log::debug!("Remaining saved state: {saved_state}");
-                        boot_applied_ifaces
-                            .extend(nic_ready_state.ifaces.iter().cloned());
+                        boot_round_applied
+                            .extend(non_wifi_cfg_state.ifaces.iter().cloned());
                     }
                 }
+
+                if !wifi_cfg_state.is_empty() {
+                    log::debug!(
+                        "Applying saved wifi-cfg state with force: \
+                         {wifi_cfg_state}"
+                    );
+                    if let Err(e) = self
+                        .apply_network_state(
+                            None,
+                            wifi_cfg_state.clone(),
+                            NipartApplyOption::new()
+                                .no_verify()
+                                .memory_only()
+                                .force(),
+                        )
+                        .await
+                    {
+                        log::warn!(
+                            "Failed to apply saved wifi-cfg state, will \
+                             retry: {e}"
+                        );
+                        if let Err(e) = saved_state.merge(&wifi_cfg_state) {
+                            log::error!(
+                                "BUG: Failed to merge back unapplied wifi-cfg \
+                                 saved state: {e}"
+                            );
+                        }
+                    } else {
+                        boot_round_applied
+                            .extend(wifi_cfg_state.ifaces.iter().cloned());
+                    }
+                }
+
+                log::debug!("Remaining saved state: {saved_state}");
+                boot_applied_ifaces.extend(boot_round_applied);
                 if saved_state.is_empty() {
                     log::info!("All saved state applied successfully");
                     break;
