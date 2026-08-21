@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
 };
 
 use nipart::{
@@ -13,6 +16,16 @@ use nipart::{
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use crate::{NipartWpaConn, apply::WifiClientState};
+
+/// Maximum time a single shuli client cycle may run before the plugin
+/// assumes the client is stuck and restarts it.  This prevents a long
+/// shuli backoff (or a wedged PNO/host-scan state) from silently
+/// disabling auto-connect forever.
+const WIFI_RUN_ONCE_TIMEOUT_SECS: u64 = 120;
+/// Timeout used while shuli is connected: the client legitimately waits
+/// for events with no deadline, so only an extremely long stall should be
+/// treated as stuck.
+const WIFI_CONNECTED_RUN_ONCE_TIMEOUT_SECS: u64 = 24 * 60 * 60;
 
 #[derive(Debug)]
 pub(crate) struct NipartPluginWifi {
@@ -44,6 +57,11 @@ async fn apply_worker(
 ) {
     let mut wifi_state = WifiClientState::new(wifi_enabled);
     loop {
+        let run_once_timeout_secs = if wifi_state.is_connected() {
+            WIFI_CONNECTED_RUN_ONCE_TIMEOUT_SECS
+        } else {
+            WIFI_RUN_ONCE_TIMEOUT_SECS
+        };
         tokio::select! {
             biased;
             maybe = rx.recv() => {
@@ -74,9 +92,25 @@ async fn apply_worker(
                     }
                 }
             }
-            result = wifi_state.run_once(), if wifi_state.has_client() => {
-                if let Err(e) = result {
-                    log::error!("WIFI plugin failed to drive client: {e}");
+            result = tokio::time::timeout(
+                Duration::from_secs(run_once_timeout_secs),
+                wifi_state.run_once(),
+            ), if wifi_state.has_client() => {
+                match result {
+                    Ok(result) => {
+                        if let Err(e) = result {
+                            log::error!(
+                                "WIFI plugin failed to drive client: {e}"
+                            );
+                        }
+                    }
+                    Err(_) => {
+                        log::error!(
+                            "WIFI client stalled for {}s; restarting it",
+                            run_once_timeout_secs
+                        );
+                        wifi_state.restart_client().await;
+                    }
                 }
             }
         }

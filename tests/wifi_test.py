@@ -115,10 +115,6 @@ class TestWifi:
             assert rc == 0, f"npt wifi on failed:\n{out}\n{err}"
             assert "WIFI is on" in out, out
 
-            rc, out, err = exec_cmd(
-                [CLI_PATH, "up", WIFI_TEST_NIC], check=False
-            )
-            assert rc == 0, f"npt up failed after WIFI off:\n{out}\n{err}"
             assert retry_till_true_or_timeout(5, ping_peer)
             assert self.connected_ssid() == TEST_WIFI_SSID
         finally:

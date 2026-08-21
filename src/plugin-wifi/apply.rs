@@ -37,6 +37,7 @@ pub(crate) struct WifiClientState {
     ifaces: HashMap<String, WifiIfaceState>,
     enabled: bool,
     enabled_flag: Arc<AtomicBool>,
+    connected: bool,
 }
 
 impl WifiClientState {
@@ -46,6 +47,7 @@ impl WifiClientState {
             ifaces: HashMap::new(),
             enabled: true,
             enabled_flag,
+            connected: false,
         }
     }
 
@@ -73,15 +75,25 @@ impl WifiClientState {
                 // before the shuli client is started.
                 self.enabled = false;
                 self.enabled_flag.store(false, Ordering::Release);
+                self.connected = false;
                 self.shutdown().await;
                 self.client = None;
             }
             NipartWifiControl::On => {
+                let was_enabled = self.enabled;
                 log::info!("Enabling WIFI");
                 // TODO: Unblock the radio via rfkill when supported and
                 // keep `enabled` in sync with the actual radio state.
                 self.enabled = true;
                 self.enabled_flag.store(true, Ordering::Release);
+                // An explicit wifi-on after WIFI was off must not wait for
+                // a long shuli backoff (e.g. `Failed` with 300s retry):
+                // restart the client so the saved networks are scanned
+                // immediately.  Idempotent wifi-on while already enabled
+                // keeps the current connection.
+                if !was_enabled || self.client.is_none() {
+                    self.restart_client().await;
+                }
             }
             _ => {
                 return Err(NipartError::new(
@@ -112,6 +124,7 @@ impl WifiClientState {
         match result.state {
             WifiState::ConnectedWithoutOffloadRekey
             | WifiState::ConnectedWithOffloadRekey => {
+                self.connected = true;
                 let ssid =
                     client.current_ssid_of(iface_name).unwrap_or("unknown");
                 let bssid = client
@@ -124,18 +137,25 @@ impl WifiClientState {
                 );
             }
             WifiState::Failed => {
+                self.connected = false;
                 log::warn!("WIFI {iface_name} connection failed, retrying");
             }
             WifiState::FailedAuthentication => {
+                self.connected = false;
                 log::error!(
                     "WIFI {iface_name} authentication failed, retrying"
                 );
             }
             state => {
+                self.connected = false;
                 log::trace!("WIFI {iface_name} state: {state:?}");
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn is_connected(&self) -> bool {
+        self.connected
     }
 
     /// Cleanly disconnect every managed interface.
@@ -143,6 +163,19 @@ impl WifiClientState {
         if let Some(client) = self.client.as_mut() {
             client.shutdown().await;
         }
+    }
+
+    /// Drop the current shuli client and start a fresh one with the
+    /// desired networks. Used when the client is known to be stuck
+    /// (e.g. `run_once()` timeout) or when an explicit wifi-on must not
+    /// wait for a long backoff.
+    pub(crate) async fn restart_client(&mut self) {
+        if let Some(client) = self.client.as_mut() {
+            client.shutdown().await;
+        }
+        self.client = None;
+        self.connected = false;
+        self.start_client().await;
     }
 
     pub(crate) async fn apply(
@@ -385,6 +418,9 @@ impl WifiClientState {
             self.client = None;
             return;
         }
+        // A fresh client starts disconnected; keep the watchdog on the
+        // short timeout until the first connect state is reported.
+        self.connected = false;
         if let Some(client) = self.client.as_mut() {
             client.shutdown().await;
         }
@@ -509,9 +545,23 @@ mod tests {
         state.set_control(NipartWifiControl::Off).await.unwrap();
         assert!(!enabled_flag.load(Ordering::Acquire));
         assert!(!state.has_client());
+        assert!(!state.is_connected());
 
         state.set_control(NipartWifiControl::On).await.unwrap();
         assert!(enabled_flag.load(Ordering::Acquire));
+        assert!(!state.has_client());
+        assert!(!state.is_connected());
+    }
+
+    #[tokio::test]
+    async fn restart_client_resets_connected_state() {
+        let enabled_flag = Arc::new(AtomicBool::new(true));
+        let mut state = WifiClientState::new(enabled_flag);
+        state.connected = true;
+
+        state.restart_client().await;
+
+        assert!(!state.is_connected());
         assert!(!state.has_client());
     }
 
