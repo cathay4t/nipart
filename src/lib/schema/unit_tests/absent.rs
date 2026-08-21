@@ -98,3 +98,41 @@ fn test_absent_wireguard_without_current_iface_removes_saved_config() {
     assert!(merged_iface.for_apply.is_some());
     assert!(merged_iface.for_apply.as_ref().unwrap().is_absent());
 }
+
+#[test]
+fn test_absent_mac_identifier_without_current_iface_removes_saved_config() {
+    // A MAC-identified profile whose NIC is already gone must still be
+    // removable: the absent apply should drop the saved config without
+    // trying to resolve the missing MAC against a live interface.
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: mac0
+          kernel-iface-name: mac0
+          type: ethernet
+          state: absent
+          identifier: mac-address
+          mac-address: 02:00:00:00:00:02
+        "#,
+    )
+    .unwrap();
+    let saved: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: mac0
+          kernel-iface-name: mac0
+          type: ethernet
+          state: up
+          identifier: mac-address
+          mac-address: 02:00:00:00:00:02
+        "#,
+    )
+    .unwrap();
+
+    let merged =
+        MergedInterfaces::new(desired, Interfaces::default(), Some(saved))
+            .unwrap();
+    let merged_iface = merged.kernel_ifaces.get("mac0").unwrap();
+    assert!(
+        merged_iface.for_save.as_ref().unwrap().is_absent(),
+        "Absent MAC-identified profile should be removed from saved config"
+    );
+}

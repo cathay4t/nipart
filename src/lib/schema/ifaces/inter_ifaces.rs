@@ -210,26 +210,24 @@ impl Interfaces {
                 // TODO: For now, we raise error for not found, but we might
                 //       need to allow user store config without apply.
                 if kernel_iface_names.is_empty() {
-                    Err(NipartError::new(
-                        ErrorKind::InvalidArgument,
-                        format!(
-                            "Failed to find interface with mac address \
-                             {search_mac} for interface {}/{}",
-                            des_iface.name, des_iface.iface_type
-                        ),
-                    ))
-                } else if !kernel_iface_names.is_empty() {
-                    Ok(self.kernel_ifaces.get(&kernel_iface_names[0]))
+                    if des_iface.state.is_absent() {
+                        // Removing a saved MAC-identified profile does not
+                        // need a live NIC: the NIC may already be gone
+                        // (e.g. dock unplug), and the absent apply only
+                        // needs to drop the saved config.
+                        Ok(None)
+                    } else {
+                        Err(NipartError::new(
+                            ErrorKind::InvalidArgument,
+                            format!(
+                                "Failed to find interface with mac address \
+                                 {search_mac} for interface {}/{}",
+                                des_iface.name, des_iface.iface_type
+                            ),
+                        ))
+                    }
                 } else {
-                    Err(NipartError::new(
-                        ErrorKind::InvalidArgument,
-                        format!(
-                            "Multiple interface holding MAC address \
-                             {search_mac} which could be matched for \
-                             interface {}/{}",
-                            des_iface.name, des_iface.iface_type
-                        ),
-                    ))
+                    Ok(self.kernel_ifaces.get(&kernel_iface_names[0]))
                 }
             }
         }

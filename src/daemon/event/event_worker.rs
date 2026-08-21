@@ -120,6 +120,22 @@ impl NipartEventWorker {
             return Ok(());
         }
 
+        if nic_is_gone(&event, cur_iface) {
+            // The kernel interface is already gone (delete event, or a
+            // link-down event processed after the device disappeared).
+            // There is nothing to purge in the kernel, and applying the
+            // saved MAC-identified config now would only fail.  Re-arm the
+            // saved-profile watches so the config is applied when the same
+            // NIC appears again, possibly under a different kernel name
+            // (e.g. a USB dock replug).
+            log::trace!("Interface {event} is gone, re-arming saved monitors");
+            commander
+                .monitor_manager
+                .setup_saved_state_monitors(&saved_state, true)
+                .await?;
+            return Ok(());
+        }
+
         if let Some(cur_iface) = cur_iface {
             log::trace!("Current interface state: {cur_iface}");
 
@@ -238,6 +254,16 @@ fn is_stale_link_down_event(
         && cur_iface.is_some_and(|iface| {
             iface.base_iface().link_state == Some(InterfaceLinkState::Up)
         })
+}
+
+/// Whether the kernel interface is gone: either the netlink event is a
+/// delete, or the current query no longer contains the interface (e.g. the
+/// device was removed before the link-down event was processed).
+fn nic_is_gone(
+    event: &InterfaceLinkEvent,
+    cur_iface: Option<&Interface>,
+) -> bool {
+    event.is_delete || cur_iface.is_none()
 }
 
 /// Gather saved routes whose next-hop is the given saved interface.
@@ -414,7 +440,7 @@ mod tests {
     use super::{
         gen_routes_for_iface_up, handle_event_auto_connect,
         handle_wifi_phy_event, is_route_matching_iface,
-        is_stale_link_down_event,
+        is_stale_link_down_event, nic_is_gone,
     };
 
     fn gen_wifi_cfg_iface() -> Interface {
@@ -639,6 +665,19 @@ interfaces:
             &gen_link_event("eth0", false),
             None
         ));
+    }
+
+    #[test]
+    fn test_nic_is_gone() {
+        let saved_state = gen_saved_state();
+        let wan0 = find_iface(&saved_state, "wan0");
+        let mut delete_event = gen_link_event("eth0", false);
+        delete_event.is_delete = true;
+
+        assert!(nic_is_gone(&delete_event, Some(wan0)));
+        assert!(nic_is_gone(&gen_link_event("eth0", false), None));
+        assert!(!nic_is_gone(&gen_link_event("eth0", false), Some(wan0)));
+        assert!(!nic_is_gone(&gen_link_event("eth0", true), Some(wan0)));
     }
 
     #[test]

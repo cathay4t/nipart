@@ -12,6 +12,12 @@ from .testlib.statelib import load_yaml, show_only
 MAC_TEST_VETH = "veth-mac-plug0"
 MAC_TEST_VETH_PEER = "veth-mac-plug1"
 TEST_MAC = "02:00:00:00:00:01"
+MAC_TEST_VETH_REPLUG = "veth-replug0"
+MAC_TEST_VETH_REPLUG_PEER = "veth-replug1"
+MAC_TEST_VETH_REPLUG_NEW = "veth-replug2"
+MAC_TEST_VETH_REPLUG_NEW_PEER = "veth-replug3"
+MAC_TEST_PROFILE = "mac-replug0"
+TEST_MAC_REPLUG = "02:00:00:00:00:7e"
 TEST_MTU = 1280
 MAC_TEST_IP = "192.0.2.99"
 ROUTE_NEXTHOP = "192.0.2.1"
@@ -98,3 +104,95 @@ def test_mac_identifier_plugin_plugout(mac_plug_env):
     assert retry_till_true_or_timeout(
         DEFAULT_TIMEOUT, _iface_has_route, MAC_TEST_VETH
     ), f"default route via {MAC_TEST_VETH} not restored after plugin"
+
+
+def test_mac_identifier_replug_with_new_kernel_name():
+    # Same scenario as the dock replug: a MAC-identified NIC is removed and
+    # comes back under a different kernel name.  The daemon must notice it
+    # via the saved MAC watch and restore the profile without a restart.
+    for iface in (
+        MAC_TEST_VETH_REPLUG,
+        MAC_TEST_VETH_REPLUG_PEER,
+        MAC_TEST_VETH_REPLUG_NEW,
+        MAC_TEST_VETH_REPLUG_NEW_PEER,
+        MAC_TEST_PROFILE,
+    ):
+        exec_cmd(f"ip link del {iface}".split(), check=False)
+
+    try:
+        exec_cmd(
+            f"ip link add {MAC_TEST_VETH_REPLUG} address {TEST_MAC_REPLUG}"
+            f" type veth peer name {MAC_TEST_VETH_REPLUG_PEER}".split()
+        )
+        exec_cmd(f"ip link set {MAC_TEST_VETH_REPLUG_PEER} up".split())
+
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+            - name: {MAC_TEST_PROFILE}
+              kernel-iface-name: {MAC_TEST_PROFILE}
+              type: ethernet
+              state: up
+              identifier: mac-address
+              mac-address: {TEST_MAC_REPLUG}
+              mtu: {TEST_MTU}
+              ipv4:
+                enabled: true
+                dhcp: false
+                address:
+                - ip: {MAC_TEST_IP}
+                  prefix-length: 24
+            routes:
+              config:
+              - destination: 0.0.0.0/0
+                next-hop-interface: {MAC_TEST_PROFILE}
+                next-hop-address: {ROUTE_NEXTHOP}
+                table-id: 254
+                metric: 199"""))
+
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT, _iface_has_mtu, MAC_TEST_PROFILE, TEST_MTU
+        ), f"{MAC_TEST_PROFILE} not up with MTU {TEST_MTU} after apply"
+        assert _iface_has_route(MAC_TEST_PROFILE), (
+            f"default route via {MAC_TEST_PROFILE} missing after apply"
+        )
+
+        # Remove the NIC, then bring it back with a different kernel name.
+        exec_cmd(f"ip link del {MAC_TEST_PROFILE}".split())
+        time.sleep(1)
+        assert not _iface_has_route(MAC_TEST_PROFILE), (
+            f"Route via {MAC_TEST_PROFILE} should be gone after removal"
+        )
+
+        exec_cmd(
+            f"ip link add {MAC_TEST_VETH_REPLUG_NEW}"
+            f" address {TEST_MAC_REPLUG}"
+            f" type veth peer name {MAC_TEST_VETH_REPLUG_NEW_PEER}".split()
+        )
+        exec_cmd(f"ip link set {MAC_TEST_VETH_REPLUG_NEW_PEER} up".split())
+
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT, _iface_has_mtu, MAC_TEST_PROFILE, TEST_MTU
+        ), (
+            f"{MAC_TEST_PROFILE} not restored with MTU {TEST_MTU} after "
+            "replug under a new kernel name"
+        )
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT, _iface_has_route, MAC_TEST_PROFILE
+        ), (
+            f"default route via {MAC_TEST_PROFILE} not restored after "
+            "replug under a new kernel name"
+        )
+    finally:
+        for iface in (
+            MAC_TEST_PROFILE,
+            MAC_TEST_VETH_REPLUG,
+            MAC_TEST_VETH_REPLUG_PEER,
+            MAC_TEST_VETH_REPLUG_NEW,
+            MAC_TEST_VETH_REPLUG_NEW_PEER,
+        ):
+            exec_cmd(f"ip link del {iface}".split(), check=False)
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+            - name: {MAC_TEST_PROFILE}
+              type: ethernet
+              state: absent"""))
