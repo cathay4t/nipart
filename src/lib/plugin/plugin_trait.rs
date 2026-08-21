@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::{
     ErrorKind, NetworkState, NipartApplyOption, NipartError,
     NipartIpcConnection, NipartIpcListener, NipartPluginCmd, NipartPluginInfo,
-    NipartQueryOption, NipartWifiScanOption, WifiScanResult,
+    NipartQueryOption, NipartWifiControl, NipartWifiScanOption, WifiScanResult,
 };
 
 pub trait NipartPlugin: Send + Sync + Sized + 'static {
@@ -93,6 +93,12 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
                             Self::wifi_scan(&plugin, *opt, &mut conn).await;
                         conn.send(result).await?
                     }
+                    NipartPluginCmd::WifiControl(control) => {
+                        let result =
+                            Self::wifi_control(&plugin, control, &mut conn)
+                                .await;
+                        conn.send(result).await?
+                    }
                 }
             }
         }
@@ -166,6 +172,27 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
                 ErrorKind::NoSupport,
                 format!(
                     "Plugin {} has not implemented wifi_scan()",
+                    Self::PLUGIN_NAME
+                ),
+            ))
+        }
+    }
+
+    /// Enable or disable the WIFI function of the plugin.
+    ///
+    /// `Off` must stop all WIFI actions (scanning, connecting, and any
+    /// ongoing shuli client work) and `On` must restore them. The default
+    /// implementation returns an unsupported error.
+    fn wifi_control(
+        _plugin: &Arc<Self>,
+        _control: NipartWifiControl,
+        _conn: &mut NipartIpcConnection,
+    ) -> impl Future<Output = Result<(), NipartError>> + Send {
+        async {
+            Err(NipartError::new(
+                ErrorKind::NoSupport,
+                format!(
+                    "Plugin {} has not implemented wifi_control()",
                     Self::PLUGIN_NAME
                 ),
             ))

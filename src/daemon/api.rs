@@ -158,6 +158,43 @@ pub(crate) async fn process_api_connection(
                 let result = commander.wifi_scan(*opt).await;
                 conn.send(result).await?;
             }
+            NipartClientCmd::WifiControl(control) => {
+                log_info(
+                    Some(&mut conn),
+                    format!(
+                        "Client process {peer_pid} acquiring lock before \
+                         setting WIFI {control}"
+                    ),
+                )
+                .await;
+                if let Some(cur_locker) = NipartLockManager::cur_locker_pid() {
+                    log_info(
+                        Some(&mut conn),
+                        format!(
+                            "Waiting on-going transaction by PID {cur_locker}"
+                        ),
+                    )
+                    .await;
+                }
+
+                let lock = NipartLockManager::lock(peer_pid).await;
+                log_info(
+                    Some(&mut conn),
+                    format!(
+                        "Client process {peer_pid} acquired lock for setting \
+                         WIFI {control}"
+                    ),
+                )
+                .await;
+                let result = commander.wifi_control(control).await;
+                log_info(
+                    Some(&mut conn),
+                    format!("Client process {peer_pid} released lock"),
+                )
+                .await;
+                drop(lock);
+                conn.send(result).await?;
+            }
             _ => {
                 conn.send::<Result<NetworkState, NipartError>>(Err(
                     NipartError::new(

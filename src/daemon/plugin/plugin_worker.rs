@@ -11,7 +11,7 @@ use futures_util::{StreamExt, stream::FuturesUnordered};
 use nipart::{
     ErrorKind, InterfaceType, NetworkState, NipartApplyOption, NipartError,
     NipartInterface, NipartNoDaemon, NipartPluginClient, NipartQueryOption,
-    NipartWifiScanOption, WifiScanResult,
+    NipartWifiControl, NipartWifiScanOption, WifiScanResult,
 };
 
 const NPT_PLUGIN_SOCK_DIR: &str = "/var/run/nipart/sockets/plugin";
@@ -28,6 +28,7 @@ pub(crate) enum NipartPluginCmd {
     QueryNetworkState(Box<(NipartQueryOption, NetworkState)>),
     ApplyNetworkState(Box<(NetworkState, NipartApplyOption)>),
     WifiScan(Box<NipartWifiScanOption>),
+    WifiControl(NipartWifiControl),
 }
 
 impl std::fmt::Display for NipartPluginCmd {
@@ -41,6 +42,9 @@ impl std::fmt::Display for NipartPluginCmd {
             }
             Self::WifiScan(_) => {
                 write!(f, "wifi-scan")
+            }
+            Self::WifiControl(_) => {
+                write!(f, "wifi-control")
             }
         }
     }
@@ -193,6 +197,7 @@ impl TaskWorker for NipartPluginWorker {
             }
             NipartPluginCmd::WifiScan(opt) => {
                 let mut ret = Vec::new();
+                let mut first_error = None;
                 for plugin in self.plugins.values() {
                     if !plugin.is_wifi_plugin() {
                         continue;
@@ -201,10 +206,29 @@ impl TaskWorker for NipartPluginWorker {
                         Ok(r) => ret.extend(r),
                         Err(e) => {
                             log::info!("{e}");
+                            if first_error.is_none() {
+                                first_error = Some(e);
+                            }
                         }
                     }
                 }
+                if ret.is_empty()
+                    && let Some(e) = first_error
+                {
+                    return Err(e);
+                }
                 Ok(NipartPluginReply::WifiScanResult(ret))
+            }
+            NipartPluginCmd::WifiControl(control) => {
+                for plugin in self.plugins.values() {
+                    if !plugin.is_wifi_plugin() {
+                        continue;
+                    }
+                    if let Err(e) = plugin.wifi_control(control).await {
+                        log::info!("{e}");
+                    }
+                }
+                Ok(NipartPluginReply::None)
             }
         }
     }

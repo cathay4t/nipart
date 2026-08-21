@@ -7,7 +7,7 @@ use std::{
 
 use nipart::{
     Interface, NetworkState, NipartClient, NipartQueryOption,
-    NipartWifiScanOption, WifiAuthType, WifiScanResult,
+    NipartWifiControl, NipartWifiScanOption, WifiAuthType, WifiScanResult,
 };
 use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -79,6 +79,14 @@ impl CommandWifi {
                             ),
                     ),
             )
+            .subcommand(
+                clap::Command::new("off").about(
+                    "Disable WIFI: disconnect and stop all WIFI actions",
+                ),
+            )
+            .subcommand(clap::Command::new("on").about(
+                "Enable WIFI actions; use connect or up to restore connections",
+            ))
     }
 
     pub(crate) async fn handle(
@@ -168,6 +176,14 @@ impl CommandWifi {
             let mut cli = NipartClient::new().await?;
             cli.apply_network_state(desired_state, Default::default())
                 .await?;
+        } else if matches.subcommand_matches("off").is_some() {
+            let mut cli = NipartClient::new().await?;
+            cli.wifi_control(NipartWifiControl::Off).await?;
+            println!("WIFI is off");
+        } else if matches.subcommand_matches("on").is_some() {
+            let mut cli = NipartClient::new().await?;
+            cli.wifi_control(NipartWifiControl::On).await?;
+            println!("WIFI is on");
         }
         Ok(())
     }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     JsonDisplayHideSecrets, NetworkState, NipartApplyOption, NipartCanIpc,
     NipartError, NipartIpcConnection, NipartPluginInfo, NipartQueryOption,
-    NipartWifiScanOption, WifiScanResult,
+    NipartWifiControl, NipartWifiScanOption, WifiScanResult,
 };
 
 #[derive(Debug)]
@@ -28,6 +28,7 @@ pub enum NipartPluginCmd {
     QueryNetworkState(Box<(NipartQueryOption, NetworkState)>),
     ApplyNetworkState(Box<(NetworkState, NipartApplyOption)>),
     WifiScan(Box<NipartWifiScanOption>),
+    WifiControl(NipartWifiControl),
     Quit,
 }
 
@@ -38,6 +39,7 @@ impl NipartCanIpc for NipartPluginCmd {
             Self::QueryNetworkState(_) => "query-network-state".to_string(),
             Self::ApplyNetworkState(_) => "apply-network-state".to_string(),
             Self::WifiScan(_) => "wifi-scan".to_string(),
+            Self::WifiControl(_) => "wifi-control".to_string(),
             Self::Quit => "quit".to_string(),
         }
     }
@@ -111,6 +113,16 @@ impl NipartPluginClient {
             .send(Ok(NipartPluginCmd::WifiScan(Box::new(option))))
             .await?;
         self.ipc.recv::<Vec<WifiScanResult>>().await
+    }
+
+    pub async fn wifi_control(
+        &mut self,
+        control: NipartWifiControl,
+    ) -> Result<(), NipartError> {
+        self.ipc
+            .send(Ok(NipartPluginCmd::WifiControl(control)))
+            .await?;
+        self.ipc.recv::<()>().await
     }
 
     pub async fn send<T>(

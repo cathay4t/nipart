@@ -62,7 +62,8 @@ pub use self::{
     net_state::NetworkState,
     route::{RouteEntry, RouteState, RouteType, Routes},
     state_options::{
-        NipartApplyOption, NipartQueryOption, NipartWifiScanOption,
+        NipartApplyOption, NipartQueryOption, NipartWifiControl,
+        NipartWifiScanOption,
     },
     version::CUR_SCHEMA_VERSION,
     wait_online::{NipartWaitOnline, NipartWaitOnlineCondition},

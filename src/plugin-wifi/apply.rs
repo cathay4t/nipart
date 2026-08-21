@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use nipart::{
     ErrorKind, Interface, InterfaceType, NipartError, NipartInterface,
-    WifiConfig,
+    NipartWifiControl, WifiConfig,
 };
 use shuli::{
     NetworkConfig as ShuliNetworkConfig, WifiClient,
@@ -26,15 +32,65 @@ pub(crate) struct WifiIfaceState {
 
 /// The plugin-side wifi state: one shuli `WifiClient` for all wifi-phy
 /// interfaces plus the per-interface metadata the apply flow needs.
-#[derive(Default)]
 pub(crate) struct WifiClientState {
     client: Option<WifiClient>,
     ifaces: HashMap<String, WifiIfaceState>,
+    enabled: bool,
+    enabled_flag: Arc<AtomicBool>,
 }
 
 impl WifiClientState {
+    pub(crate) fn new(enabled_flag: Arc<AtomicBool>) -> Self {
+        Self {
+            client: None,
+            ifaces: HashMap::new(),
+            enabled: true,
+            enabled_flag,
+        }
+    }
+
     pub(crate) fn has_client(&self) -> bool {
         self.client.is_some()
+    }
+
+    /// Enable or disable all WIFI actions.
+    ///
+    /// Disabling disconnects the shuli client and prevents future scans,
+    /// connects, and client-driven passive scans.  Enabling only re-enables
+    /// the WIFI function; the next explicit wifi apply (`npt wifi connect`
+    /// or `npt up` on a wifi interface) starts the client again with the
+    /// saved desired networks.
+    pub(crate) async fn set_control(
+        &mut self,
+        control: NipartWifiControl,
+    ) -> Result<(), NipartError> {
+        match control {
+            NipartWifiControl::Off => {
+                log::info!("Disabling WIFI");
+                // TODO: Also block the radio via rfkill when supported.
+                // The `enabled` state should then reflect the actual
+                // rfkill state, and `npt wifi on` must unblock the radio
+                // before the shuli client is started.
+                self.enabled = false;
+                self.enabled_flag.store(false, Ordering::Release);
+                self.shutdown().await;
+                self.client = None;
+            }
+            NipartWifiControl::On => {
+                log::info!("Enabling WIFI");
+                // TODO: Unblock the radio via rfkill when supported and
+                // keep `enabled` in sync with the actual radio state.
+                self.enabled = true;
+                self.enabled_flag.store(true, Ordering::Release);
+            }
+            _ => {
+                return Err(NipartError::new(
+                    ErrorKind::Bug,
+                    format!("Unsupported WIFI control {control}"),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Drive the single client until one interface reports a state
@@ -94,6 +150,18 @@ impl WifiClientState {
         ifaces: &[Interface],
         force: bool,
     ) -> Result<(), NipartError> {
+        // An explicit wifi up request carrying an SSID (e.g.
+        // `npt wifi connect` or `npt up <wifi-phy|wifi-cfg>`)
+        // automatically restores WIFI even when it was previously turned
+        // off.  Down/absent-only applies and background wifi-phy IP
+        // applies must not silently re-enable it.
+        let has_wifi_up_request = has_wifi_ssid_up_request(ifaces);
+        if !self.enabled && has_wifi_up_request {
+            log::info!("WIFI is off; explicit wifi up request restores WIFI");
+            self.enabled = true;
+            self.enabled_flag.store(true, Ordering::Release);
+        }
+
         let mut available_wifi_phys: Vec<String> = Vec::new();
         // Map of wifi-phy name to its current kernel if_index, used to
         // detect a phy that was recreated (e.g. wifi driver module
@@ -242,6 +310,18 @@ impl WifiClientState {
             recreate = true;
         }
 
+        // While WIFI is disabled, keep the desired network bookkeeping up
+        // to date (so `npt wifi on` or a later explicit up can restore the
+        // right profiles) but never start or drive the shuli client.
+        if !self.enabled {
+            for (iface_name, networks) in pending_networks.drain() {
+                if let Some(iface_state) = self.ifaces.get_mut(&iface_name) {
+                    iface_state.desired_networks = networks;
+                }
+            }
+            return Ok(());
+        }
+
         if self.client.is_none() && !self.ifaces.is_empty() {
             recreate = true;
         }
@@ -255,34 +335,7 @@ impl WifiClientState {
             if let Some(client) = self.client.as_mut() {
                 client.shutdown().await;
             }
-            let configs: Vec<ShuliWifiConfig> = self
-                .ifaces
-                .iter()
-                .map(|(iface_name, iface_state)| {
-                    let mut config = ShuliWifiConfig::new(iface_name);
-                    config.networks = iface_state.desired_networks.clone();
-                    config
-                })
-                .collect();
-            if configs.is_empty() {
-                self.client = None;
-            } else {
-                log::info!(
-                    "Starting WIFI client on {}",
-                    configs
-                        .iter()
-                        .map(|config| config.iface_name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-                match WifiClient::init_multi(configs).await {
-                    Ok(client) => self.client = Some(client),
-                    Err(e) => {
-                        log::error!("WIFI init failed: {e}");
-                        self.client = None;
-                    }
-                }
-            }
+            self.start_client().await;
             return Ok(());
         }
 
@@ -326,6 +379,54 @@ impl WifiClientState {
 
         Ok(())
     }
+
+    async fn start_client(&mut self) {
+        if self.ifaces.is_empty() {
+            self.client = None;
+            return;
+        }
+        if let Some(client) = self.client.as_mut() {
+            client.shutdown().await;
+        }
+        let configs: Vec<ShuliWifiConfig> = self
+            .ifaces
+            .iter()
+            .map(|(iface_name, iface_state)| {
+                let mut config = ShuliWifiConfig::new(iface_name);
+                config.networks = iface_state.desired_networks.clone();
+                config
+            })
+            .collect();
+        log::info!(
+            "Starting WIFI client on {}",
+            configs
+                .iter()
+                .map(|config| config.iface_name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        match WifiClient::init_multi(configs).await {
+            Ok(client) => self.client = Some(client),
+            Err(e) => {
+                log::error!("WIFI init failed: {e}");
+                self.client = None;
+            }
+        }
+    }
+}
+
+fn has_wifi_ssid_up_request(ifaces: &[Interface]) -> bool {
+    ifaces.iter().any(|iface| {
+        if !iface.is_up() {
+            return false;
+        }
+        let wifi_cfg = match iface {
+            Interface::WifiCfg(iface) => iface.wifi.as_ref(),
+            Interface::WifiPhy(iface) => iface.wifi.as_ref(),
+            _ => None,
+        };
+        wifi_cfg.is_some_and(|cfg| !cfg.ssid.is_empty())
+    })
 }
 
 fn mac_to_string(mac: &[u8; 6]) -> String {
@@ -369,7 +470,50 @@ fn build_shuli_networks(
 
 #[cfg(test)]
 mod tests {
+    use nipart::{
+        BaseInterface, InterfaceState, InterfaceType, WifiCfgInterface,
+        WifiPhyInterface,
+    };
+
     use super::*;
+
+    #[test]
+    fn has_wifi_ssid_up_request_requires_ssid() {
+        let mut wifi_cfg = WifiCfgInterface::new(BaseInterface::new(
+            "Test-WIFI".to_string(),
+            InterfaceType::WifiCfg,
+        ));
+        wifi_cfg.base.state = InterfaceState::Up;
+        wifi_cfg.wifi = Some(WifiConfig {
+            ssid: "Test-WIFI".to_string(),
+            ..Default::default()
+        });
+        assert!(has_wifi_ssid_up_request(&[Interface::WifiCfg(Box::new(
+            wifi_cfg
+        ))]));
+
+        let mut wifi_phy = WifiPhyInterface::default();
+        wifi_phy.base =
+            BaseInterface::new("wlan0".to_string(), InterfaceType::WifiPhy);
+        wifi_phy.base.state = InterfaceState::Up;
+        assert!(!has_wifi_ssid_up_request(&[Interface::WifiPhy(Box::new(
+            wifi_phy
+        ))]));
+    }
+
+    #[tokio::test]
+    async fn set_control_off_on_toggles_wifi_state() {
+        let enabled_flag = Arc::new(AtomicBool::new(true));
+        let mut state = WifiClientState::new(enabled_flag.clone());
+
+        state.set_control(NipartWifiControl::Off).await.unwrap();
+        assert!(!enabled_flag.load(Ordering::Acquire));
+        assert!(!state.has_client());
+
+        state.set_control(NipartWifiControl::On).await.unwrap();
+        assert!(enabled_flag.load(Ordering::Acquire));
+        assert!(!state.has_client());
+    }
 
     fn wifi_cfg(ssid: &str, password: Option<&str>) -> WifiConfig {
         WifiConfig {

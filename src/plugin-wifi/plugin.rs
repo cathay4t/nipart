@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use nipart::{
     ErrorKind, Interface, InterfaceType, NetworkState, NipartApplyOption,
     NipartError, NipartIpcConnection, NipartPlugin, NipartPluginInfo,
-    NipartQueryOption, NipartWifiScanOption, WifiScanResult,
+    NipartQueryOption, NipartWifiControl, NipartWifiScanOption, WifiScanResult,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
@@ -13,8 +16,17 @@ use crate::{NipartWpaConn, apply::WifiClientState};
 
 #[derive(Debug)]
 pub(crate) struct NipartPluginWifi {
-    apply_tx:
-        tokio::sync::mpsc::UnboundedSender<(Vec<Interface>, NipartApplyOption)>,
+    worker_tx: tokio::sync::mpsc::UnboundedSender<WifiWorkerRequest>,
+    wifi_enabled: Arc<AtomicBool>,
+}
+
+#[derive(Debug)]
+enum WifiWorkerRequest {
+    Apply(Vec<Interface>, NipartApplyOption),
+    Control(
+        NipartWifiControl,
+        tokio::sync::oneshot::Sender<Result<(), NipartError>>,
+    ),
 }
 
 /// Dedicated worker processing wifi apply requests serially in arrival
@@ -23,17 +35,20 @@ pub(crate) struct NipartPluginWifi {
 /// connection handling, and `query_network_state()` is never stalled by an
 /// on-going apply.  The worker also owns every live wifi connection
 /// ([`WifiClientState`]): when the daemon connection is gone it tears
-/// the single client down.
+/// the single client down.  WIFI on/off control is also serialized here
+/// so a disable always runs after any queued apply and before any later
+/// one.
 async fn apply_worker(
-    mut rx: UnboundedReceiver<(Vec<Interface>, NipartApplyOption)>,
+    mut rx: UnboundedReceiver<WifiWorkerRequest>,
+    wifi_enabled: Arc<AtomicBool>,
 ) {
-    let mut wifi_state = WifiClientState::default();
+    let mut wifi_state = WifiClientState::new(wifi_enabled);
     loop {
         tokio::select! {
             biased;
             maybe = rx.recv() => {
                 match maybe {
-                    Some((ifaces, opt)) => {
+                    Some(WifiWorkerRequest::Apply(ifaces, opt)) => {
                         if let Err(e) = wifi_state
                             .apply(ifaces.as_slice(), opt.force)
                             .await
@@ -42,6 +57,16 @@ async fn apply_worker(
                                 "WIFI plugin failed to apply state: {e}"
                             );
                         }
+                    }
+                    Some(WifiWorkerRequest::Control(control, reply)) => {
+                        let result = wifi_state.set_control(control).await;
+                        if let Err(e) = &result {
+                            log::error!(
+                                "WIFI plugin failed to set control \
+                                 {control}: {e}"
+                            );
+                        }
+                        let _ = reply.send(result);
                     }
                     None => {
                         wifi_state.shutdown().await;
@@ -62,9 +87,13 @@ impl NipartPlugin for NipartPluginWifi {
     const PLUGIN_NAME: &'static str = "wifi";
 
     async fn init() -> Result<Self, NipartError> {
-        let (apply_tx, apply_rx) = unbounded_channel();
-        tokio::spawn(apply_worker(apply_rx));
-        Ok(Self { apply_tx })
+        let (worker_tx, worker_rx) = unbounded_channel();
+        let wifi_enabled = Arc::new(AtomicBool::new(true));
+        tokio::spawn(apply_worker(worker_rx, wifi_enabled.clone()));
+        Ok(Self {
+            worker_tx,
+            wifi_enabled,
+        })
     }
 
     async fn plugin_info(
@@ -104,26 +133,62 @@ impl NipartPlugin for NipartPluginWifi {
         // Never block: enqueue the request to the dedicated apply worker
         // and return immediately. The daemon verification stage waits and
         // retries until the applied state matches the desired state.
-        plugin.apply_tx.send((ifaces, _opt.clone())).map_err(|e| {
-            NipartError::new(
-                ErrorKind::Bug,
-                format!("Failed to enqueue wifi apply request: {e}"),
-            )
-        })
+        plugin
+            .worker_tx
+            .send(WifiWorkerRequest::Apply(ifaces, _opt.clone()))
+            .map_err(|e| {
+                NipartError::new(
+                    ErrorKind::Bug,
+                    format!("Failed to enqueue wifi apply request: {e}"),
+                )
+            })
     }
 
     async fn wifi_scan(
-        _plugin: &Arc<Self>,
+        plugin: &Arc<Self>,
         opt: NipartWifiScanOption,
         conn: &mut NipartIpcConnection,
     ) -> Result<Vec<WifiScanResult>, NipartError> {
         conn.log_trace(format!("WIFI plugin wifi_scan with option {opt}"))
             .await;
+        if !plugin.wifi_enabled.load(Ordering::Acquire) {
+            return Err(NipartError::new(
+                ErrorKind::PluginFailure,
+                "WIFI is off; run `npt wifi on`, `npt wifi connect`, or `npt \
+                 up` on a wifi interface to restore it"
+                    .to_string(),
+            ));
+        }
         let NipartWifiScanOption {
             iface_name,
             hidden_ssids,
             ..
         } = opt;
         NipartWpaConn::wifi_scan(iface_name.as_deref(), hidden_ssids).await
+    }
+
+    async fn wifi_control(
+        plugin: &Arc<Self>,
+        control: NipartWifiControl,
+        conn: &mut NipartIpcConnection,
+    ) -> Result<(), NipartError> {
+        conn.log_trace(format!("WIFI plugin wifi_control with {control}"))
+            .await;
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        plugin
+            .worker_tx
+            .send(WifiWorkerRequest::Control(control, reply_tx))
+            .map_err(|e| {
+                NipartError::new(
+                    ErrorKind::Bug,
+                    format!("Failed to enqueue wifi control request: {e}"),
+                )
+            })?;
+        reply_rx.await.map_err(|e| {
+            NipartError::new(
+                ErrorKind::Bug,
+                format!("Failed to receive wifi control reply: {e}"),
+            )
+        })?
     }
 }
