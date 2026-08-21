@@ -62,6 +62,26 @@ fn test_wifi_phy_hold_wifi_cfg_with_other_base_iface() {
 }
 
 #[test]
+fn test_wifi_cfg_hidden_round_trip() {
+    let iface: WifiCfgInterface = rmsd_yaml::from_str(
+        r#"---
+        name: Test-WIFI-HIDDEN
+        type: wifi-cfg
+        state: up
+        wifi:
+          ssid: Test-WIFI-HIDDEN
+          hidden: true
+        "#,
+    )
+    .unwrap();
+    assert!(iface.wifi.as_ref().unwrap().hidden);
+
+    let yaml = rmsd_yaml::to_string(&iface).unwrap();
+    let parsed: WifiCfgInterface = rmsd_yaml::from_str(&yaml).unwrap();
+    assert!(parsed.wifi.as_ref().unwrap().hidden);
+}
+
+#[test]
 fn test_wifi_cfg_sanitize_keeps_full_saved_config_on_diff_apply() {
     let desired: WifiCfgInterface = rmsd_yaml::from_str(
         r#"---

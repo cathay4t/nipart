@@ -70,6 +70,7 @@ class TestWifiHidden:
                     wifi:
                       ssid: {TEST_WIFI_SSID_HIDDEN}
                       password: {TEST_WIFI_PSK}
+                      hidden: true
                     ipv4:
                       enabled: true
                       dhcp: false
@@ -89,6 +90,7 @@ class TestWifiHidden:
                     wifi:
                       ssid: {TEST_WIFI_SSID_HIDDEN}
                       password: {TEST_WIFI_PSK}
+                      hidden: true
                     ipv4:
                       enabled: true
                       dhcp: true"""))
@@ -105,6 +107,7 @@ class TestWifiHidden:
                     wifi:
                       ssid: {TEST_WIFI_SSID_HIDDEN}
                       password: {TEST_WIFI_PSK}
+                      hidden: true
                     ipv4:
                       enabled: true
                       dhcp: false
@@ -132,3 +135,54 @@ class TestWifiHidden:
 
         output = exec_cmd([npt_path(), "wifi", "scan", "--show-hidden"])[1]
         assert TEST_WIFI_SSID_HIDDEN in output
+
+
+@pytest.mark.skipif(
+    not has_kernel_module("mac80211_hwsim"),
+    reason="Does not have 'mac80211_hwsim' kernel module",
+)
+class TestWifiHiddenAutoConnect:
+    """Apply hidden SSID state before the AP comes up; verify the daemon
+    auto-connects once the hidden AP becomes available."""
+
+    @pytest.fixture(autouse=True)
+    def setup_and_teardown(self):
+        create_sim_wifi_nics()
+        exec_cmd("killall wpa_supplicant".split(), check=False)
+        yield
+        destroy_sim_wifi_nics()
+
+    def test_auto_connect_after_ap_starts(self):
+        # Apply the hidden SSID config before hostapd is running.
+        # The daemon saves the state and holds the connection attempt;
+        # the AP is not yet broadcasting.
+        try:
+            nipart.apply(
+                load_yaml(f"""---
+                    interfaces:
+                      - name: {WIFI_TEST_NIC}
+                        type: wifi-phy
+                        state: up
+                        wifi:
+                          ssid: {TEST_WIFI_SSID_HIDDEN}
+                          password: {TEST_WIFI_PSK}
+                          hidden: true
+                        ipv4:
+                          enabled: true
+                          dhcp: false
+                          address:
+                            - ip: {DHCP_SRV_IP4_PREFIX}.99
+                              prefix-length: 24"""),
+                verify_change=False,
+            )
+        except Exception:
+            # Expected: AP not up yet, daemon saves config for retry.
+            pass
+
+        # Now bring up the hidden AP.
+        start_hostapd_hidden(TEST_NET_NS)
+
+        # Nipart should auto-connect via directed probe (hidden_ssids).
+        assert retry_till_true_or_timeout(
+            30, ping_peer
+        ), "hidden SSID did not auto-connect after AP came up"

@@ -18,20 +18,23 @@ impl NipartWpaConn {
     pub(crate) async fn wifi_scan(
         iface_name: Option<&str>,
         show_hidden: bool,
+        hidden_ssids: Vec<String>,
     ) -> Result<Vec<WifiScanResult>, NipartError> {
-        if let Ok(r) = _wifi_scan(iface_name, show_hidden).await
+        if let Ok(r) =
+            _wifi_scan(iface_name, show_hidden, hidden_ssids.clone()).await
             && !r.is_empty()
         {
             return Ok(r);
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        _wifi_scan(iface_name, show_hidden).await
+        _wifi_scan(iface_name, show_hidden, hidden_ssids).await
     }
 }
 
 async fn _wifi_scan(
     iface_name: Option<&str>,
     show_hidden: bool,
+    hidden_ssids: Vec<String>,
 ) -> Result<Vec<WifiScanResult>, NipartError> {
     // Keep one entry per SSID, merging auth types from all BSSes of the
     // same SSID and keeping the strongest signal.
@@ -67,14 +70,15 @@ async fn _wifi_scan(
     };
 
     for iface_name in &scan_ifaces {
-        let scan_results = shuli::scan::scan_wifi_with_ies(iface_name)
-            .await
-            .map_err(|e| {
-                NipartError::new(
-                    ErrorKind::PluginFailure,
-                    format!("scan failed on {iface_name}: {e}"),
-                )
-            })?;
+        let scan_results =
+            shuli::scan::scan_wifi_with_ies(iface_name, hidden_ssids.clone())
+                .await
+                .map_err(|e| {
+                    NipartError::new(
+                        ErrorKind::PluginFailure,
+                        format!("scan failed on {iface_name}: {e}"),
+                    )
+                })?;
 
         for (bss_info, ies) in &scan_results {
             if bss_info.hidden && !show_hidden {
