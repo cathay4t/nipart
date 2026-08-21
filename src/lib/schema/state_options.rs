@@ -123,9 +123,11 @@ impl NipartApplyOption {
 pub struct NipartWifiScanOption {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub iface_name: Option<String>,
-    /// Show hidden SSIDs in scan results. Default to false.
-    #[serde(default)]
-    pub show_hidden: bool,
+    /// SSIDs to probe explicitly so hidden networks can be discovered
+    /// (e.g. `--with-hidden`); the currently connected SSID is always
+    /// added as well.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_ssids: Vec<String>,
 }
 
 impl NipartWifiScanOption {

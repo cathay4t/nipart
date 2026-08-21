@@ -20,7 +20,7 @@ from .testlib.wifi import destroy_sim_wifi_nics
 from .testlib.wifi import start_hostapd_hidden
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="class")
 def wifi_hidden_env():
     create_sim_wifi_nics()
     exec_cmd("killall wpa_supplicant".split(), check=False)
@@ -133,7 +133,16 @@ class TestWifiHidden:
         output = exec_cmd([npt_path(), "wifi", "scan"])[1]
         assert TEST_WIFI_SSID_HIDDEN not in output
 
-        output = exec_cmd([npt_path(), "wifi", "scan", "--show-hidden"])[1]
+        # A hidden network is only reported once we probe for it.
+        output = exec_cmd(
+            [
+                npt_path(),
+                "wifi",
+                "scan",
+                "--with-hidden",
+                TEST_WIFI_SSID_HIDDEN,
+            ]
+        )[1]
         assert TEST_WIFI_SSID_HIDDEN in output
 
 
