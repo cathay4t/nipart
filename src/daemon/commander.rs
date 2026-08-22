@@ -6,8 +6,8 @@ use futures_channel::mpsc::UnboundedSender;
 use nipart::{
     BaseInterface, Interface, InterfaceIdentifier, InterfaceState,
     InterfaceType, NetworkState, NipartApplyOption, NipartError,
-    NipartInterface, NipartNoDaemon, NipartQueryOption, NipartWifiScanOption,
-    WifiScanResult,
+    NipartInterface, NipartNoDaemon, NipartQueryOption, NipartWifiControl,
+    NipartWifiScanOption, WifiScanResult,
 };
 
 use super::{
@@ -293,6 +293,13 @@ impl NipartCommander {
         // the wifi plugin from live network state); a hidden SSID is only
         // reported when it is explicitly probed for.
         self.plugin_manager.wifi_scan(opt).await
+    }
+
+    pub(crate) async fn wifi_control(
+        &mut self,
+        control: NipartWifiControl,
+    ) -> Result<(), NipartError> {
+        self.plugin_manager.wifi_control(control).await
     }
 
     /// Restore the DHCP clients for the saved interfaces applied at boot.

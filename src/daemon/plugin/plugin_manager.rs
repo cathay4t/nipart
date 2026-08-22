@@ -2,7 +2,7 @@
 
 use nipart::{
     ErrorKind, NetworkState, NipartApplyOption, NipartError, NipartQueryOption,
-    NipartWifiScanOption, WifiScanResult,
+    NipartWifiControl, NipartWifiScanOption, WifiScanResult,
 };
 
 use super::{NipartPluginCmd, NipartPluginReply, NipartPluginWorker};
@@ -85,5 +85,25 @@ impl NipartPluginManager {
             ))))
             .await?;
         Ok(())
+    }
+
+    // TODO: Support redirect logs from plugin to user
+    pub(crate) async fn wifi_control(
+        &mut self,
+        control: NipartWifiControl,
+    ) -> Result<(), NipartError> {
+        let reply =
+            self.mgr.exec(NipartPluginCmd::WifiControl(control)).await?;
+        if let NipartPluginReply::None = reply {
+            Ok(())
+        } else {
+            Err(NipartError::new(
+                ErrorKind::Bug,
+                format!(
+                    "NipartPluginCmd::WifiControl is not replying with \
+                     NipartPluginReply::None, but {reply:?}"
+                ),
+            ))
+        }
     }
 }

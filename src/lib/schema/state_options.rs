@@ -135,3 +135,20 @@ impl NipartWifiScanOption {
         Self::default()
     }
 }
+
+/// WIFI radio/function control requested through `npt wifi on|off`.
+///
+/// For now this only tells the WIFI plugin to stop (or resume) all WIFI
+/// actions such as scanning and connecting.  When rfkill support is added,
+/// [`NipartWifiControl::Off`] should also block the radio and
+/// [`NipartWifiControl::On`] should unblock it.  The setting is currently
+/// plugin-runtime only and resets to `On` when the daemon restarts.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonDisplay,
+)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum NipartWifiControl {
+    On,
+    Off,
+}

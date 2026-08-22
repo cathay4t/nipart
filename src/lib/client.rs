@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     JsonDisplayHideSecrets, NetworkState, NipartApplyOption, NipartCanIpc,
-    NipartError, NipartIpcConnection, NipartQueryOption, NipartWifiScanOption,
-    WifiScanResult,
+    NipartError, NipartIpcConnection, NipartQueryOption, NipartWifiControl,
+    NipartWifiScanOption, WifiScanResult,
 };
 
 impl NipartCanIpc for NetworkState {
@@ -32,6 +32,7 @@ pub enum NipartClientCmd {
     DownInterface(String),
     WaitOnline,
     WifiScan(Box<NipartWifiScanOption>),
+    WifiControl(NipartWifiControl),
 }
 
 impl NipartCanIpc for Vec<WifiScanResult> {
@@ -50,6 +51,7 @@ impl NipartCanIpc for NipartClientCmd {
             Self::DownInterface(_) => "down-interface".to_string(),
             Self::WaitOnline => "wait-online".to_string(),
             Self::WifiScan(_) => "wifi-scan".to_string(),
+            Self::WifiControl(_) => "wifi-control".to_string(),
         }
     }
 }
@@ -167,5 +169,15 @@ impl NipartClient {
             .send(Ok(NipartClientCmd::WifiScan(Box::new(option))))
             .await?;
         self.ipc.recv::<Vec<WifiScanResult>>().await
+    }
+
+    pub async fn wifi_control(
+        &mut self,
+        control: NipartWifiControl,
+    ) -> Result<(), NipartError> {
+        self.ipc
+            .send(Ok(NipartClientCmd::WifiControl(control)))
+            .await?;
+        self.ipc.recv::<()>().await
     }
 }

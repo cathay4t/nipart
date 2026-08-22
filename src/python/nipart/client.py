@@ -8,6 +8,7 @@ from .cmd import NipartCmdDownInterface
 from .cmd import NipartCmdPing
 from .cmd import NipartCmdQueryNetworkState
 from .cmd import NipartCmdUpInterface
+from .cmd import NipartCmdWifiControl
 from .error import NipartError
 from .log import NipartLogEntry
 from .schema.state_option import NipartApplyOption
@@ -75,3 +76,6 @@ class NipartClient:
 
     def down_interface(self, name):
         return self._conn.exec(NipartCmdDownInterface(name))
+
+    def wifi_control(self, control):
+        return self._conn.exec(NipartCmdWifiControl(control))

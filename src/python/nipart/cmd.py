@@ -48,6 +48,21 @@ class NipartCmdDownInterface:
         )
 
 
+class NipartCmdWifiControl:
+    IPC_KIND = "wifi-control"
+
+    def __init__(self, control: str):
+        self.control = control
+
+    def to_json(self):
+        return json.dumps(
+            {
+                "kind": NipartCmdWifiControl.IPC_KIND,
+                "data": {NipartCmdWifiControl.IPC_KIND: self.control},
+            }
+        )
+
+
 class NipartCmdQueryNetworkState:
     IPC_KIND = "query-network-state"
 
