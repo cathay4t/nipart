@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::time::Duration;
+
 use futures_util::stream::{StreamExt, TryStreamExt};
 use rtnetlink::{
     MulticastGroup, new_multicast_connection,
@@ -11,6 +13,8 @@ use rtnetlink::{
 };
 
 use crate::{ErrorKind, NipartError, NipartNoDaemon};
+
+const LINK_CARRIER_QUERY_INTERVAL_SEC: u64 = 30;
 
 impl NipartNoDaemon {
     pub async fn wait_link_carrier_up(
@@ -132,6 +136,7 @@ async fn wait_link_carrier(
             )
         })?;
     tokio::spawn(conn);
+    let mut multicast_socket_dropped = false;
 
     let cur_link_state = is_link_oper_up(&handle, iface_name).await?;
     if link_up == cur_link_state {
@@ -139,30 +144,56 @@ async fn wait_link_carrier(
     }
 
     let iface_name_attr = LinkAttribute::IfName(iface_name.to_string());
+    // The multicast stream may drop or batch notifications when the kernel
+    // is busy, and a non-ENOBUFS socket error ends the stream, so poll the
+    // link state as a fallback.
+    let mut query_interval = tokio::time::interval(Duration::from_secs(
+        LINK_CARRIER_QUERY_INTERVAL_SEC,
+    ));
+    // Consume the immediate first tick; the initial query already ran above.
+    query_interval.tick().await;
 
-    while let Some((nl_msg, _)) = messages.next().await {
-        if let NetlinkPayload::InnerMessage(RouteNetlinkMessage::NewLink(
-            link_msg,
-        )) = nl_msg.payload
-            && link_msg
-                .attributes
-                .iter()
-                .any(|attr| attr == &iface_name_attr)
-            && (if link_up {
-                link_msg.header.flags.contains(LinkFlags::Running)
-            } else {
-                !link_msg.header.flags.contains(LinkFlags::Running)
-            })
-        {
-            return Ok(());
+    loop {
+        tokio::select! {
+            result = async {
+                if multicast_socket_dropped {
+                    std::future::pending::<Option<_>>().await
+                } else {
+                    messages.next().await
+                }
+            } => {
+                let Some((nl_msg, _)) = result else {
+                    log::warn!(
+                        "Netlink multicast socket stream for interface {} \
+                         ended, falling back to periodic link state query",
+                        iface_name
+                    );
+                    multicast_socket_dropped = true;
+                    continue;
+                };
+                if let NetlinkPayload::InnerMessage(
+                    RouteNetlinkMessage::NewLink(link_msg),
+                ) = nl_msg.payload
+                    && link_msg
+                        .attributes
+                        .iter()
+                        .any(|attr| attr == &iface_name_attr)
+                    && (if link_up {
+                        link_msg.header.flags.contains(LinkFlags::Running)
+                    } else {
+                        !link_msg.header.flags.contains(LinkFlags::Running)
+                    })
+                {
+                    return Ok(());
+                }
+            }
+            _ = query_interval.tick() => {
+                if is_link_oper_up(&handle, iface_name).await? == link_up {
+                    return Ok(());
+                }
+            }
         }
     }
-    Err(NipartError::new(
-        ErrorKind::Bug,
-        "wait_link_carrier(): Kernel terminated the netlink multicast socket \
-         connection"
-            .into(),
-    ))
 }
 
 async fn is_link_oper_up(
