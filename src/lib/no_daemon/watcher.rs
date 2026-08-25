@@ -6,7 +6,7 @@ use rtnetlink::{
     packet_core::NetlinkPayload,
     packet_route::{
         RouteNetlinkMessage,
-        link::{LinkAttribute, State},
+        link::{LinkAttribute, LinkFlags},
     },
 };
 
@@ -133,7 +133,7 @@ async fn wait_link_carrier(
         })?;
     tokio::spawn(conn);
 
-    let cur_link_state = is_link_carrier_up(&handle, iface_name).await?;
+    let cur_link_state = is_link_oper_up(&handle, iface_name).await?;
     if link_up == cur_link_state {
         return Ok(());
     }
@@ -148,12 +148,10 @@ async fn wait_link_carrier(
                 .attributes
                 .iter()
                 .any(|attr| attr == &iface_name_attr)
-            && link_msg.attributes.iter().any(|attr| {
-                if link_up {
-                    &LinkAttribute::OperState(State::Up) == attr
-                } else {
-                    &LinkAttribute::OperState(State::Up) != attr
-                }
+            && (if link_up {
+                link_msg.header.flags.contains(LinkFlags::Running)
+            } else {
+                !link_msg.header.flags.contains(LinkFlags::Running)
             })
         {
             return Ok(());
@@ -167,7 +165,7 @@ async fn wait_link_carrier(
     ))
 }
 
-async fn is_link_carrier_up(
+async fn is_link_oper_up(
     handle: &rtnetlink::Handle,
     iface_name: &str,
 ) -> Result<bool, NipartError> {
@@ -186,10 +184,11 @@ async fn is_link_carrier_up(
             ),
         )
     })? {
-        for attr in link_msg.attributes {
-            if LinkAttribute::OperState(State::Up) == attr {
-                return Ok(true);
-            }
+        // `IFF_RUNNING` means RFC2863 operational state UP or UNKNOWN;
+        // the kernel documentation recommends DHCP clients wait for it
+        // before querying an address.
+        if link_msg.header.flags.contains(LinkFlags::Running) {
+            return Ok(true);
         }
     }
     Ok(false)
