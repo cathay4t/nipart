@@ -541,6 +541,20 @@ fn parse_link_msg(
     event.is_up = link_msg.header.flags.contains(LinkFlags::LowerUp)
         || link_msg.header.flags.contains(LinkFlags::Running);
 
+    // `wireless_send_event()` sends RTM_NEWLINK with only `IFLA_IFNAME`
+    // and `IFLA_WIRELESS`. Only the association IE events carry the SSID
+    // of a new association; everything else (e.g. the `SIOCGIWSCAN`
+    // scan-done event emitted after every scan) is wireless telemetry,
+    // not a link-state change. Dropping those here prevents a background
+    // roam scan from re-applying the saved config and restarting DHCP.
+    if should_ignore_wireless_notification(link_msg) {
+        log::trace!(
+            "{iface_name}: ignoring wireless-only RTM_NEWLINK notification \
+             without association IEs"
+        );
+        return None;
+    }
+
     if wifi_monitor_enabled && event.iface_type == InterfaceType::WifiPhy {
         let Some(wifi_ie) = link_msg.attributes.iter().find_map(|attr| {
             if let LinkAttribute::Wireless(wifi_attr) = attr {
@@ -635,6 +649,42 @@ fn parse_route_netlink_msg(
     }
 }
 
+/// Whether an `RTM_NEWLINK` message is a wireless-only notification
+/// emitted by the kernel's `wireless_send_event()` (attributes are only
+/// `IFLA_IFNAME` + `IFLA_WIRELESS`) and does not carry association IEs.
+///
+/// `wireless_send_event()` is also used for non-association telemetry such
+/// as the `SIOCGIWSCAN` scan-done event emitted after every scan; those
+/// messages are not link-state changes and must not be converted into a
+/// link event, otherwise a background roam scan would re-apply the saved
+/// config and restart DHCP.
+fn should_ignore_wireless_notification(link_msg: &LinkMessage) -> bool {
+    let mut has_wireless_attr = false;
+    let mut has_association_ie = false;
+    let mut has_other_attr = false;
+    for attr in &link_msg.attributes {
+        match attr {
+            LinkAttribute::IfName(_) => {}
+            LinkAttribute::Wireless(wifi_attr) => {
+                has_wireless_attr = true;
+                has_association_ie |= is_wifi_association_event(wifi_attr);
+            }
+            _ => has_other_attr = true,
+        }
+    }
+    has_wireless_attr && !has_other_attr && !has_association_ie
+}
+
+/// Whether the wireless event is an association IE notification carrying
+/// the SSID of the new association.
+fn is_wifi_association_event(wifi_attr: &WirelessEvent) -> bool {
+    matches!(
+        wifi_attr,
+        WirelessEvent::AssociateRequest(_)
+            | WirelessEvent::AssociateResponse(_)
+    )
+}
+
 fn parse_iface_type_from_nl_msg(link_msg: &LinkMessage) -> InterfaceType {
     if let Some(link_infos) = link_msg.attributes.iter().find_map(|attr| {
         if let LinkAttribute::LinkInfo(infos) = attr {
@@ -700,8 +750,17 @@ mod tests {
 
     use futures_channel::mpsc::unbounded;
     use nipart::{InterfaceLinkEvent, InterfaceType};
+    use rtnetlink::{
+        packet_core::{Emitable, Parseable},
+        packet_route::link::{
+            LinkAttribute, LinkHeader, LinkLayerType, LinkMessage,
+            WirelessEvent,
+        },
+    };
 
-    use super::{NipartMonitorWorker, format_mac};
+    use super::{
+        NipartMonitorWorker, format_mac, should_ignore_wireless_notification,
+    };
     use crate::task::TaskWorker;
 
     fn gen_event(iface_name: &str) -> InterfaceLinkEvent {
@@ -722,6 +781,31 @@ mod tests {
             .expect("Failed to create monitor worker")
     }
 
+    fn gen_wireless_link_msg(
+        wifi_attr: WirelessEvent,
+        with_other_attr: bool,
+    ) -> LinkMessage {
+        let header = LinkHeader {
+            index: 2,
+            link_layer_type: LinkLayerType::Ether,
+            ..Default::default()
+        };
+        let mut attrs = vec![
+            LinkAttribute::IfName("wlan0".to_string()),
+            LinkAttribute::Wireless(wifi_attr),
+        ];
+        if with_other_attr {
+            attrs.push(LinkAttribute::Address(vec![
+                0x02, 0x00, 0x00, 0x00, 0x00, 0x01,
+            ]));
+        }
+        let mut buf =
+            vec![0; header.buffer_len() + attrs.as_slice().buffer_len()];
+        header.emit(&mut buf);
+        attrs.as_slice().emit(&mut buf[header.buffer_len()..]);
+        LinkMessage::parse(&buf).expect("Failed to parse link message")
+    }
+
     #[test]
     fn test_format_mac() {
         assert_eq!(
@@ -732,6 +816,43 @@ mod tests {
         // match an ethernet MAC.
         assert_eq!(format_mac(&[0x00, 0x11]), None);
         assert_eq!(format_mac(&[]), None);
+    }
+
+    #[test]
+    fn test_ignore_wireless_only_scan_done_notification() {
+        // The kernel emits an `IFLA_WIRELESS`-only RTM_NEWLINK carrying
+        // `struct iw_event { len=16, cmd=SIOCGIWSCAN(0x8B19) }` when a
+        // scan finishes. It is not a link-state change and must not be
+        // turned into a link-up event (which would re-apply the saved
+        // wifi config and restart DHCP).
+        let scan_done = WirelessEvent::Other(vec![
+            16, 0, 25, 139, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        assert!(should_ignore_wireless_notification(&gen_wireless_link_msg(
+            scan_done.clone(),
+            false
+        )));
+
+        // A real link message carrying other attributes (e.g. a link dump)
+        // is kept even when it also carries a non-association wireless
+        // attribute.
+        assert!(!should_ignore_wireless_notification(
+            &gen_wireless_link_msg(scan_done, true)
+        ));
+    }
+
+    #[test]
+    fn test_keep_wireless_association_ie_notification() {
+        // Association IE notifications are wireless-only but carry the
+        // SSID of the new association and must be kept.
+        let link_msg = gen_wireless_link_msg(
+            WirelessEvent::AssociateResponse(vec![
+                // SSID IE: element id 0, length 8, "Test-WIFI"
+                0, 8, b'T', b'e', b's', b't', b'-', b'W', b'I', b'F', b'I',
+            ]),
+            false,
+        );
+        assert!(!should_ignore_wireless_notification(&link_msg));
     }
 
     #[test]

@@ -297,17 +297,13 @@ fn saved_route_is_removed(
         // removed by an explicit absent match handled above.
         return false;
     };
-    if ignored_ifaces.iter().any(|i| i == via)
+    ignored_ifaces.iter().any(|i| i == via)
         || iface_lists.absent.contains(&via.as_str())
         || (iface_lists.desired_ifaces.contains(&via.as_str())
             && ((rt.is_ipv6()
                 && desired_iface_ipv6_disabled(via, merged_ifaces))
                 || (!rt.is_ipv6()
                     && desired_iface_ipv4_disabled(via, merged_ifaces))))
-    {
-        return true;
-    }
-    false
 }
 
 /// Whether the desired state for the given kernel interface explicitly
