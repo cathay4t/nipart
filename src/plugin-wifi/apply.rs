@@ -436,7 +436,7 @@ impl WifiClientState {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        match WifiClient::init_multi(configs).await {
+        match WifiClient::init(configs).await {
             Ok(client) => self.client = Some(client),
             Err(e) => {
                 log::error!("WIFI init failed: {e}");

@@ -18,8 +18,8 @@ use rtnetlink::{
     packet_route::{
         RouteNetlinkMessage,
         link::{
-            InfoKind, LinkAttribute, LinkInfo, LinkLayerType, LinkMessage,
-            State, WirelessEvent,
+            InfoKind, LinkAttribute, LinkFlags, LinkInfo, LinkLayerType,
+            LinkMessage, WirelessEvent,
         },
     },
     sys::SocketAddr,
@@ -33,9 +33,6 @@ const EVENT_EXPIRE_TIME_SEC: u64 = 300;
 
 // When the event changed to down, we wait 10 seconds to prevent flipping
 const DOWN_WAIT_SEC: u64 = 10;
-// When SSID wifi-phy is UP but kernel got no SSID info yet, we wait 5 seconds
-// to process it
-const WIFI_UP_NO_SSID_WAIT_SEC: u64 = 5;
 // Check delay queue event every second if delay_queue is not empty
 const DELAY_TICK_SEC_IF_BUSY: u64 = 1;
 // Check delay queue event every day if delay_queue is empty, we cannot use
@@ -368,10 +365,7 @@ impl NipartMonitorWorker {
                     && previous_event.is_up
                     && event.is_up
                 {
-                    log::trace!(
-                        "Link restored to up after delay, no need to emit \
-                         event"
-                    );
+                    log::trace!("Link is already up, no need to emit event");
                 } else {
                     self.notify(event).await?;
                 }
@@ -454,23 +448,15 @@ impl NipartMonitorWorker {
             return Ok(());
         }
 
-        // When SSID changes, normally it should go thought down->up chain,
-        // hence no need to handle specially here.
+        // When SSID changes, normally it should go through down->up chain,
+        // hence no need to handle specially here.  WIFI up notifications
+        // carry the SSID in their `WirelessEvent` attribute (see
+        // `parse_link_msg()`), so an up event without SSID is either a
+        // non-association link event or a duplicate; the normal down->up
+        // deduplication below handles both.
         if event.is_delete {
             // delete event, emit now.
             self.notify(event).await?;
-        } else if event.is_up
-            && event.iface_type == InterfaceType::WifiPhy
-            && event.ssid.is_none()
-        {
-            // If WIFI is up but no SSID yet, we delay the event, so kernel
-            // could continue processing it.  A link-down event has no SSID
-            // by definition, so it is not delayed here: delaying it stalls
-            // pending wifi applies at boot for the whole wait window.
-            self.delay_notify(
-                event,
-                Duration::from_secs(WIFI_UP_NO_SSID_WAIT_SEC),
-            );
         } else if let Some(previous_event) =
             self.emited.get(event.iface_name.as_str())
         {
@@ -540,32 +526,20 @@ fn parse_link_msg(
         return Some((event, mac));
     }
 
-    let op_state = link_msg.attributes.iter().find_map(|attr| {
-        if let LinkAttribute::OperState(op_state) = attr {
-            Some(op_state)
-        } else {
-            None
-        }
-    })?;
-    match op_state {
-        State::Up => {
-            log::trace!("{iface_name}: LinkAttribute::OperState is Up");
-            event.is_up = true;
-        }
-        State::Down | State::LowerLayerDown => {
-            log::trace!(
-                "{iface_name}: LinkAttribute::OperState is {op_state:?}"
-            );
-            event.is_up = false;
-        }
-        _ => {
-            log::trace!(
-                "{iface_name}: ignoring netlink message due to unsupported \
-                 LinkAttribute::OperState value: {op_state:?}"
-            );
-            return None;
-        }
-    }
+    // Unlike `IFLA_OPERSTATE`, the `IFF_*` flags are present in every
+    // RTM_NEWLINK message, including the `IFLA_WIRELESS`-only notifications
+    // emitted by `wireless_send_event()` on WIFI association. Those
+    // notifications carry the SSID in their `WirelessEvent` attribute, so we
+    // must accept them to get an up event with SSID included.
+    //
+    // Use `IFF_LOWER_UP` (carrier up) as the primary signal: on association,
+    // `wireless_send_event()` runs after `netif_carrier_on()` but before
+    // linkwatch promotes `operstate`, so the SSID-bearing notification has
+    // `IFF_LOWER_UP` but not yet `IFF_RUNNING`. Keep `IFF_RUNNING` as well to
+    // also accept the "operational state UP/UNKNOWN" notifications used by
+    // notification-less drivers (see the DHCP `wait_link_carrier` fix).
+    event.is_up = link_msg.header.flags.contains(LinkFlags::LowerUp)
+        || link_msg.header.flags.contains(LinkFlags::Running);
 
     if wifi_monitor_enabled && event.iface_type == InterfaceType::WifiPhy {
         let Some(wifi_ie) = link_msg.attributes.iter().find_map(|attr| {
@@ -586,12 +560,11 @@ fn parse_link_msg(
             }
         }) else {
             // If we cannot get SSID out of wifi-phy event, we still try to
-            // emit it, the delay_notify() will notice event_worker
-            // to process it later where event_worker will check current
-            // interface state for SSID
+            // emit it; the event worker checks the current interface state
+            // for SSID when processing the event.
             log::trace!(
-                "{iface_name}: No SSID out wifi-phy event, delay_notify() \
-                 will try to resolve it later"
+                "{iface_name}: No SSID out wifi-phy event, event worker will \
+                 resolve it from current interface state"
             );
             return Some((event, mac));
         };
