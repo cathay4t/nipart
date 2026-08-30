@@ -111,24 +111,20 @@ impl WifiClientState {
         let Some(client) = self.client.as_mut() else {
             return Ok(());
         };
-        let result = client.run_multi().await.map_err(|e| {
+        let result = client.run().await.map_err(|e| {
             NipartError::new(
                 ErrorKind::PluginFailure,
                 format!("WIFI client run failed: {e}"),
             )
         })?;
         let iface_name = &result.iface_name;
-        if let Some(e) = result.error.as_ref() {
-            log::warn!("WIFI {iface_name} error: {e}");
-        }
         match result.state {
             WifiState::ConnectedWithoutOffloadRekey
             | WifiState::ConnectedWithOffloadRekey => {
                 self.connected = true;
-                let ssid =
-                    client.current_ssid_of(iface_name).unwrap_or("unknown");
+                let ssid = client.current_ssid(iface_name).unwrap_or("unknown");
                 let bssid = client
-                    .current_bssid_of(iface_name)
+                    .current_bssid(iface_name)
                     .map(|mac| mac_to_string(&mac))
                     .unwrap_or_else(|| "00:00:00:00:00:00".to_string());
                 log::info!(
@@ -381,7 +377,7 @@ impl WifiClientState {
                         "Restarting WIFI on {iface_name} to force connection"
                     );
                     if let Err(e) =
-                        client.update_networks_of(&iface_name, Vec::new()).await
+                        client.update_networks(&iface_name, Vec::new()).await
                     {
                         log::warn!(
                             "WIFI {iface_name} failed to update networks: {e}"
@@ -395,9 +391,8 @@ impl WifiClientState {
                          disconnecting"
                     );
                 }
-                if let Err(e) = client
-                    .update_networks_of(&iface_name, networks.clone())
-                    .await
+                if let Err(e) =
+                    client.update_networks(&iface_name, networks.clone()).await
                 {
                     log::warn!(
                         "WIFI {iface_name} failed to update networks: {e}"

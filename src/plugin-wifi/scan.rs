@@ -72,7 +72,7 @@ async fn _wifi_scan(
 
     for iface_name in &scan_ifaces {
         let scan_results =
-            shuli::scan::scan_wifi_with_ies(iface_name, hidden_ssids.clone())
+            shuli::WifiClient::scan(iface_name, hidden_ssids.clone())
                 .await
                 .map_err(|e| {
                     NipartError::new(
