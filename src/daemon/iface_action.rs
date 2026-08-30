@@ -265,13 +265,9 @@ fn is_route_matching_iface(rt: &RouteEntry, iface: &Interface) -> bool {
     let Some(next_hop_iface) = rt.next_hop_iface.as_deref() else {
         return false;
     };
-    if next_hop_iface == iface.kernel_iface_name()
+    next_hop_iface == iface.kernel_iface_name()
         || next_hop_iface == iface.name()
         || iface.base_iface().profile_name.as_deref() == Some(next_hop_iface)
-    {
-        return true;
-    }
-    false
 }
 
 #[cfg(test)]
