@@ -7,6 +7,8 @@ Before=network-online.target
 
 [Service]
 Type=oneshot
+TimeoutStartSec=60s
+TimeoutStopSec=10s
 ExecStart=/usr/bin/npt wait-online
 RemainAfterExit=yes
 
