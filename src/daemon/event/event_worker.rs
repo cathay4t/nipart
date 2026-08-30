@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::time::Duration;
+
 use futures_channel::{mpsc::UnboundedReceiver, oneshot::Sender};
 use nipart::{
     BaseInterface, ErrorKind, Interface, InterfaceAutoConnect, InterfaceIpv4,
@@ -10,6 +12,13 @@ use nipart::{
 };
 
 use super::super::{commander::NipartCommander, task::TaskWorker};
+
+// When a wifi-phy up event arrives without SSID (e.g. the kernel does not
+// emit the `IFLA_WIRELESS` notification carrying the association IEs), retry
+// querying the current state for the SSID before giving up.  This covers the
+// window between carrier up and the kernel completing its connect bookkeeping.
+const WIFI_SSID_QUERY_RETRY_TIMES: usize = 10;
+const WIFI_SSID_QUERY_RETRY_INTERVAL_MS: u64 = 500;
 
 #[derive(Debug, Clone)]
 pub(crate) enum NipartEventCmd {
@@ -97,12 +106,13 @@ impl NipartEventWorker {
         };
         log::trace!("Handle link event {event}");
         let saved_state = commander.conf_manager.query_state().await?;
-        let cur_state =
+        let mut cur_state =
             NipartNoDaemon::query_network_state(NipartQueryOption::running())
                 .await?;
 
         // Kernel event is always for kernel interface
-        let cur_iface = cur_state.ifaces.kernel_ifaces.get(&event.iface_name);
+        let mut cur_iface =
+            cur_state.ifaces.kernel_ifaces.get(&event.iface_name);
 
         // Skip stale link-down events: when the interface's current link
         // state is already up, a queued down event is a leftover of an
@@ -136,14 +146,47 @@ impl NipartEventWorker {
             return Ok(());
         }
 
-        if let Some(cur_iface) = cur_iface {
+        if let Some(cur_iface) = cur_iface.as_ref() {
             log::trace!("Current interface state: {cur_iface}");
+        }
 
-            if event.ssid.is_none()
-                && event.iface_type == InterfaceType::WifiPhy
-                && let Interface::WifiPhy(cur_wifi_iface) = cur_iface
-            {
-                event.ssid = cur_wifi_iface.ssid().map(|s| s.to_string());
+        // A wifi-phy up event may reach us before the kernel has finished
+        // publishing the associated SSID (especially on drivers using
+        // `NL80211_CMD_ASSOCIATE`).  Retry the query for a short while so
+        // the wifi-cfg IP config is not lost just because the first snapshot
+        // was taken too early.
+        if event.ssid.is_none()
+            && event.is_up
+            && event.iface_type == InterfaceType::WifiPhy
+        {
+            for retry_count in 1..=WIFI_SSID_QUERY_RETRY_TIMES {
+                if let Some(ssid) = wifi_phy_ssid(cur_iface) {
+                    event.ssid = Some(ssid);
+                    break;
+                }
+                if retry_count == WIFI_SSID_QUERY_RETRY_TIMES {
+                    log::trace!(
+                        "{}: SSID still unavailable after {} attempts",
+                        event.iface_name,
+                        retry_count
+                    );
+                    break;
+                }
+                log::trace!(
+                    "{}: wifi-phy up without SSID, retrying query \
+                     ({retry_count}/{WIFI_SSID_QUERY_RETRY_TIMES})",
+                    event.iface_name
+                );
+                tokio::time::sleep(Duration::from_millis(
+                    WIFI_SSID_QUERY_RETRY_INTERVAL_MS,
+                ))
+                .await;
+                cur_state = NipartNoDaemon::query_network_state(
+                    NipartQueryOption::running(),
+                )
+                .await?;
+                cur_iface =
+                    cur_state.ifaces.kernel_ifaces.get(&event.iface_name);
             }
         }
 
@@ -264,6 +307,18 @@ fn nic_is_gone(
     cur_iface: Option<&Interface>,
 ) -> bool {
     event.is_delete || cur_iface.is_none()
+}
+
+/// The SSID of the current kernel wifi-phy, if it is a wifi interface and
+/// the kernel already reports the association.
+fn wifi_phy_ssid(cur_iface: Option<&Interface>) -> Option<String> {
+    cur_iface.and_then(|iface| {
+        if let Interface::WifiPhy(wifi_iface) = iface {
+            wifi_iface.ssid().map(|s| s.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 /// Gather saved routes whose next-hop is the given saved interface.
@@ -440,7 +495,7 @@ mod tests {
     use super::{
         gen_routes_for_iface_up, handle_event_auto_connect,
         handle_wifi_phy_event, is_route_matching_iface,
-        is_stale_link_down_event, nic_is_gone,
+        is_stale_link_down_event, nic_is_gone, wifi_phy_ssid,
     };
 
     fn gen_wifi_cfg_iface() -> Interface {
@@ -678,6 +733,33 @@ interfaces:
         assert!(nic_is_gone(&gen_link_event("eth0", false), None));
         assert!(!nic_is_gone(&gen_link_event("eth0", false), Some(wan0)));
         assert!(!nic_is_gone(&gen_link_event("eth0", true), Some(wan0)));
+    }
+
+    #[test]
+    fn test_wifi_phy_ssid_extraction() {
+        let phy: Interface = rmsd_yaml::from_str(
+            r#"---
+            name: wlan0
+            type: wifi-phy
+            state: up
+            wifi:
+              ssid: Test-WIFI
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(wifi_phy_ssid(Some(&phy)).as_deref(), Some("Test-WIFI"));
+        assert_eq!(wifi_phy_ssid(None), None);
+
+        let eth: Interface = rmsd_yaml::from_str(
+            r#"---
+            name: eth0
+            type: ethernet
+            state: up
+            "#,
+        )
+        .unwrap();
+        assert_eq!(wifi_phy_ssid(Some(&eth)), None);
     }
 
     #[test]
