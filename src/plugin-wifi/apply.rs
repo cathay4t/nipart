@@ -303,7 +303,21 @@ impl WifiClientState {
             // re-applying the IP config of a wifi-phy after link up)
             // must not tear the connection down: only explicit
             // absent/down wifi-cfg entries remove SSIDs.
+            // An explicit `npt up <SSID>` (a forced apply carrying exactly
+            // one up wifi-cfg) must not drop the other saved networks from
+            // the shuli client.  Keep the existing in-memory list and only
+            // mark the requested SSID as preferred, so shuli tries it first
+            // but can still fall back to the remaining saved networks when
+            // it is unavailable or too weak.  Non-forced applies (boot's
+            // full saved wifi-cfg set, `npt apply`) still replace the list
+            // with exactly the requested set.
             let networks = match desired.get(&iface_name) {
+                Some(wifi_cfgs) if force && wifi_cfgs.len() == 1 => {
+                    merge_preferred_networks(
+                        &iface_state.desired_networks,
+                        wifi_cfgs,
+                    )?
+                }
                 Some(wifi_cfgs) => build_shuli_networks(wifi_cfgs)?,
                 None => {
                     let mut networks = iface_state.desired_networks.clone();
@@ -326,7 +340,11 @@ impl WifiClientState {
             if self.ifaces.contains_key(iface_name) {
                 continue;
             }
-            let networks = build_shuli_networks(wifi_cfgs)?;
+            let networks = if force && wifi_cfgs.len() == 1 {
+                merge_preferred_networks(&[], wifi_cfgs)?
+            } else {
+                build_shuli_networks(wifi_cfgs)?
+            };
             let if_index =
                 wifi_phys_if_index.get(iface_name).copied().unwrap_or(0);
             self.ifaces.insert(
@@ -489,13 +507,62 @@ fn build_shuli_networks(
             log::debug!("Ignoring duplicate WIFI SSID {}", wifi_cfg.ssid);
             continue;
         }
-        let mut network = ShuliNetworkConfig::new(&wifi_cfg.ssid);
-        network.set_hidden(wifi_cfg.hidden);
-        if let Some(password) = wifi_cfg.password.as_deref() {
-            network.set_password(password);
-        }
-        ret.push(network);
+        ret.push(build_shuli_network(wifi_cfg));
     }
+    Ok(ret)
+}
+
+fn build_shuli_network(wifi_cfg: &WifiConfig) -> ShuliNetworkConfig {
+    let mut network = ShuliNetworkConfig::new(&wifi_cfg.ssid);
+    network.set_hidden(wifi_cfg.hidden);
+    if let Some(password) = wifi_cfg.password.as_deref() {
+        network.set_password(password);
+    }
+    network
+}
+
+/// Merge an explicit single-SSID `npt up` request into the existing shuli
+/// network list instead of replacing it: the requested SSID becomes
+/// `prefered`, every other configured network is kept and demoted to
+/// non-preferred (the latest request wins), and new SSIDs are appended.
+fn merge_preferred_networks(
+    existing: &[ShuliNetworkConfig],
+    wifi_cfgs: &[&WifiConfig],
+) -> Result<Vec<ShuliNetworkConfig>, NipartError> {
+    let mut requested: Vec<ShuliNetworkConfig> = Vec::new();
+    for wifi_cfg in wifi_cfgs {
+        if let Some(existing) =
+            requested.iter().find(|n| n.ssid == wifi_cfg.ssid)
+        {
+            if existing.password.as_deref() != wifi_cfg.password.as_deref() {
+                return Err(NipartError::new(
+                    ErrorKind::InvalidArgument,
+                    format!(
+                        "Conflicting WIFI config for SSID {} on the same \
+                         interface",
+                        wifi_cfg.ssid
+                    ),
+                ));
+            }
+            continue;
+        }
+        let mut network = build_shuli_network(wifi_cfg);
+        network.set_prefered(true);
+        requested.push(network);
+    }
+
+    let mut ret: Vec<ShuliNetworkConfig> = Vec::new();
+    for network in existing {
+        match requested.iter().position(|n| n.ssid == network.ssid) {
+            Some(idx) => ret.push(requested.remove(idx)),
+            None => {
+                let mut network = network.clone();
+                network.prefered = false;
+                ret.push(network);
+            }
+        }
+    }
+    ret.extend(requested);
     Ok(ret)
 }
 
@@ -589,5 +656,73 @@ mod tests {
         let cfgs = [wifi_cfg("A", Some("one")), wifi_cfg("A", Some("two"))];
         let refs: Vec<&WifiConfig> = cfgs.iter().collect();
         assert!(build_shuli_networks(&refs).is_err());
+    }
+
+    fn network(
+        ssid: &str,
+        password: Option<&str>,
+        prefered: bool,
+    ) -> ShuliNetworkConfig {
+        let mut network = ShuliNetworkConfig::new(ssid);
+        if let Some(password) = password {
+            network.set_password(password);
+        }
+        network.prefered = prefered;
+        network
+    }
+
+    #[test]
+    fn merge_preferred_networks_keeps_others_and_prefers_requested() {
+        let existing = [
+            network("A", None, false),
+            network("B", Some("b-secret"), true),
+        ];
+        let cfgs = [wifi_cfg("B", Some("b-new"))];
+        let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+
+        let merged = merge_preferred_networks(&existing, &refs).unwrap();
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].ssid, "A");
+        assert!(!merged[0].prefered);
+        assert_eq!(merged[1].ssid, "B");
+        assert!(merged[1].prefered);
+        assert_eq!(merged[1].password.as_deref(), Some("b-new"));
+    }
+
+    #[test]
+    fn merge_preferred_networks_appends_new_ssid() {
+        let existing = [network("A", None, false)];
+        let cfgs = [wifi_cfg("B", None)];
+        let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+
+        let merged = merge_preferred_networks(&existing, &refs).unwrap();
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].ssid, "A");
+        assert!(!merged[0].prefered);
+        assert_eq!(merged[1].ssid, "B");
+        assert!(merged[1].prefered);
+    }
+
+    #[test]
+    fn merge_preferred_networks_dedupes_requested_ssids() {
+        let cfgs =
+            [wifi_cfg("A", Some("secret")), wifi_cfg("A", Some("secret"))];
+        let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+
+        let merged = merge_preferred_networks(&[], &refs).unwrap();
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].ssid, "A");
+        assert!(merged[0].prefered);
+    }
+
+    #[test]
+    fn merge_preferred_networks_rejects_conflicting_password() {
+        let cfgs = [wifi_cfg("A", Some("one")), wifi_cfg("A", Some("two"))];
+        let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+
+        assert!(merge_preferred_networks(&[], &refs).is_err());
     }
 }
