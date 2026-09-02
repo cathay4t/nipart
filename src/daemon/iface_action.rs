@@ -34,6 +34,13 @@ impl NipartCommander {
             saved_iface.iface_type()
         );
 
+        // An earlier `npt down` only kept the interface down in memory;
+        // explicit `npt up` must release that marker so link events can
+        // manage the saved profile again.
+        self.monitor_manager
+            .clear_explicitly_down(saved_iface)
+            .await?;
+
         let desired_state = gen_state_for_up(saved_iface, &saved_state);
         let opt = NipartApplyOption::new().memory_only().force();
         self.apply_network_state_with_saved_config(
@@ -57,14 +64,17 @@ impl NipartCommander {
         name: &str,
     ) -> Result<NetworkState, NipartError> {
         let saved_state = self.conf_manager.query_state().await?;
-        let desired_state =
+        let (desired_state, marked_iface) =
             if let Some(saved_iface) = find_saved_iface(&saved_state, name) {
                 log::info!(
                     "Bringing interface {}/{} down",
                     saved_iface.name(),
                     saved_iface.iface_type()
                 );
-                gen_state_for_down(saved_iface, &saved_state)
+                (
+                    gen_state_for_down(saved_iface, &saved_state),
+                    Some(saved_iface.clone()),
+                )
             } else {
                 // No saved profile: allow bringing down a live kernel interface
                 // by its kernel name.
@@ -74,6 +84,7 @@ impl NipartCommander {
                     .ifaces
                     .iter()
                     .find(|iface| iface_matches_name(iface, name))
+                    .cloned()
                     .ok_or_else(|| {
                         NipartError::new(
                             ErrorKind::InvalidArgument,
@@ -88,17 +99,40 @@ impl NipartCommander {
                     cur_iface.name(),
                     cur_iface.iface_type()
                 );
-                gen_state_for_down_current_only(cur_iface)
+                (gen_state_for_down_current_only(&cur_iface), Some(cur_iface))
             };
 
+        // Remember the explicit down in the monitor worker before applying:
+        // the monitor link dump emitted after the apply must not be sent to
+        // the event worker, which would re-apply the saved config and routes.
+        if let Some(marked_iface) = marked_iface.as_ref() {
+            self.monitor_manager
+                .mark_explicitly_down(marked_iface)
+                .await?;
+        }
+
         let opt = NipartApplyOption::new().memory_only().force();
-        self.apply_network_state_with_saved_config(
-            None,
-            desired_state,
-            opt,
-            None,
-        )
-        .await
+        let result = self
+            .apply_network_state_with_saved_config(
+                None,
+                desired_state,
+                opt,
+                None,
+            )
+            .await;
+        if result.is_err()
+            && let Some(marked_iface) = marked_iface.as_ref()
+            && let Err(e) = self
+                .monitor_manager
+                .clear_explicitly_down(marked_iface)
+                .await
+        {
+            log::error!(
+                "Failed to clear explicit-down state after failed `npt down`: \
+                 {e}"
+            );
+        }
+        result
     }
 }
 

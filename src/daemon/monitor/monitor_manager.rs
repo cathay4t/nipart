@@ -9,7 +9,7 @@ use nipart::{
 
 use super::{
     super::daemon::NipartManagerCmd, NipartMonitorCmd, NipartMonitorReply,
-    NipartMonitorWorker,
+    NipartMonitorWorker, iface_identity_names,
 };
 use crate::TaskManager;
 
@@ -50,6 +50,34 @@ impl NipartMonitorManager {
 
     pub(crate) async fn resume(&mut self) -> Result<(), NipartError> {
         self.mgr.exec(NipartMonitorCmd::Resume).await?;
+        Ok(())
+    }
+
+    /// Record the interface/profile as explicitly downed by `npt down` so
+    /// its link events are not forwarded to the event worker.
+    pub(crate) async fn mark_explicitly_down(
+        &mut self,
+        iface: &Interface,
+    ) -> Result<(), NipartError> {
+        self.mgr
+            .exec(NipartMonitorCmd::MarkExplicitlyDown(iface_identity_names(
+                iface,
+            )))
+            .await?;
+        Ok(())
+    }
+
+    /// Forget that the interface/profile was explicitly downed.  Used by
+    /// `npt up` so the saved config can be activated again.
+    pub(crate) async fn clear_explicitly_down(
+        &mut self,
+        iface: &Interface,
+    ) -> Result<(), NipartError> {
+        self.mgr
+            .exec(NipartMonitorCmd::ClearExplicitlyDown(iface_identity_names(
+                iface,
+            )))
+            .await?;
         Ok(())
     }
 

@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import time
+
 import nipart
 
 from .conftest import CLI_PATH
@@ -10,6 +12,11 @@ from .testlib.statelib import show_only
 
 TEST_DUMMY = "dummy-up-down0"
 RUNNING_DUMMY = "dummy-running0"
+DOWN_VETH = "npt-down-veth0"
+DOWN_VETH_PEER = "npt-down-veth1"
+DOWN_VETH_IP = "198.51.100.99"
+DOWN_VETH_GW = "198.51.100.1"
+DOWN_VETH_MAC = "02:00:00:00:00:0a"
 
 
 def _dummy_up():
@@ -19,6 +26,26 @@ def _dummy_up():
 
 def _dummy_gone():
     return show_only(TEST_DUMMY) is None
+
+
+def _down_veth_stays_down():
+    iface_state = show_only(DOWN_VETH)
+    if iface_state is None or iface_state.get("state") != "down":
+        return False
+    rc, out, _ = exec_cmd(
+        ["ip", "-4", "route", "show", "dev", DOWN_VETH], check=False
+    )
+    return rc == 0 and "default via" not in out
+
+
+def _down_veth_is_up_with_route():
+    iface_state = show_only(DOWN_VETH)
+    if iface_state is None or iface_state.get("state") != "up":
+        return False
+    rc, out, _ = exec_cmd(
+        ["ip", "-4", "route", "show", "dev", DOWN_VETH], check=False
+    )
+    return rc == 0 and DOWN_VETH_GW in out
 
 
 def test_npt_up_down_virtual_iface():
@@ -57,6 +84,79 @@ def test_npt_up_down_virtual_iface():
             interfaces:
               - name: {TEST_DUMMY}
                 type: dummy
+                state: absent
+            """))
+
+
+def test_npt_down_nonvirtual_iface_removes_routes():
+    for iface in (DOWN_VETH, DOWN_VETH_PEER):
+        exec_cmd(["ip", "link", "del", iface], check=False)
+    exec_cmd(
+        [
+            "ip",
+            "link",
+            "add",
+            DOWN_VETH,
+            "address",
+            DOWN_VETH_MAC,
+            "type",
+            "veth",
+            "peer",
+            "name",
+            DOWN_VETH_PEER,
+        ],
+        check=True,
+    )
+    exec_cmd(["ip", "link", "set", DOWN_VETH_PEER, "up"], check=True)
+    try:
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {DOWN_VETH}
+                type: ethernet
+                state: up
+                identifier: mac-address
+                mac-address: {DOWN_VETH_MAC}
+                ipv4:
+                  enabled: true
+                  dhcp: false
+                  address:
+                    - ip: {DOWN_VETH_IP}
+                      prefix-length: 24
+            routes:
+              config:
+                - destination: 0.0.0.0/0
+                  next-hop-interface: {DOWN_VETH}
+                  next-hop-address: {DOWN_VETH_GW}
+                  metric: 100
+                  table-id: 254
+            """))
+        assert retry_till_true_or_timeout(
+            10, _down_veth_is_up_with_route
+        ), f"{DOWN_VETH} should be up with default route before `npt down`"
+
+        rc, out, err = exec_cmd([CLI_PATH, "down", DOWN_VETH], check=False)
+        assert rc == 0, f"npt down failed:\n{out}\n{err}"
+        # The route must stay gone; before the explicit-down tracking was
+        # added, the monitor link dump re-applied the saved config and
+        # brought the route back within a second.
+        time.sleep(2)
+        assert _down_veth_stays_down(), (
+            f"{DOWN_VETH} should stay down without its default route after "
+            "`npt down`"
+        )
+
+        rc, out, err = exec_cmd([CLI_PATH, "up", DOWN_VETH], check=False)
+        assert rc == 0, f"npt up failed:\n{out}\n{err}"
+        assert retry_till_true_or_timeout(10, _down_veth_is_up_with_route), (
+            f"{DOWN_VETH} should be restored with its default route by "
+            "`npt up`"
+        )
+    finally:
+        exec_cmd(["ip", "link", "del", DOWN_VETH], check=False)
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {DOWN_VETH}
+                type: ethernet
                 state: absent
             """))
 
