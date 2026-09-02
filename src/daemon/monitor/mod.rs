@@ -7,5 +7,6 @@ pub(crate) use self::{
     monitor_manager::NipartMonitorManager,
     monitor_worker::{
         NipartMonitorCmd, NipartMonitorReply, NipartMonitorWorker,
+        iface_identity_names,
     },
 };

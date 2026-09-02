@@ -11,7 +11,10 @@ use futures_channel::{
     oneshot::Sender,
 };
 use futures_util::{SinkExt, StreamExt};
-use nipart::{ErrorKind, InterfaceLinkEvent, InterfaceType, NipartError};
+use nipart::{
+    ErrorKind, Interface, InterfaceLinkEvent, InterfaceType, NipartError,
+    NipartInterface,
+};
 use rtnetlink::{
     MulticastGroup, new_multicast_connection,
     packet_core::{NetlinkMessage, NetlinkPayload},
@@ -64,6 +67,12 @@ pub(crate) enum NipartMonitorCmd {
     /// Resume the monitoring, emit current status of monitoring
     /// interface list.
     Resume,
+    /// Record that an interface/profile was explicitly brought down by
+    /// `npt down`.  Link events of these interfaces must not be forwarded
+    /// to the event worker until `npt up` clears the marker.
+    MarkExplicitlyDown(Vec<String>),
+    /// Forget that an interface/profile was explicitly brought down.
+    ClearExplicitlyDown(Vec<String>),
 }
 
 impl std::fmt::Display for NipartMonitorCmd {
@@ -95,6 +104,12 @@ impl std::fmt::Display for NipartMonitorCmd {
             }
             Self::Resume => {
                 write!(f, "resume-monitor")
+            }
+            Self::MarkExplicitlyDown(ifaces) => {
+                write!(f, "mark-explicitly-down:{ifaces:?}")
+            }
+            Self::ClearExplicitlyDown(ifaces) => {
+                write!(f, "clear-explicitly-down:{ifaces:?}")
             }
         }
     }
@@ -129,6 +144,10 @@ pub(crate) struct NipartMonitorWorker {
     wifi_monitor_enabled: bool,
     msg_to_commander: Option<UnboundedSender<NipartManagerCmd>>,
     manual_paused: bool,
+    /// Interface/profile aliases explicitly brought down by `npt down`.
+    /// Link events for these interfaces are dropped at the monitor worker so
+    /// the event worker cannot re-apply the saved config and its routes.
+    explicitly_down: HashSet<String>,
     emited: HashMap<String, InterfaceLinkEvent>,
     delay_queue: HashMap<String, (InterfaceLinkEvent, Instant)>,
 }
@@ -150,6 +169,7 @@ impl TaskWorker for NipartMonitorWorker {
             netlink_msg_receiver: None,
             manual_paused: false,
             msg_to_commander: None,
+            explicitly_down: HashSet::new(),
             emited: HashMap::new(),
             delay_queue: HashMap::new(),
         })
@@ -212,6 +232,14 @@ impl TaskWorker for NipartMonitorWorker {
                 self.manual_paused = false;
                 if self.should_resume() && self.should_start_netlink() {
                     self.resume().await?;
+                }
+            }
+            NipartMonitorCmd::MarkExplicitlyDown(names) => {
+                self.explicitly_down.extend(names);
+            }
+            NipartMonitorCmd::ClearExplicitlyDown(names) => {
+                for name in names {
+                    self.explicitly_down.remove(&name);
                 }
             }
         }
@@ -360,6 +388,13 @@ impl NipartMonitorWorker {
         for iface_name in pending_changes {
             log::trace!("Emit delayed event on {iface_name}");
             if let Some((event, _)) = self.delay_queue.remove(&iface_name) {
+                if event_is_explicitly_down(&event, &self.explicitly_down) {
+                    log::trace!(
+                        "Ignoring delayed link event {event}: interface was \
+                         explicitly brought down by `npt down`"
+                    );
+                    continue;
+                }
                 if let Some(previous_event) =
                     self.emited.get(event.iface_name.as_str())
                     && previous_event.is_up
@@ -443,6 +478,13 @@ impl NipartMonitorWorker {
         &mut self,
         event: InterfaceLinkEvent,
     ) -> Result<(), NipartError> {
+        if event_is_explicitly_down(&event, &self.explicitly_down) {
+            log::trace!(
+                "Ignoring link event {event}: interface was explicitly \
+                 brought down by `npt down`"
+            );
+            return Ok(());
+        }
         if !self.event_is_interested(&event) {
             log::trace!("Event {event} is not interested");
             return Ok(());
@@ -478,6 +520,35 @@ impl NipartMonitorWorker {
         }
         Ok(())
     }
+}
+
+/// All names which may identify an interface/profile: the logical name,
+/// kernel interface name and profile name.  `npt down` may be invoked with
+/// any of them, and link events only carry the kernel interface name.
+pub(crate) fn iface_identity_names(iface: &Interface) -> Vec<String> {
+    let mut names = vec![iface.name().to_string()];
+    let kernel_iface_name = iface.kernel_iface_name();
+    if !kernel_iface_name.is_empty() && kernel_iface_name != iface.name() {
+        names.push(kernel_iface_name.to_string());
+    }
+    if let Some(profile_name) = iface.base_iface().profile_name.as_deref()
+        && profile_name != iface.name()
+        && profile_name != kernel_iface_name
+    {
+        names.push(profile_name.to_string());
+    }
+    names
+}
+
+fn event_is_explicitly_down(
+    event: &InterfaceLinkEvent,
+    explicitly_down: &HashSet<String>,
+) -> bool {
+    explicitly_down.contains(&event.iface_name)
+        || event
+            .ssid
+            .as_deref()
+            .is_some_and(|ssid| explicitly_down.contains(ssid))
 }
 
 fn parse_link_msg(
@@ -746,10 +817,13 @@ fn is_wifi_phy_nic(iface_name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::{
+        collections::HashSet,
+        time::{Duration, Instant},
+    };
 
     use futures_channel::mpsc::unbounded;
-    use nipart::{InterfaceLinkEvent, InterfaceType};
+    use nipart::{Interface, InterfaceLinkEvent, InterfaceType};
     use rtnetlink::{
         packet_core::{Emitable, Parseable},
         packet_route::link::{
@@ -759,7 +833,8 @@ mod tests {
     };
 
     use super::{
-        NipartMonitorWorker, format_mac, should_ignore_wireless_notification,
+        NipartMonitorWorker, event_is_explicitly_down, format_mac,
+        iface_identity_names, should_ignore_wireless_notification,
     };
     use crate::task::TaskWorker;
 
@@ -943,5 +1018,54 @@ mod tests {
         assert!(worker.emited.is_empty());
         assert!(worker.delay_queue.is_empty());
         assert!(worker.iface_mac.is_empty());
+    }
+
+    #[test]
+    fn test_pause_keeps_explicit_down_list() {
+        // The explicit-down marker must survive the monitor pause/resume
+        // cycle around `npt down`, otherwise the link dump emitted on resume
+        // would re-apply the saved config.
+        let mut worker = gen_worker();
+        worker.explicitly_down.insert("enp1s0".to_string());
+
+        worker.pause();
+
+        assert!(worker.explicitly_down.contains("enp1s0"));
+    }
+
+    #[test]
+    fn test_iface_identity_names_include_profile_and_kernel_names() {
+        let iface: Interface = rmsd_yaml::from_str(
+            r#"---
+            name: eth9
+            kernel-iface-name: eth9
+            profile-name: wan9
+            type: ethernet
+            state: up
+            "#,
+        )
+        .unwrap();
+
+        let names = iface_identity_names(&iface);
+        assert!(names.iter().any(|name| name == "eth9"));
+        assert!(names.iter().any(|name| name == "wan9"));
+    }
+
+    #[test]
+    fn test_event_is_explicitly_down_matches_iface_and_ssid() {
+        let explicitly_down =
+            HashSet::from(["eth9".to_string(), "Test-WIFI".to_string()]);
+
+        let iface_event = gen_event("eth9");
+        assert!(event_is_explicitly_down(&iface_event, &explicitly_down));
+
+        let mut wifi_event = gen_event("wlan0");
+        wifi_event.ssid = Some("Test-WIFI".to_string());
+        assert!(event_is_explicitly_down(&wifi_event, &explicitly_down));
+
+        assert!(!event_is_explicitly_down(
+            &gen_event("enp1s0"),
+            &explicitly_down
+        ));
     }
 }
