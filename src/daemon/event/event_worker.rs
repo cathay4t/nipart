@@ -375,6 +375,12 @@ fn gen_desired_iface_down(
     new_iface.base_iface_mut().auto_connect = None;
     new_iface.base_iface_mut().ipv4 = Some(InterfaceIpv4::new_disabled());
     new_iface.base_iface_mut().ipv6 = Some(InterfaceIpv6::new_disabled());
+    // A link-down purge must not carry the saved SSID back to the wifi
+    // plugin: the plugin would treat it as an explicit wifi up request and
+    // re-enable WIFI while `npt wifi off` is in effect.
+    if let Interface::WifiPhy(wifi_iface) = &mut new_iface {
+        wifi_iface.wifi = None;
+    }
 
     // Remove routes to this interface also
     if !new_iface.is_userspace()
@@ -488,14 +494,15 @@ mod tests {
     use std::time::SystemTime;
 
     use nipart::{
-        Interface, InterfaceIpv4, InterfaceLinkEvent, InterfaceState,
-        InterfaceType, NetworkState, NipartInterface,
+        Interface, InterfaceAutoConnect, InterfaceIpv4, InterfaceLinkEvent,
+        InterfaceState, InterfaceType, NetworkState, NipartInterface,
     };
 
     use super::{
-        gen_routes_for_iface_up, handle_event_auto_connect,
-        handle_wifi_phy_event, is_route_matching_iface,
-        is_stale_link_down_event, nic_is_gone, wifi_phy_ssid,
+        gen_desired_iface_down, gen_routes_for_iface_up,
+        handle_event_auto_connect, handle_wifi_phy_event,
+        is_route_matching_iface, is_stale_link_down_event, nic_is_gone,
+        wifi_phy_ssid,
     };
 
     fn gen_wifi_cfg_iface() -> Interface {
@@ -807,6 +814,31 @@ interfaces:
         );
         assert_eq!(routes.len(), 1);
         assert!(routes[0].is_absent());
+    }
+
+    #[test]
+    fn test_wifi_phy_link_down_purge_drops_wifi_section() {
+        let saved_iface: Interface = rmsd_yaml::from_str(
+            r#"---
+            name: wlan0
+            type: wifi-phy
+            state: up
+            wifi:
+              ssid: Test-WIFI
+              base-iface: wlan0
+            "#,
+        )
+        .unwrap();
+
+        let (new_iface, _) = gen_desired_iface_down(
+            &InterfaceAutoConnect::AutoConnect,
+            &saved_iface,
+            &NetworkState::default(),
+        );
+        let Interface::WifiPhy(new_iface) = new_iface else {
+            panic!("expected wifi-phy interface");
+        };
+        assert!(new_iface.wifi.is_none());
     }
 
     #[test]

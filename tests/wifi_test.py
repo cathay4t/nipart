@@ -10,6 +10,7 @@ from .conftest import CLI_PATH
 from .testlib.cmdlib import exec_cmd
 from .testlib.dhcp import DHCP_SRV_IP4
 from .testlib.dhcp import DHCP_SRV_IP4_PREFIX
+from .testlib.dhcp import IPV4_CLASSLESS_ROUTE_DST_NET1
 from .testlib.env import has_kernel_module
 from .testlib.retry import retry_till_true_or_timeout
 from .testlib.statelib import load_yaml
@@ -48,6 +49,34 @@ class TestWifi:
         ]
         match = re.search(r"SSID: (.+)", output)
         return match.group(1) if match else None
+
+    def has_static_ip_and_route(self):
+        rc, out, _ = exec_cmd(
+            ["ip", "-4", "-o", "addr", "show", "dev", WIFI_TEST_NIC],
+            check=False,
+        )
+        if rc != 0 or f"{DHCP_SRV_IP4_PREFIX}.99/24" not in out:
+            return False
+        rc, out, _ = exec_cmd(
+            ["ip", "-4", "route", "show", "dev", WIFI_TEST_NIC],
+            check=False,
+        )
+        return rc == 0 and (
+            f"{IPV4_CLASSLESS_ROUTE_DST_NET1} via {DHCP_SRV_IP4}" in out
+        )
+
+    def has_no_static_ip_and_route(self):
+        rc, out, _ = exec_cmd(
+            ["ip", "-4", "-o", "addr", "show", "dev", WIFI_TEST_NIC],
+            check=False,
+        )
+        if rc != 0 or f"{DHCP_SRV_IP4_PREFIX}.99/24" in out:
+            return False
+        rc, out, _ = exec_cmd(
+            ["ip", "-4", "route", "show", "dev", WIFI_TEST_NIC],
+            check=False,
+        )
+        return rc == 0 and IPV4_CLASSLESS_ROUTE_DST_NET1 not in out
 
     def test_wifi_iface_static_ip(self, clean_up, wifi_env):  # noqa: F811
         nipart.apply(load_yaml(f"""---
@@ -96,8 +125,18 @@ class TestWifi:
                       dhcp: false
                       address:
                         - ip: {DHCP_SRV_IP4_PREFIX}.99
-                          prefix-length: 24"""))
+                          prefix-length: 24
+                routes:
+                  config:
+                    - destination: {IPV4_CLASSLESS_ROUTE_DST_NET1}
+                      next-hop-interface: {WIFI_TEST_NIC}
+                      next-hop-address: {DHCP_SRV_IP4}
+                      table-id: 254
+                """))
         assert retry_till_true_or_timeout(5, ping_peer)
+        assert retry_till_true_or_timeout(
+            5, self.has_static_ip_and_route
+        ), "WIFI static IP or route missing before `npt wifi off`"
         assert self.connected_ssid() == TEST_WIFI_SSID
         try:
             rc, out, err = exec_cmd([CLI_PATH, "wifi", "off"], check=False)
@@ -106,6 +145,9 @@ class TestWifi:
             assert retry_till_true_or_timeout(
                 5, lambda: self.connected_ssid() is None
             )
+            assert retry_till_true_or_timeout(
+                10, self.has_no_static_ip_and_route
+            ), "WIFI IP or route was not purged by `npt wifi off`"
 
             rc, out, err = exec_cmd([CLI_PATH, "wifi", "scan"], check=False)
             assert rc != 0, "npt wifi scan should fail while WIFI is off"
@@ -117,5 +159,8 @@ class TestWifi:
 
             assert retry_till_true_or_timeout(5, ping_peer)
             assert self.connected_ssid() == TEST_WIFI_SSID
+            assert retry_till_true_or_timeout(
+                10, self.has_static_ip_and_route
+            ), "WIFI static IP or route not restored by `npt wifi on`"
         finally:
             exec_cmd([CLI_PATH, "wifi", "on"], check=False)

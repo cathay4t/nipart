@@ -288,6 +288,14 @@ fn wifi_monitor_is_needed(full_saved_state: &NetworkState) -> bool {
             && wifi_iface.ssid().is_some()
         {
             return true;
+        } else if let Interface::WifiPhy(wifi_iface) = iface
+            && wifi_iface.ssid().is_some()
+        {
+            // A saved wifi-phy profile carries its own SSID config (e.g.
+            // an older style `state: up` wifi-phy apply).  Its link-up
+            // event must be monitored so `npt wifi on` can restore the
+            // IP stack after `npt wifi off` purged it.
+            return true;
         } else if let Some(auto_connect) =
             iface.base_iface().auto_connect.as_ref()
             && auto_connect.is_wifi()
