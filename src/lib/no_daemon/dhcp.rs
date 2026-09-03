@@ -362,6 +362,11 @@ async fn apply_lease_v4(
             .map(|i| i.auto_gateway.unwrap_or(true))
             != Some(false)
     {
+        let ipv4 = merged_iface.merged.base_iface().ipv4.as_ref();
+        let iface_index = merged_iface
+            .current
+            .as_ref()
+            .and_then(|c| c.base_iface().iface_index);
         for (index, gateway) in gateways.iter().enumerate() {
             let route = RouteEntry {
                 destination: Some("0.0.0.0/0".to_string()),
@@ -371,15 +376,9 @@ async fn apply_lease_v4(
                 // Lease is already applied, no need to bypass kernel
                 // gateway validation via onlink flag.
                 onlink: Some(false),
-                // TODO: Be consistent on metric?
-                // TODO: Priority ethernet over wifi/VPN/etc ?
-                metric: merged_iface
-                    .current
-                    .as_ref()
-                    .and_then(|c| c.base_iface().iface_index)
-                    .map(|iface_index| {
-                        100i64 * iface_index as i64 + index as i64
-                    }),
+                metric: ipv4.and_then(|ipv4| {
+                    ipv4.dhcp_route_metric(iface_index, index)
+                }),
                 ..Default::default()
             };
             conf_routes.push(route);

@@ -1141,6 +1141,142 @@ fn test_ipv4_auto_gateway_true() {
     assert_eq!(iface.auto_gateway, Some(true));
 }
 
+/// Test parsing `auto-route-metric` in IPv4 DHCP config.
+#[test]
+fn test_ipv4_auto_route_metric() {
+    let net_state: NetworkState = rmsd_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+              auto-route-metric: 321
+        "#,
+    )
+    .unwrap();
+
+    let iface = net_state
+        .ifaces
+        .kernel_ifaces
+        .get("eth1")
+        .map(|i| i.base_iface().ipv4.as_ref().unwrap().clone())
+        .unwrap();
+
+    assert_eq!(iface.auto_route_metric, Some(321));
+}
+
+/// Test that the default value for `auto-route-metric` is `None` when not
+/// specified.
+#[test]
+fn test_ipv4_auto_route_metric_defaults() {
+    let net_state: NetworkState = rmsd_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+        "#,
+    )
+    .unwrap();
+
+    let iface = net_state
+        .ifaces
+        .kernel_ifaces
+        .get("eth1")
+        .map(|i| i.base_iface().ipv4.as_ref().unwrap().clone())
+        .unwrap();
+
+    assert_eq!(iface.auto_route_metric, None);
+}
+
+/// Test that `auto-route-metric` survives the merge into both `merged` and
+/// `for_apply` when DHCP is already running in the kernel.
+///
+/// The DHCPv4 lease paths decide the gateway route metric from the merged
+/// IPv4 config, so losing it during the merge would make
+/// `auto-route-metric` ineffective.
+#[test]
+fn test_ipv4_auto_route_metric_survives_merge() {
+    let current: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth1
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+        "#,
+    )
+    .unwrap();
+
+    let desired: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth1
+          type: ethernet
+          state: up
+          ipv4:
+            enabled: true
+            dhcp: true
+            auto-route-metric: 321
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedInterfaces::new(desired, current, None).unwrap();
+    let merged_iface = merged.kernel_ifaces.get("eth1").unwrap();
+
+    let merged_ipv4 = merged_iface.merged.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(merged_ipv4.auto_route_metric, Some(321));
+
+    let for_apply = merged_iface.for_apply.as_ref().unwrap();
+    let apply_ipv4 = for_apply.base_iface().ipv4.as_ref().unwrap();
+    assert_eq!(apply_ipv4.auto_route_metric, Some(321));
+}
+
+/// Test DHCP route metric selection with `auto-route-metric` defined.
+#[test]
+fn test_ipv4_dhcp_route_metric_uses_auto_route_metric() {
+    let ipv4 = InterfaceIpv4 {
+        enabled: Some(true),
+        dhcp: Some(true),
+        auto_route_metric: Some(321),
+        ..Default::default()
+    };
+    assert_eq!(ipv4.dhcp_route_metric(Some(9), 0), Some(321));
+    assert_eq!(ipv4.dhcp_route_metric(Some(9), 1), Some(321));
+}
+
+/// Test DHCP route metric fallback to `iface-index * 100`.
+#[test]
+fn test_ipv4_dhcp_route_metric_falls_back_to_iface_index() {
+    let ipv4 = InterfaceIpv4 {
+        enabled: Some(true),
+        dhcp: Some(true),
+        ..Default::default()
+    };
+    assert_eq!(ipv4.dhcp_route_metric(Some(9), 0), Some(900));
+    assert_eq!(ipv4.dhcp_route_metric(Some(9), 1), Some(901));
+    assert_eq!(ipv4.dhcp_route_metric(None, 0), None);
+}
+
+/// Test DHCP route metric treats `-1` as "use the default metric".
+#[test]
+fn test_ipv4_dhcp_route_metric_default_metric_value() {
+    let ipv4 = InterfaceIpv4 {
+        enabled: Some(true),
+        dhcp: Some(true),
+        auto_route_metric: Some(-1),
+        ..Default::default()
+    };
+    assert_eq!(ipv4.dhcp_route_metric(Some(9), 0), Some(900));
+}
+
 /// Test that `auto-gateway: false` survives the merge into both `merged`
 /// and `for_apply` when DHCP is already running in the kernel.
 ///
@@ -1190,6 +1326,7 @@ fn test_ipv4_auto_gateway_false_survives_merge() {
 fn test_ipv4_new_disabled() {
     let ipv4 = InterfaceIpv4::new_disabled();
     assert_eq!(ipv4.auto_gateway, None);
+    assert_eq!(ipv4.auto_route_metric, None);
 }
 
 /// Test that sanitize clears auto_gateway when DHCP is off.
@@ -1201,9 +1338,11 @@ fn test_ipv4_sanitize_clears_when_dhcp_off() {
         dhcp_state: None,
         addresses: None,
         auto_gateway: Some(false),
+        auto_route_metric: Some(321),
     };
     ipv4.sanitize(None).unwrap();
     assert_eq!(ipv4.auto_gateway, None);
+    assert_eq!(ipv4.auto_route_metric, None);
 }
 
 /// Test that sanitize clears auto_gateway when IP disabled.
@@ -1215,9 +1354,25 @@ fn test_ipv4_sanitize_clears_when_ip_disabled() {
         dhcp_state: None,
         addresses: None,
         auto_gateway: Some(false),
+        auto_route_metric: Some(321),
     };
     ipv4.sanitize(None).unwrap();
     assert_eq!(ipv4.auto_gateway, None);
+    assert_eq!(ipv4.auto_route_metric, None);
+}
+
+/// Test that sanitize rejects out-of-range `auto-route-metric`.
+#[test]
+fn test_ipv4_sanitize_rejects_out_of_range_auto_route_metric() {
+    let mut ipv4 = InterfaceIpv4 {
+        enabled: Some(true),
+        dhcp: Some(true),
+        dhcp_state: None,
+        addresses: None,
+        auto_gateway: None,
+        auto_route_metric: Some(u32::MAX as i64 + 1),
+    };
+    assert!(ipv4.sanitize(None).is_err());
 }
 
 /// Test that ipv6 sanitize clears dhcp_state (query only field).
