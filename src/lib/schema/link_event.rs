@@ -18,6 +18,11 @@ pub struct InterfaceLinkEvent {
     pub time_stamp: SystemTime,
     /// For WIFI interface only, SSID connected
     pub ssid: Option<String>,
+    /// Set by the monitor worker on the first event it sends for a
+    /// wifi-phy. The event worker uses it to hand the saved WIFI profiles
+    /// to the plugin, which then (re)creates its client on the new phy.
+    #[serde(skip)]
+    pub is_new_wifi_phy: bool,
 }
 
 impl InterfaceLinkEvent {
@@ -36,6 +41,7 @@ impl InterfaceLinkEvent {
             is_delete: false,
             time_stamp: SystemTime::now(),
             ssid,
+            is_new_wifi_phy: false,
         }
     }
 }
@@ -55,6 +61,7 @@ impl From<&Interface> for InterfaceLinkEvent {
             } else {
                 None
             },
+            is_new_wifi_phy: false,
         }
     }
 }

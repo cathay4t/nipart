@@ -146,6 +146,33 @@ impl NipartEventWorker {
             return Ok(());
         }
 
+        // A new wifi-phy appeared after the boot grace period: the wifi
+        // plugin is a fresh process (or never saw this phy), so give it the
+        // complete saved WIFI picture. Its apply worker will start a new
+        // shuli client covering this phy.
+        if event.is_new_wifi_phy && event.iface_type == InterfaceType::WifiPhy {
+            let wifi_state = gen_wifi_plugin_state(&saved_state);
+            if wifi_state.is_empty() {
+                log::debug!(
+                    "No saved WIFI config for new wifi-phy {}",
+                    event.iface_name
+                );
+            } else {
+                log::info!(
+                    "Applying saved WIFI config to plugin for new wifi-phy \
+                     {}: {wifi_state}",
+                    event.iface_name
+                );
+                commander
+                    .plugin_manager
+                    .apply_network_state(
+                        &wifi_state,
+                        &NipartApplyOption::new().memory_only(),
+                    )
+                    .await?;
+            }
+        }
+
         if let Some(cur_iface) = cur_iface.as_ref() {
             log::trace!("Current interface state: {cur_iface}");
         }
@@ -267,6 +294,21 @@ impl NipartEventWorker {
     }
 }
 
+/// Extract every saved WIFI interface so the plugin can rebuild its full
+/// network list when a new wifi-phy shows up.
+fn gen_wifi_plugin_state(saved_state: &NetworkState) -> NetworkState {
+    let mut ret = NetworkState::default();
+    for iface in saved_state.ifaces.iter() {
+        if matches!(
+            iface.iface_type(),
+            InterfaceType::WifiCfg | InterfaceType::WifiPhy
+        ) {
+            ret.ifaces.push(iface.clone());
+        }
+    }
+    ret
+}
+
 fn is_route_matching_iface(rt: &RouteEntry, iface: &Interface) -> bool {
     match rt.next_hop_iface.as_deref() {
         Some(name) if name == iface.kernel_iface_name() => true,
@@ -375,6 +417,12 @@ fn gen_desired_iface_down(
     new_iface.base_iface_mut().auto_connect = None;
     new_iface.base_iface_mut().ipv4 = Some(InterfaceIpv4::new_disabled());
     new_iface.base_iface_mut().ipv6 = Some(InterfaceIpv6::new_disabled());
+    // A link-down purge must not carry the saved SSID back to the wifi
+    // plugin: the plugin would treat it as an explicit wifi up request and
+    // re-enable WIFI while `npt wifi off` is in effect.
+    if let Interface::WifiPhy(wifi_iface) = &mut new_iface {
+        wifi_iface.wifi = None;
+    }
 
     // Remove routes to this interface also
     if !new_iface.is_userspace()
@@ -488,14 +536,15 @@ mod tests {
     use std::time::SystemTime;
 
     use nipart::{
-        Interface, InterfaceIpv4, InterfaceLinkEvent, InterfaceState,
-        InterfaceType, NetworkState, NipartInterface,
+        Interface, InterfaceAutoConnect, InterfaceIpv4, InterfaceLinkEvent,
+        InterfaceState, InterfaceType, NetworkState, NipartInterface,
     };
 
     use super::{
-        gen_routes_for_iface_up, handle_event_auto_connect,
-        handle_wifi_phy_event, is_route_matching_iface,
-        is_stale_link_down_event, nic_is_gone, wifi_phy_ssid,
+        gen_desired_iface_down, gen_routes_for_iface_up, gen_wifi_plugin_state,
+        handle_event_auto_connect, handle_wifi_phy_event,
+        is_route_matching_iface, is_stale_link_down_event, nic_is_gone,
+        wifi_phy_ssid,
     };
 
     fn gen_wifi_cfg_iface() -> Interface {
@@ -527,6 +576,7 @@ mod tests {
             is_delete: false,
             time_stamp: SystemTime::now(),
             ssid: ssid.map(|s| s.to_string()),
+            is_new_wifi_phy: false,
         }
     }
 
@@ -654,6 +704,36 @@ interfaces:
         assert!(!is_route_matching_iface(vpn0_rt, wan0));
     }
 
+    #[test]
+    fn test_gen_wifi_plugin_state_filters_non_wifi_ifaces() {
+        let state: NetworkState = rmsd_yaml::from_str(
+            r#"---
+            interfaces:
+              - name: eth0
+                type: ethernet
+                state: up
+              - name: Test-WIFI
+                type: wifi-cfg
+                state: up
+                wifi:
+                  ssid: Test-WIFI
+              - name: wlan0
+                type: wifi-phy
+                state: up
+            "#,
+        )
+        .unwrap();
+
+        let wifi_state = gen_wifi_plugin_state(&state);
+        assert_eq!(wifi_state.ifaces.iter().count(), 2);
+        assert!(wifi_state.ifaces.iter().all(|iface| {
+            matches!(
+                iface.iface_type(),
+                InterfaceType::WifiCfg | InterfaceType::WifiPhy
+            )
+        }));
+    }
+
     fn gen_link_event(iface_name: &str, is_up: bool) -> InterfaceLinkEvent {
         InterfaceLinkEvent {
             iface_name: iface_name.to_string(),
@@ -663,6 +743,7 @@ interfaces:
             is_delete: false,
             time_stamp: SystemTime::now(),
             ssid: None,
+            is_new_wifi_phy: false,
         }
     }
 
@@ -807,6 +888,31 @@ interfaces:
         );
         assert_eq!(routes.len(), 1);
         assert!(routes[0].is_absent());
+    }
+
+    #[test]
+    fn test_wifi_phy_link_down_purge_drops_wifi_section() {
+        let saved_iface: Interface = rmsd_yaml::from_str(
+            r#"---
+            name: wlan0
+            type: wifi-phy
+            state: up
+            wifi:
+              ssid: Test-WIFI
+              base-iface: wlan0
+            "#,
+        )
+        .unwrap();
+
+        let (new_iface, _) = gen_desired_iface_down(
+            &InterfaceAutoConnect::AutoConnect,
+            &saved_iface,
+            &NetworkState::default(),
+        );
+        let Interface::WifiPhy(new_iface) = new_iface else {
+            panic!("expected wifi-phy interface");
+        };
+        assert!(new_iface.wifi.is_none());
     }
 
     #[test]

@@ -147,6 +147,16 @@ impl NipartMonitorManager {
         saved_state: &NetworkState,
         watch_active: bool,
     ) -> Result<(), NipartError> {
+        // Wifi-cfg profiles are userspace-only and are not registered with a
+        // kernel name or MAC watch below, but their auto-connect still needs
+        // the wifi monitor: it emits the first event of a wifi-phy so the
+        // event worker can hand the saved profiles to the plugin.
+        if wifi_monitor_is_needed(saved_state) {
+            self.enable_wifi_monitor().await?;
+        } else {
+            self.disable_wifi_monitor().await?;
+        }
+
         let cur_state =
             NipartNoDaemon::query_network_state(NipartQueryOption::running())
                 .await?;
@@ -287,6 +297,14 @@ fn wifi_monitor_is_needed(full_saved_state: &NetworkState) -> bool {
         if let Interface::WifiCfg(wifi_iface) = iface
             && wifi_iface.ssid().is_some()
         {
+            return true;
+        } else if let Interface::WifiPhy(wifi_iface) = iface
+            && wifi_iface.ssid().is_some()
+        {
+            // A saved wifi-phy profile carries its own SSID config (e.g.
+            // an older style `state: up` wifi-phy apply).  Its link-up
+            // event must be monitored so `npt wifi on` can restore the
+            // IP stack after `npt wifi off` purged it.
             return true;
         } else if let Some(auto_connect) =
             iface.base_iface().auto_connect.as_ref()

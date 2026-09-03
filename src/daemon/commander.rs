@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use futures_channel::mpsc::UnboundedSender;
 use nipart::{
-    BaseInterface, Interface, InterfaceIdentifier, InterfaceState,
-    InterfaceType, NetworkState, NipartApplyOption, NipartError,
-    NipartInterface, NipartNoDaemon, NipartQueryOption, NipartWifiControl,
-    NipartWifiScanOption, WifiScanResult,
+    BaseInterface, Interface, InterfaceIdentifier, InterfaceIpv4,
+    InterfaceIpv6, InterfaceState, InterfaceType, NetworkState,
+    NipartApplyOption, NipartError, NipartInterface, NipartNoDaemon,
+    NipartQueryOption, NipartWifiControl, NipartWifiScanOption, WifiScanResult,
 };
 
 use super::{
@@ -299,7 +299,36 @@ impl NipartCommander {
         &mut self,
         control: NipartWifiControl,
     ) -> Result<(), NipartError> {
-        self.plugin_manager.wifi_control(control).await
+        self.plugin_manager.wifi_control(control).await?;
+        if control == NipartWifiControl::Off {
+            self.purge_wifi_phy_ip_stack().await?;
+        }
+        Ok(())
+    }
+
+    /// Purge IP and routes of every active wifi-phy interface.
+    ///
+    /// Disabling WIFI only tells the plugin to disconnect; the kernel
+    /// keeps the addresses and routes unless the daemon disables the IP
+    /// stack explicitly.  The apply is memory-only so the saved profiles
+    /// stay intact and `npt wifi on` can restore them through the normal
+    /// link-event path.
+    async fn purge_wifi_phy_ip_stack(&mut self) -> Result<(), NipartError> {
+        let cur_state =
+            self.query_network_state(None, Default::default()).await?;
+        let desired_state = gen_wifi_off_purge_state(&cur_state);
+        if desired_state.is_empty() {
+            return Ok(());
+        }
+        let opt = NipartApplyOption::new().memory_only();
+        self.apply_network_state_with_saved_config(
+            None,
+            desired_state,
+            opt,
+            None,
+        )
+        .await?;
+        Ok(())
     }
 
     /// Restore the DHCP clients for the saved interfaces applied at boot.
@@ -668,13 +697,31 @@ fn remove_manual_activation(state: &mut NetworkState) {
     }
 }
 
+fn gen_wifi_off_purge_state(cur_state: &NetworkState) -> NetworkState {
+    let mut desired_state = NetworkState::default();
+    for iface in cur_state.ifaces.kernel_ifaces.values().filter(|iface| {
+        iface.iface_type() == &InterfaceType::WifiPhy
+            && iface.base_iface().state.is_up()
+    }) {
+        let mut base = BaseInterface::new(
+            iface.kernel_iface_name().to_string(),
+            InterfaceType::WifiPhy,
+        );
+        base.state = InterfaceState::Up;
+        base.ipv4 = Some(InterfaceIpv4::new_disabled());
+        base.ipv6 = Some(InterfaceIpv6::new_disabled());
+        desired_state.ifaces.push(base.into());
+    }
+    desired_state
+}
+
 #[cfg(test)]
 mod tests {
     use nipart::{BaseInterface, InterfaceType, NetworkState, NipartInterface};
 
     use super::{
-        base_iface_for_dhcp_restore, remove_manual_activation,
-        remove_ready_state,
+        base_iface_for_dhcp_restore, gen_wifi_off_purge_state,
+        remove_manual_activation, remove_ready_state,
     };
 
     #[test]
@@ -859,5 +906,55 @@ mod tests {
         let rts = state.routes.config.unwrap();
         assert_eq!(rts.len(), 1);
         assert_eq!(rts[0].next_hop_iface.as_deref(), Some("eth1"));
+    }
+
+    #[test]
+    fn test_gen_wifi_off_purge_state_disables_wifi_phy_ip() {
+        let cur_state: NetworkState = rmsd_yaml::from_str(
+            r#"---
+            interfaces:
+              - name: wlan0
+                type: wifi-phy
+                state: up
+                ipv4:
+                  enabled: true
+                  dhcp: false
+                  address:
+                    - ip: 192.0.2.99
+                      prefix-length: 24
+                ipv6:
+                  enabled: true
+                  autoconf: true
+              - name: eth0
+                type: ethernet
+                state: up
+                ipv4:
+                  enabled: true
+            "#,
+        )
+        .unwrap();
+
+        let desired_state = gen_wifi_off_purge_state(&cur_state);
+        let ifaces: Vec<_> = desired_state.ifaces.iter().collect();
+        assert_eq!(ifaces.len(), 1);
+        assert_eq!(ifaces[0].iface_type(), &InterfaceType::WifiPhy);
+        assert_eq!(ifaces[0].kernel_iface_name(), "wlan0");
+        assert!(ifaces[0].base_iface().state.is_up());
+        assert_eq!(
+            ifaces[0]
+                .base_iface()
+                .ipv4
+                .as_ref()
+                .and_then(|ipv4| ipv4.enabled),
+            Some(false)
+        );
+        assert_eq!(
+            ifaces[0]
+                .base_iface()
+                .ipv6
+                .as_ref()
+                .and_then(|ipv6| ipv6.enabled),
+            Some(false)
+        );
     }
 }
