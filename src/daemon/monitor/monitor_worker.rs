@@ -149,6 +149,11 @@ pub(crate) struct NipartMonitorWorker {
     /// the event worker cannot re-apply the saved config and its routes.
     explicitly_down: HashSet<String>,
     emited: HashMap<String, InterfaceLinkEvent>,
+    /// Wifi-phys whose first event has already been sent to the event
+    /// worker. Kept across pause/resume so an existing phy is not announced
+    /// as new after every apply; removed on interface delete so a later
+    /// reappearance is announced again.
+    wifi_phys_emited: HashSet<String>,
     delay_queue: HashMap<String, (InterfaceLinkEvent, Instant)>,
 }
 
@@ -171,6 +176,7 @@ impl TaskWorker for NipartMonitorWorker {
             msg_to_commander: None,
             explicitly_down: HashSet::new(),
             emited: HashMap::new(),
+            wifi_phys_emited: HashSet::new(),
             delay_queue: HashMap::new(),
         })
     }
@@ -345,8 +351,22 @@ impl NipartMonitorWorker {
 
     async fn notify(
         &mut self,
-        event: InterfaceLinkEvent,
+        mut event: InterfaceLinkEvent,
     ) -> Result<(), NipartError> {
+        let is_wifi_phy = self.wifi_monitor_enabled
+            && event.iface_type == InterfaceType::WifiPhy;
+        if event.is_delete {
+            self.wifi_phys_emited.remove(&event.iface_name);
+        } else if is_wifi_phy
+            && !self.wifi_phys_emited.contains(&event.iface_name)
+        {
+            event.is_new_wifi_phy = true;
+            log::debug!(
+                "New wifi-phy {}(ifindex {}) detected, notifying event worker",
+                event.iface_name,
+                event.iface_index
+            );
+        }
         log::trace!("NipartMonitorWorker sending out {event:?}");
         if let Some(sender) = self.msg_to_commander.as_mut() {
             let cmd = NipartManagerCmd::LinkEvent(Box::new(event.clone()));
@@ -362,7 +382,11 @@ impl NipartMonitorWorker {
             self.delay_queue.remove(&event.iface_name);
             if event.is_delete {
                 self.emited.remove(&event.iface_name);
+                self.wifi_phys_emited.remove(&event.iface_name);
             } else {
+                if event.is_new_wifi_phy {
+                    self.wifi_phys_emited.insert(event.iface_name.to_string());
+                }
                 self.emited.insert(event.iface_name.to_string(), event);
             }
             Ok(())
@@ -997,11 +1021,12 @@ mod tests {
     }
 
     #[test]
-    fn test_pause_clears_monitor_session_state() {
+    fn test_pause_clears_volatile_state_keeps_wifi_phys_emited() {
         let mut worker = gen_worker();
         worker
             .emited
             .insert("enp1s0".to_string(), gen_event("enp1s0"));
+        worker.wifi_phys_emited.insert("wlan0".to_string());
         worker.delay_queue.insert(
             "enp2s0".to_string(),
             (
@@ -1018,6 +1043,40 @@ mod tests {
         assert!(worker.emited.is_empty());
         assert!(worker.delay_queue.is_empty());
         assert!(worker.iface_mac.is_empty());
+        // A wifi-phy already announced to the event worker is not forgotten
+        // by a pause/resume cycle: only a real delete (or a fresh monitor
+        // worker) should cause it to be announced as new again.
+        assert!(worker.wifi_phys_emited.contains("wlan0"));
+    }
+
+    #[test]
+    fn test_notify_marks_new_wifi_phy_only_once() {
+        let mut worker = gen_worker();
+        worker.wifi_monitor_enabled = true;
+        let (tx, _rx) = unbounded();
+        worker.msg_to_commander = Some(tx);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let mut event = InterfaceLinkEvent::new(
+            "wlan0".to_string(),
+            10,
+            InterfaceType::WifiPhy,
+            true,
+            None,
+        );
+        rt.block_on(worker.notify(event.clone())).unwrap();
+        assert!(worker.emited["wlan0"].is_new_wifi_phy);
+        assert!(worker.wifi_phys_emited.contains("wlan0"));
+
+        // A later event for the same phy is a normal link event.
+        event.is_up = false;
+        rt.block_on(worker.notify(event.clone())).unwrap();
+        assert!(!worker.emited["wlan0"].is_new_wifi_phy);
+
+        // A delete forgets the phy so a reappearance is announced again.
+        event.is_delete = true;
+        rt.block_on(worker.notify(event)).unwrap();
+        assert!(!worker.wifi_phys_emited.contains("wlan0"));
     }
 
     #[test]
