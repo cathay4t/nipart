@@ -27,6 +27,7 @@ impl InterfaceIpv4 {
         // desired states.
         if !self.is_auto() {
             self.auto_gateway = None;
+            self.auto_route_metric = None;
         }
     }
 }

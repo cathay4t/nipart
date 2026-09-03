@@ -374,9 +374,9 @@ fn gen_routes(lease: &DhcpV4Lease, base_iface: &BaseInterface) -> Routes {
             route.next_hop_iface = Some(base_iface.name.to_string());
             route.next_hop_addr = Some(gateway.to_string());
             route.table_id = Some(DEFAULT_ROUTE_TABLE_ID);
-            route.metric = base_iface
-                .iface_index
-                .map(|iface_index| 100i64 * iface_index as i64 + index as i64);
+            route.metric = base_iface.ipv4.as_ref().and_then(|ipv4| {
+                ipv4.dhcp_route_metric(base_iface.iface_index, index)
+            });
             conf_routes.push(route);
         }
     }
@@ -384,4 +384,47 @@ fn gen_routes(lease: &DhcpV4Lease, base_iface: &BaseInterface) -> Routes {
     let mut routes = Routes::default();
     routes.config = Some(conf_routes);
     routes
+}
+
+#[cfg(test)]
+mod tests {
+    use nipart::InterfaceType;
+
+    use super::*;
+
+    fn base_iface_with_auto_route_metric(
+        auto_route_metric: Option<i64>,
+    ) -> BaseInterface {
+        let mut base_iface =
+            BaseInterface::new("eth1".to_string(), InterfaceType::Ethernet);
+        base_iface.iface_index = Some(7);
+        let mut ipv4 = InterfaceIpv4::default();
+        ipv4.enabled = Some(true);
+        ipv4.dhcp = Some(true);
+        ipv4.auto_route_metric = auto_route_metric;
+        base_iface.ipv4 = Some(ipv4);
+        base_iface
+    }
+
+    fn lease_with_gateway() -> DhcpV4Lease {
+        let mut lease = DhcpV4Lease::default();
+        lease.gateways = Some(vec![std::net::Ipv4Addr::new(192, 0, 2, 1)]);
+        lease
+    }
+
+    #[test]
+    fn test_gen_routes_uses_auto_route_metric() {
+        let lease = lease_with_gateway();
+        let base_iface = base_iface_with_auto_route_metric(Some(321));
+        let routes = gen_routes(&lease, &base_iface);
+        assert_eq!(routes.config.unwrap()[0].metric, Some(321));
+    }
+
+    #[test]
+    fn test_gen_routes_falls_back_to_iface_index_metric() {
+        let lease = lease_with_gateway();
+        let base_iface = base_iface_with_auto_route_metric(None);
+        let routes = gen_routes(&lease, &base_iface);
+        assert_eq!(routes.config.unwrap()[0].metric, Some(700));
+    }
 }

@@ -15,7 +15,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ErrorKind, JsonDisplay, NipartError};
+use crate::{ErrorKind, JsonDisplay, NipartError, RouteEntry};
 
 const IPV4_ADDR_LEN: usize = 32;
 const IPV6_ADDR_LEN: usize = 128;
@@ -126,6 +126,15 @@ pub struct InterfaceIpv4 {
         deserialize_with = "crate::deserializer::option_bool_or_string"
     )]
     pub auto_gateway: Option<bool>,
+    /// Metric of routes learned from DHCPv4. When not defined, nipart will
+    /// use `iface-index * 100` as the metric. Use -1 to explicitly request
+    /// the default metric.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "crate::deserializer::option_i64_or_string"
+    )]
+    pub auto_route_metric: Option<i64>,
 }
 
 impl Default for InterfaceIpv4 {
@@ -144,6 +153,7 @@ impl InterfaceIpv4 {
             dhcp_state: None,
             addresses: None,
             auto_gateway: None,
+            auto_route_metric: None,
         }
     }
 
@@ -159,6 +169,26 @@ impl InterfaceIpv4 {
         self.is_enabled()
             && !self.is_auto()
             && !self.addresses.as_deref().unwrap_or_default().is_empty()
+    }
+
+    /// Return the metric to use for the DHCPv4 learned route at
+    /// `route_index`. When `auto_route_metric` is undefined or set to
+    /// [RouteEntry::USE_DEFAULT_METRIC], fall back to
+    /// `iface_index * 100 + route_index`.
+    pub fn dhcp_route_metric(
+        &self,
+        iface_index: Option<u32>,
+        route_index: usize,
+    ) -> Option<i64> {
+        if let Some(metric) = self.auto_route_metric
+            && metric != RouteEntry::USE_DEFAULT_METRIC
+        {
+            Some(metric)
+        } else {
+            iface_index.map(|iface_index| {
+                100i64 * iface_index as i64 + route_index as i64
+            })
+        }
     }
 
     // * Remove DHCP state
@@ -213,9 +243,28 @@ impl InterfaceIpv4 {
             self.dhcp = None;
             self.addresses = None;
             self.auto_gateway = None;
+            self.auto_route_metric = None;
         }
         if self.dhcp != Some(true) {
             self.auto_gateway = None;
+            self.auto_route_metric = None;
+        } else if let Some(metric) = self.auto_route_metric {
+            if !(RouteEntry::USE_DEFAULT_METRIC..=u32::MAX as i64)
+                .contains(&metric)
+            {
+                return Err(NipartError::new(
+                    ErrorKind::InvalidArgument,
+                    format!(
+                        "Invalid value for ipv4.auto-route-metric: {metric}, \
+                         should be in the range of [{};{}]",
+                        RouteEntry::USE_DEFAULT_METRIC,
+                        u32::MAX,
+                    ),
+                ));
+            }
+            if metric == RouteEntry::USE_DEFAULT_METRIC {
+                self.auto_route_metric = None;
+            }
         }
         Ok(())
     }
@@ -224,12 +273,13 @@ impl InterfaceIpv4 {
     ///   be latency after applied and query back.
     /// * Set current DHCP none to false.
     /// * Set current address none to empty array.
-    /// * Remove `auto_gateway` as it is configuration only property, not
-    ///   reflected in running state.
+    /// * Remove `auto_gateway` and `auto_route_metric` as they are
+    ///   configuration only properties, not reflected in running state.
     /// * Sort addresses in both desired and current state to canonical order so
     ///   that verification is order-independent.
     pub(crate) fn sanitize_before_verify(&mut self, current: &mut Self) {
         self.auto_gateway = None;
+        self.auto_route_metric = None;
         if let Some(addrs) = self.addresses.as_mut() {
             for addr in addrs.iter_mut() {
                 if let Some(cur_addr) =

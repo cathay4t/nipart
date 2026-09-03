@@ -381,10 +381,11 @@ impl NipartCommander {
                     cur_iface.iface_type()
                 );
                 // The kernel state (`cur_base`) never carries the
-                // config-only `auto_gateway` property, so inherit it from
-                // the saved config, otherwise the restored client would
-                // ignore `auto-gateway: false` and add the DHCP gateway
-                // routes again.
+                // config-only `auto_gateway` and `auto_route_metric`
+                // properties, so inherit them from the saved config,
+                // otherwise the restored client would ignore
+                // `auto-gateway: false` / `auto-route-metric` and add the
+                // DHCP gateway routes with wrong settings again.
                 let dhcp_base_iface =
                     base_iface_for_dhcp_restore(cur_base, base);
                 if let Err(e) =
@@ -428,10 +429,11 @@ impl NipartCommander {
 
 /// Build the base interface used to start the DHCPv4 client after a daemon
 /// restart: the kernel state (which carries the MAC address and interface
-/// index the client needs), but with the config-only `auto_gateway` property
-/// inherited from the saved config — the kernel never reports it, so without
-/// this the restored client would ignore `auto-gateway: false` and re-add
-/// the DHCP gateway routes on the first renewal.
+/// index the client needs), but with the config-only `auto_gateway` and
+/// `auto_route_metric` properties inherited from the saved config — the
+/// kernel never reports them, so without this the restored client would
+/// ignore `auto-gateway: false` or the configured `auto-route-metric` and
+/// re-add the DHCP gateway routes with wrong settings on the first renewal.
 fn base_iface_for_dhcp_restore(
     kernel_base: &BaseInterface,
     saved_base: &BaseInterface,
@@ -440,6 +442,8 @@ fn base_iface_for_dhcp_restore(
     if let Some(ipv4) = ret.ipv4.as_mut() {
         ipv4.auto_gateway =
             saved_base.ipv4.as_ref().and_then(|i| i.auto_gateway);
+        ipv4.auto_route_metric =
+            saved_base.ipv4.as_ref().and_then(|i| i.auto_route_metric);
     }
     ret
 }
@@ -725,7 +729,7 @@ mod tests {
     };
 
     #[test]
-    fn test_base_iface_for_dhcp_restore_inherits_auto_gateway() {
+    fn test_base_iface_for_dhcp_restore_inherits_config_only_ipv4() {
         let kernel_base: BaseInterface = rmsd_yaml::from_str(
             r#"---
             name: eth0
@@ -746,12 +750,17 @@ mod tests {
               enabled: true
               dhcp: true
               auto-gateway: false
+              auto-route-metric: 321
             "#,
         )
         .unwrap();
 
         let ret = base_iface_for_dhcp_restore(&kernel_base, &saved_base);
         assert_eq!(ret.ipv4.as_ref().and_then(|i| i.auto_gateway), Some(false));
+        assert_eq!(
+            ret.ipv4.as_ref().and_then(|i| i.auto_route_metric),
+            Some(321)
+        );
     }
 
     #[test]
@@ -781,6 +790,7 @@ mod tests {
 
         let ret = base_iface_for_dhcp_restore(&kernel_base, &saved_base);
         assert_eq!(ret.ipv4.as_ref().and_then(|i| i.auto_gateway), None);
+        assert_eq!(ret.ipv4.as_ref().and_then(|i| i.auto_route_metric), None);
     }
 
     #[test]
