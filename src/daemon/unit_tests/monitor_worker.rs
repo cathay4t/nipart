@@ -15,8 +15,8 @@ use rtnetlink::{
 };
 
 use super::{
-    NipartMonitorWorker, event_is_explicitly_down, format_mac,
-    iface_identity_names, should_ignore_wireless_notification,
+    NipartMonitorCmd, NipartMonitorWorker, event_is_explicitly_down,
+    format_mac, iface_identity_names, should_ignore_wireless_notification,
 };
 use crate::task::TaskWorker;
 
@@ -247,6 +247,34 @@ fn test_pause_keeps_explicit_down_list() {
     worker.pause();
 
     assert!(worker.explicitly_down.contains("enp1s0"));
+}
+
+#[test]
+fn test_pause_resume_nested_requires_matching_resume() {
+    // `load_saved_state()` pauses the monitor for the whole boot pass while
+    // every apply inside it pauses again. A nested resume must not start the
+    // netlink socket (and emit a fresh link dump) before the outer pause is
+    // released.
+    let mut worker = gen_worker();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    rt.block_on(worker.process_cmd(NipartMonitorCmd::Pause))
+        .unwrap();
+    assert_eq!(worker.manual_pause_count, 1);
+
+    rt.block_on(worker.process_cmd(NipartMonitorCmd::Pause))
+        .unwrap();
+    assert_eq!(worker.manual_pause_count, 2);
+
+    rt.block_on(worker.process_cmd(NipartMonitorCmd::Resume))
+        .unwrap();
+    assert_eq!(worker.manual_pause_count, 1);
+    assert!(worker.netlink_handle.is_none());
+
+    rt.block_on(worker.process_cmd(NipartMonitorCmd::Resume))
+        .unwrap();
+    assert_eq!(worker.manual_pause_count, 0);
+    assert!(worker.netlink_handle.is_none());
 }
 
 #[test]

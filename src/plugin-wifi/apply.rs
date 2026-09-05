@@ -327,9 +327,19 @@ impl WifiClientState {
                     networks
                 }
             };
-            if iface_state.desired_networks != networks
-                || (force && !networks.is_empty())
-            {
+            // A forced single-SSID apply (e.g. `npt up`) records the
+            // requested network as preferred. A later non-forced re-apply of
+            // the same saved profile (e.g. the boot new-phy event) must not
+            // clear that preference and restart the client.
+            let network_list_changed = if force {
+                iface_state.desired_networks != networks
+            } else {
+                !same_saved_networks_ignoring_prefered(
+                    &iface_state.desired_networks,
+                    &networks,
+                )
+            };
+            if network_list_changed || (force && !networks.is_empty()) {
                 pending_networks.insert(iface_name.clone(), networks);
             }
         }
@@ -510,6 +520,25 @@ fn build_shuli_networks(
         ret.push(build_shuli_network(wifi_cfg));
     }
     Ok(ret)
+}
+
+/// Whether two network lists carry the same saved configuration.
+///
+/// `prefered` is a per-connection hint, not a saved property: nipart may
+/// mark the requested SSID of a forced `npt up` as preferred, and a later
+/// re-apply of the same saved profiles must not treat that as a change.
+fn same_saved_networks_ignoring_prefered(
+    current: &[ShuliNetworkConfig],
+    desired: &[ShuliNetworkConfig],
+) -> bool {
+    current.len() == desired.len()
+        && current.iter().zip(desired).all(|(cur, des)| {
+            let mut cur = cur.clone();
+            let mut des = des.clone();
+            cur.prefered = false;
+            des.prefered = false;
+            cur == des
+        })
 }
 
 fn build_shuli_network(wifi_cfg: &WifiConfig) -> ShuliNetworkConfig {

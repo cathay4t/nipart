@@ -62,7 +62,9 @@ pub(crate) enum NipartMonitorCmd {
     EnableWifiMonitor,
     /// Stop monitoring on WIFI SSID association
     DisableWifiMonitor,
-    /// Stop the monitoring but preserving the internal monitoring list
+    /// Stop the monitoring but preserving the internal monitoring list.
+    /// Nested pauses require the same number of resumes before monitoring
+    /// restarts.
     Pause,
     /// Resume the monitoring, emit current status of monitoring
     /// interface list.
@@ -143,7 +145,11 @@ pub(crate) struct NipartMonitorWorker {
     iface_mac: HashMap<String, String>,
     wifi_monitor_enabled: bool,
     msg_to_commander: Option<UnboundedSender<NipartManagerCmd>>,
-    manual_paused: bool,
+    /// Number of outstanding `Pause` requests. `Pause`/`Resume` calls may
+    /// nest (e.g. the boot load pauses the monitor while every apply inside
+    /// it also pauses), so the monitor stays down until the last matching
+    /// `Resume` is issued.
+    manual_pause_count: u32,
     /// Interface/profile aliases explicitly brought down by `npt down`.
     /// Link events for these interfaces are dropped at the monitor worker so
     /// the event worker cannot re-apply the saved config and its routes.
@@ -172,7 +178,7 @@ impl TaskWorker for NipartMonitorWorker {
             wifi_monitor_enabled: false,
             netlink_handle: None,
             netlink_msg_receiver: None,
-            manual_paused: false,
+            manual_pause_count: 0,
             msg_to_commander: None,
             explicitly_down: HashSet::new(),
             emited: HashMap::new(),
@@ -231,12 +237,17 @@ impl TaskWorker for NipartMonitorWorker {
                 }
             }
             NipartMonitorCmd::Pause => {
-                self.manual_paused = true;
+                self.manual_pause_count =
+                    self.manual_pause_count.saturating_add(1);
                 self.pause();
             }
             NipartMonitorCmd::Resume => {
-                self.manual_paused = false;
-                if self.should_resume() && self.should_start_netlink() {
+                self.manual_pause_count =
+                    self.manual_pause_count.saturating_sub(1);
+                if self.manual_pause_count == 0
+                    && self.should_resume()
+                    && self.should_start_netlink()
+                {
                     self.resume().await?;
                 }
             }
@@ -294,7 +305,7 @@ impl TaskWorker for NipartMonitorWorker {
                         }
                     }
                 }
-                if !self.manual_paused {
+                if self.manual_pause_count == 0 {
                     self.netlink_msg_receiver = Some(netlink_msg_receiver);
                 }
             } else if let Some((cmd, sender)) = self.recv_cmd().await {
@@ -334,7 +345,7 @@ impl NipartMonitorWorker {
     /// "socket is active" check from `process_cmd()`. The handle remains
     /// set for the whole active period.
     fn should_start_netlink(&self) -> bool {
-        !self.manual_paused && self.netlink_handle.is_none()
+        self.manual_pause_count == 0 && self.netlink_handle.is_none()
     }
 
     fn pause(&mut self) {

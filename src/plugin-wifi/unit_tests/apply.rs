@@ -90,6 +90,25 @@ fn build_shuli_networks_rejects_conflicting_password() {
     assert!(build_shuli_networks(&refs).is_err());
 }
 
+#[test]
+fn same_saved_networks_ignoring_prefered_only() {
+    let preferred = [network("A", None, true)];
+    let normal = [network("A", None, false)];
+    assert!(same_saved_networks_ignoring_prefered(&preferred, &normal));
+
+    let different_password = [network("A", Some("secret"), false)];
+    assert!(!same_saved_networks_ignoring_prefered(
+        &preferred,
+        &different_password
+    ));
+
+    let extra_network = [network("A", None, true), network("B", None, false)];
+    assert!(!same_saved_networks_ignoring_prefered(
+        &preferred,
+        &extra_network
+    ));
+}
+
 fn network(
     ssid: &str,
     password: Option<&str>,
