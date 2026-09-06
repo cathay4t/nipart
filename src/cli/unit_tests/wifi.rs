@@ -24,6 +24,24 @@ fn new_scan_result(
 }
 
 #[test]
+fn test_wifi_down_is_alias_of_off() {
+    let matches = CommandWifi::new_cmd()
+        .try_get_matches_from(["npt", "wifi", "down"])
+        .unwrap();
+
+    assert!(matches.subcommand_matches("off").is_some());
+}
+
+#[test]
+fn test_wifi_up_is_alias_of_on() {
+    let matches = CommandWifi::new_cmd()
+        .try_get_matches_from(["npt", "wifi", "up"])
+        .unwrap();
+
+    assert!(matches.subcommand_matches("on").is_some());
+}
+
+#[test]
 fn test_wifi_scan_table_has_nmcli_style_columns() {
     let wifi_cfgs = vec![
         new_scan_result(

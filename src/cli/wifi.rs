@@ -80,11 +80,11 @@ impl CommandWifi {
                     ),
             )
             .subcommand(
-                clap::Command::new("off").about(
+                clap::Command::new("off").alias("down").about(
                     "Disable WIFI: disconnect and stop all WIFI actions",
                 ),
             )
-            .subcommand(clap::Command::new("on").about(
+            .subcommand(clap::Command::new("on").alias("up").about(
                 "Enable WIFI actions; use connect or up to restore connections",
             ))
     }
