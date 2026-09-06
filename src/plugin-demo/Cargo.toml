@@ -9,7 +9,6 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-env_logger = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
