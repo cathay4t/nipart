@@ -3,10 +3,12 @@
 import os
 import re
 import signal
+import time
 
 import nipart
 import pytest
 
+from .conftest import CLI_PATH
 from .testlib.cmdlib import exec_cmd
 from .testlib.dhcp import DHCP_SRV_IP4
 from .testlib.dhcp import DHCP_SRV_IP4_PREFIX
@@ -42,6 +44,7 @@ DHCP_SRV_IP4_2 = f"{DHCP_SRV_IP4_PREFIX_2}.1"
 DNSMASQ_CONF_PATH_2 = "/tmp/nipart_test_dnsmasq2.conf"
 DNSMASQ_PID_PATH_2 = "/tmp/nipart_test_dnsmasq2.pid"
 TEST_NET_NS_2 = "wifi-test-2"
+DUMMY_IFACE = "wifi-dhcp-dummy0"
 HOSTAPD_CONF_2 = f"""
 interface={AP2_NIC}
 driver=nl80211
@@ -286,3 +289,52 @@ class TestWifiDhcpSwitch:
         assert retry_till_true_or_timeout(
             60, lambda: not _has_ipv4_prefix(DHCP_SRV_IP4_PREFIX)
         ), "previous DHCP address was not purged after SSID switch"
+
+    def test_unrelated_npt_up_does_not_restart_wifi_dhcp(
+        self, clean_up, two_dhcp_ap_env  # noqa: F811
+    ):
+        try:
+            nipart.apply(load_yaml(f"""---
+                interfaces:
+                  - name: {DUMMY_IFACE}
+                    type: dummy
+                    state: up
+                """))
+            nipart.apply(load_yaml(f"""---
+                interfaces:
+                  - name: {WIFI_TEST_NIC}
+                    type: wifi-phy
+                    state: up
+                    wifi:
+                      ssid: {TEST_WIFI_SSID_2}
+                    ipv4:
+                      enabled: true
+                      dhcp: true
+                """))
+            assert retry_till_true_or_timeout(
+                60, lambda: _connected_ssid() == TEST_WIFI_SSID_2
+            )
+            assert retry_till_true_or_timeout(
+                60,
+                lambda: _has_ipv4_prefix(DHCP_SRV_IP4_PREFIX_2),
+            )
+
+            # With no DHCP server available, a spurious DHCP restart caused
+            # by the monitor link dump after an unrelated `npt up` purges
+            # the lease and leaves the wifi-phy without IPv4.
+            _stop_dhcp_server_2()
+            rc, out, err = exec_cmd([CLI_PATH, "up", DUMMY_IFACE], check=False)
+            assert rc == 0, f"npt up failed:\n{out}\n{err}"
+            time.sleep(3)
+            assert _has_ipv4_prefix(DHCP_SRV_IP4_PREFIX_2), (
+                "unrelated `npt up` restarted the wifi DHCP client and "
+                "purged its lease"
+            )
+        finally:
+            _stop_dhcp_server_2()
+            nipart.apply(load_yaml(f"""---
+                interfaces:
+                  - name: {DUMMY_IFACE}
+                    type: dummy
+                    state: absent
+                """))

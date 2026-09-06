@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
+    collections::HashMap,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -15,7 +16,10 @@ use nipart::{
 };
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
-use crate::{NipartWpaConn, apply::WifiClientState};
+use crate::{
+    NipartWpaConn,
+    apply::{WifiClientState, WifiLiveState},
+};
 
 /// Maximum time a single shuli client cycle may run before the plugin
 /// assumes the client is stuck and restarts it.  This prevents a long
@@ -31,6 +35,7 @@ const WIFI_CONNECTED_RUN_ONCE_TIMEOUT_SECS: u64 = 24 * 60 * 60;
 pub(crate) struct NipartPluginWifi {
     worker_tx: tokio::sync::mpsc::UnboundedSender<WifiWorkerRequest>,
     wifi_enabled: Arc<AtomicBool>,
+    wifi_live: Arc<Mutex<HashMap<String, WifiLiveState>>>,
 }
 
 #[derive(Debug)]
@@ -54,8 +59,9 @@ enum WifiWorkerRequest {
 async fn apply_worker(
     mut rx: UnboundedReceiver<WifiWorkerRequest>,
     wifi_enabled: Arc<AtomicBool>,
+    wifi_live: Arc<Mutex<HashMap<String, WifiLiveState>>>,
 ) {
-    let mut wifi_state = WifiClientState::new(wifi_enabled);
+    let mut wifi_state = WifiClientState::new(wifi_enabled, wifi_live);
     loop {
         let run_once_timeout_secs = if wifi_state.is_connected() {
             WIFI_CONNECTED_RUN_ONCE_TIMEOUT_SECS
@@ -123,10 +129,16 @@ impl NipartPlugin for NipartPluginWifi {
     async fn init() -> Result<Self, NipartError> {
         let (worker_tx, worker_rx) = unbounded_channel();
         let wifi_enabled = Arc::new(AtomicBool::new(true));
-        tokio::spawn(apply_worker(worker_rx, wifi_enabled.clone()));
+        let wifi_live = Arc::new(Mutex::new(HashMap::new()));
+        tokio::spawn(apply_worker(
+            worker_rx,
+            wifi_enabled.clone(),
+            wifi_live.clone(),
+        ));
         Ok(Self {
             worker_tx,
             wifi_enabled,
+            wifi_live,
         })
     }
 
@@ -141,16 +153,22 @@ impl NipartPlugin for NipartPluginWifi {
     }
 
     async fn query_network_state(
-        _plugin: &Arc<Self>,
+        plugin: &Arc<Self>,
         _opt: NipartQueryOption,
         _cur_net_state: &NetworkState,
         conn: &mut NipartIpcConnection,
     ) -> Result<NetworkState, NipartError> {
         conn.log_trace("WIFI plugin query_network_state".to_string())
             .await;
-        // Query only reads the live connection state, it never
-        // triggers a scan.
-        NipartWpaConn::query_network_state().await
+        // Query only reads the shuli live connection state kept by the
+        // apply worker; it never triggers a scan or blocks the worker.
+        let live_ifaces = plugin.wifi_live.lock().map_err(|e| {
+            NipartError::new(
+                ErrorKind::Bug,
+                format!("Failed to lock wifi live state: {e}"),
+            )
+        })?;
+        Ok(NipartWpaConn::network_state_from_live_ifaces(&live_ifaces))
     }
 
     async fn apply_network_state(

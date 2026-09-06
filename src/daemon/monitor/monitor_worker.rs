@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io::Read,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use futures_channel::{
@@ -41,6 +41,37 @@ const DELAY_TICK_SEC_IF_BUSY: u64 = 1;
 // Check delay queue event every day if delay_queue is empty, we cannot use
 // Duration::MAX which will cause overflow on Interval::reset_after()
 const DELAY_TICK_SEC_IF_FREE: u64 = 24 * 60 * 60;
+
+/// Compact last link state kept for deduplication.
+///
+/// Unlike the full netlink event, this survives monitor pause/resume so a
+/// fresh link dump can distinguish a real down->up transition from a
+/// duplicate up event of an interface that never went down.
+#[derive(Debug, Clone)]
+struct LastLinkEvent {
+    is_up: bool,
+    /// SSID for wifi-phy events that carried one, empty otherwise.
+    /// Future: link-local address when DHCPv6 must restart after the
+    /// address changes.
+    #[allow(dead_code)]
+    extra_info: String,
+    time_stamp: SystemTime,
+}
+
+impl LastLinkEvent {
+    fn from_event(event: &InterfaceLinkEvent) -> Self {
+        let extra_info = if event.iface_type == InterfaceType::WifiPhy {
+            event.ssid.clone().unwrap_or_default()
+        } else {
+            String::new()
+        };
+        Self {
+            is_up: event.is_up,
+            extra_info,
+            time_stamp: event.time_stamp,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum NipartMonitorCmd {
@@ -154,7 +185,7 @@ pub(crate) struct NipartMonitorWorker {
     /// Link events for these interfaces are dropped at the monitor worker so
     /// the event worker cannot re-apply the saved config and its routes.
     explicitly_down: HashSet<String>,
-    emited: HashMap<String, InterfaceLinkEvent>,
+    emited: HashMap<String, LastLinkEvent>,
     /// Wifi-phys whose first event has already been sent to the event
     /// worker. Kept across pause/resume so an existing phy is not announced
     /// as new after every apply; removed on interface delete so a later
@@ -351,11 +382,11 @@ impl NipartMonitorWorker {
     fn pause(&mut self) {
         self.netlink_handle = None;
         self.netlink_msg_receiver = None;
-        // The monitor session is over: stale last-event/MAC observations
-        // from a previous session must not suppress the fresh link dump
-        // emitted after the next resume (e.g. the same wifi-phy up event
-        // seen again after a daemon-managed reconnect).
-        self.emited.clear();
+        // The netlink session is over, but the last known link state is kept
+        // on purpose: after the next resume, the link dump must be able to
+        // distinguish a real down->up transition from a duplicate up event.
+        // Without this, every managed interface would be re-applied and its
+        // DHCP client restarted after each unrelated `npt up`.
         self.delay_queue.clear();
         self.iface_mac.clear();
     }
@@ -398,7 +429,10 @@ impl NipartMonitorWorker {
                 if event.is_new_wifi_phy {
                     self.wifi_phys_emited.insert(event.iface_name.to_string());
                 }
-                self.emited.insert(event.iface_name.to_string(), event);
+                self.emited.insert(
+                    event.iface_name.to_string(),
+                    LastLinkEvent::from_event(&event),
+                );
             }
             Ok(())
         } else {
@@ -518,6 +552,18 @@ impl NipartMonitorWorker {
                 "Ignoring link event {event}: interface was explicitly \
                  brought down by `npt down`"
             );
+            // Keep the last known state updated even though the event is
+            // suppressed, otherwise a later `npt up` resume link dump would
+            // still see the pre-down up state and delay/ignore the up event.
+            if event.is_delete {
+                self.emited.remove(&event.iface_name);
+                self.wifi_phys_emited.remove(&event.iface_name);
+            } else {
+                self.emited.insert(
+                    event.iface_name.to_string(),
+                    LastLinkEvent::from_event(&event),
+                );
+            }
             return Ok(());
         }
         if !self.event_is_interested(&event) {

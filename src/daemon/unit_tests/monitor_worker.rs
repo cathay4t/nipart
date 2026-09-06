@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashSet,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use futures_channel::mpsc::unbounded;
@@ -15,8 +15,9 @@ use rtnetlink::{
 };
 
 use super::{
-    NipartMonitorCmd, NipartMonitorWorker, event_is_explicitly_down,
-    format_mac, iface_identity_names, should_ignore_wireless_notification,
+    LastLinkEvent, NipartMonitorCmd, NipartMonitorWorker,
+    event_is_explicitly_down, format_mac, iface_identity_names,
+    should_ignore_wireless_notification,
 };
 use crate::task::TaskWorker;
 
@@ -36,6 +37,14 @@ fn gen_worker() -> NipartMonitorWorker {
         .expect("Failed to create tokio runtime")
         .block_on(NipartMonitorWorker::new(rx))
         .expect("Failed to create monitor worker")
+}
+
+fn gen_last_state(is_up: bool) -> LastLinkEvent {
+    LastLinkEvent {
+        is_up,
+        extra_info: String::new(),
+        time_stamp: SystemTime::now(),
+    }
 }
 
 fn gen_wireless_link_msg(
@@ -178,11 +187,11 @@ fn test_should_pause_and_resume_include_mac_watch() {
 }
 
 #[test]
-fn test_pause_clears_volatile_state_keeps_wifi_phys_emited() {
+fn test_pause_keeps_last_state_and_wifi_phys_emited() {
     let mut worker = gen_worker();
     worker
         .emited
-        .insert("enp1s0".to_string(), gen_event("enp1s0"));
+        .insert("enp1s0".to_string(), gen_last_state(true));
     worker.wifi_phys_emited.insert("wlan0".to_string());
     worker.delay_queue.insert(
         "enp2s0".to_string(),
@@ -197,12 +206,12 @@ fn test_pause_clears_volatile_state_keeps_wifi_phys_emited() {
 
     worker.pause();
 
-    assert!(worker.emited.is_empty());
+    assert!(worker.emited.contains_key("enp1s0"));
+    assert!(worker.emited["enp1s0"].is_up);
     assert!(worker.delay_queue.is_empty());
     assert!(worker.iface_mac.is_empty());
-    // A wifi-phy already announced to the event worker is not forgotten
-    // by a pause/resume cycle: only a real delete (or a fresh monitor
-    // worker) should cause it to be announced as new again.
+    // The last link state and the announced wifi-phys survive pause/resume
+    // so a fresh link dump is not treated as a new down->up transition.
     assert!(worker.wifi_phys_emited.contains("wlan0"));
 }
 
@@ -222,18 +231,80 @@ fn test_notify_marks_new_wifi_phy_only_once() {
         None,
     );
     rt.block_on(worker.notify(event.clone())).unwrap();
-    assert!(worker.emited["wlan0"].is_new_wifi_phy);
     assert!(worker.wifi_phys_emited.contains("wlan0"));
+    assert!(worker.emited["wlan0"].is_up);
+    assert!(worker.emited["wlan0"].extra_info.is_empty());
 
     // A later event for the same phy is a normal link event.
     event.is_up = false;
     rt.block_on(worker.notify(event.clone())).unwrap();
-    assert!(!worker.emited["wlan0"].is_new_wifi_phy);
+    assert!(!worker.emited["wlan0"].is_up);
 
     // A delete forgets the phy so a reappearance is announced again.
     event.is_delete = true;
     rt.block_on(worker.notify(event)).unwrap();
     assert!(!worker.wifi_phys_emited.contains("wlan0"));
+    assert!(!worker.emited.contains_key("wlan0"));
+}
+
+#[test]
+fn test_try_notify_dedups_duplicate_up_events() {
+    let mut worker = gen_worker();
+    let (tx, _rx) = unbounded();
+    worker.msg_to_commander = Some(tx);
+    worker.iface_monitor_list.insert("enp1s0".to_string());
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    // No previous state: emit immediately.
+    let up_event = gen_event("enp1s0");
+    rt.block_on(worker.try_notify(up_event.clone())).unwrap();
+    assert!(worker.emited["enp1s0"].is_up);
+    assert!(!worker.delay_queue.contains_key("enp1s0"));
+
+    // Already up: the duplicate is delayed instead of re-applied.
+    rt.block_on(worker.try_notify(up_event)).unwrap();
+    assert!(worker.delay_queue.contains_key("enp1s0"));
+
+    // Down->up: emit immediately.
+    worker.delay_queue.clear();
+    worker
+        .emited
+        .insert("enp1s0".to_string(), gen_last_state(false));
+    rt.block_on(worker.try_notify(gen_event("enp1s0"))).unwrap();
+    assert!(worker.emited["enp1s0"].is_up);
+    assert!(!worker.delay_queue.contains_key("enp1s0"));
+}
+
+#[test]
+fn test_explicit_down_updates_last_state_for_later_up() {
+    let mut worker = gen_worker();
+    let (tx, _rx) = unbounded();
+    worker.msg_to_commander = Some(tx);
+    worker.iface_monitor_list.insert("enp1s0".to_string());
+    worker.explicitly_down.insert("enp1s0".to_string());
+    worker
+        .emited
+        .insert("enp1s0".to_string(), gen_last_state(true));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    // `npt down` suppresses the down event, but the monitor must remember
+    // that the interface is down so a later `npt up` link dump is treated
+    // as a real down->up transition.
+    let down_event = InterfaceLinkEvent::new(
+        "enp1s0".to_string(),
+        10,
+        InterfaceType::Ethernet,
+        false,
+        None,
+    );
+    rt.block_on(worker.try_notify(down_event)).unwrap();
+    assert!(!worker.emited["enp1s0"].is_up);
+    assert!(!worker.delay_queue.contains_key("enp1s0"));
+
+    worker.explicitly_down.clear();
+    rt.block_on(worker.try_notify(gen_event("enp1s0"))).unwrap();
+    assert!(worker.emited["enp1s0"].is_up);
+    assert!(!worker.delay_queue.contains_key("enp1s0"));
 }
 
 #[test]

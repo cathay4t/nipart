@@ -20,6 +20,39 @@ pub(crate) use self::{
 
 const WIFI_SSID_WAIT_TIMEOUT_SECS: u64 = 60;
 
+/// Whether the apply changed the SSID of a wifi-phy.
+///
+/// The link-up event path synthesizes a wifi-phy from a saved wifi-cfg to
+/// carry the IP config; that synthetic interface intentionally has no
+/// `wifi` section.  Without a desired SSID we cannot claim an SSID change,
+/// otherwise every repeated up event would tear down a healthy DHCP lease.
+pub(crate) fn wifi_ssid_changed(
+    current: Option<&Interface>,
+    desired: Option<&Interface>,
+) -> bool {
+    match (current, desired) {
+        (Some(Interface::WifiPhy(cur)), Some(Interface::WifiPhy(des))) => des
+            .ssid()
+            .is_some_and(|des_ssid| cur.ssid() != Some(des_ssid)),
+        _ => false,
+    }
+}
+
+/// Whether an apply should touch the DHCP client of an interface.
+///
+/// A merge diff can be caused by saved-only fields (e.g. `profile-name`)
+/// that do not require any DHCP change.  Force applies and SSID changes
+/// still restart DHCP even when the IP diff omitted the unchanged DHCP
+/// settings; interfaces going down always need their DHCP client stopped.
+pub(crate) fn should_touch_dhcp(
+    force: bool,
+    ssid_changed: bool,
+    ip_conf_changed: bool,
+    iface_is_up: bool,
+) -> bool {
+    !iface_is_up || force || ssid_changed || ip_conf_changed
+}
+
 /// Wait until the wifi-phy reports the desired SSID.
 ///
 /// Used when an apply switches a wifi-phy to a different SSID: DHCP must
@@ -53,3 +86,7 @@ pub(crate) async fn wait_wifi_ssid(
         ),
     ))
 }
+
+#[cfg(test)]
+#[path = "../unit_tests/dhcp.rs"]
+mod tests;

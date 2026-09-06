@@ -6,7 +6,8 @@ use nipart::{
 };
 
 use super::{
-    NipartDhcpCmd, NipartDhcpReply, NipartDhcpV4Worker, wait_wifi_ssid,
+    NipartDhcpCmd, NipartDhcpReply, NipartDhcpV4Worker, should_touch_dhcp,
+    wait_wifi_ssid, wifi_ssid_changed,
 };
 use crate::{TaskManager, log_debug};
 
@@ -114,6 +115,12 @@ impl NipartDhcpV4Manager {
             }
             apply_iface.base_iface_mut().iface_index =
                 merged_iface.merged.base_iface().iface_index;
+            // `for_apply` is a diff against the current state.  A changed
+            // interface caused only by saved-only fields (e.g.
+            // `profile-name`) must not restart a healthy DHCP client, so
+            // remember whether this diff actually touched IPv4 before the
+            // fallback below adds the merged config.
+            let ipv4_changed = apply_iface.base_iface().ipv4.is_some();
             // `for_apply` is a diff against the current state, so unchanged
             // DHCP settings may be omitted even when the SSID changed and
             // the DHCP client must be restarted. Fall back to the merged
@@ -122,17 +129,19 @@ impl NipartDhcpV4Manager {
                 apply_iface.base_iface_mut().ipv4 =
                     merged_iface.merged.base_iface().ipv4.clone();
             }
+            let ssid_changed = wifi_ssid_changed(
+                merged_iface.current.as_ref(),
+                merged_iface.desired.as_ref(),
+            );
+            if !should_touch_dhcp(
+                merged_state.option.force,
+                ssid_changed,
+                ipv4_changed,
+                apply_iface.is_up(),
+            ) {
+                continue;
+            }
             if apply_iface.is_up() {
-                let ssid_changed = matches!(
-                    (
-                        merged_iface.current.as_ref(),
-                        merged_iface.desired.as_ref(),
-                    ),
-                    (
-                        Some(Interface::WifiPhy(cur)),
-                        Some(Interface::WifiPhy(des)),
-                    ) if cur.ssid() != des.ssid()
-                );
                 if let Some(dhcp_enabled) =
                     apply_iface.base_iface().ipv4.as_ref().map(|i| i.is_auto())
                 {

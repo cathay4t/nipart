@@ -1,46 +1,59 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
+
 use nipart::{
-    BaseInterface, Interface, InterfaceType, Interfaces, NetworkState,
-    NipartError, WifiPhyInterface,
+    BaseInterface, Interface, InterfaceState, InterfaceType, NetworkState,
+    WifiConfig, WifiPhyInterface,
 };
 
-use crate::NipartWpaConn;
+use crate::{NipartWpaConn, apply::WifiLiveState};
 
 impl NipartWpaConn {
-    pub(crate) async fn query_network_state()
-    -> Result<NetworkState, NipartError> {
+    /// Convert the plugin's live shuli connection states into a network
+    /// state carrying only wifi-phys shuli reports as connected.
+    pub(crate) fn network_state_from_live_ifaces(
+        live_ifaces: &HashMap<String, WifiLiveState>,
+    ) -> NetworkState {
         let mut net_state = NetworkState::default();
-
-        let mut filter = nispor::NetStateFilter::minimum();
-        filter.iface = Some(nispor::NetStateIfaceFilter::minimum());
-        if let Ok(np_state) =
-            nispor::NetState::retrieve_with_filter_async(&filter).await
-        {
-            for np_iface in np_state.ifaces.values() {
-                if np_iface.iface_type == nispor::IfaceType::Wifi {
-                    let mut iface = WifiPhyInterface::default();
-                    iface.base = BaseInterface::new(
-                        np_iface.name.to_string(),
-                        InterfaceType::WifiPhy,
-                    );
-                    net_state.ifaces.push(Interface::WifiPhy(Box::new(iface)));
-                }
-            }
+        for (iface_name, live) in live_ifaces {
+            let mut iface = WifiPhyInterface::default();
+            iface.base =
+                BaseInterface::new(iface_name.clone(), InterfaceType::WifiPhy);
+            iface.base.state = InterfaceState::Up;
+            iface.wifi = Some(WifiConfig {
+                ssid: live.ssid.clone(),
+                bssid: live.bssid.clone(),
+                ..Default::default()
+            });
+            net_state.ifaces.push(Interface::WifiPhy(Box::new(iface)));
         }
-
-        Self::fill_wifi_cfg(&mut net_state.ifaces).await?;
-        Ok(net_state)
+        net_state
     }
+}
 
-    pub(crate) async fn fill_wifi_cfg(
-        _ifaces: &mut Interfaces,
-    ) -> Result<(), NipartError> {
-        // Without wpa_supplicant, we no longer have a persistent
-        // record of configured networks.  Connection state is
-        // managed by the single shuli WifiClient owned by the apply
-        // worker.  Full query support will be added with the
-        // connection manager in a future release.
-        Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_network_state_from_live_ifaces() {
+        let mut live_ifaces = HashMap::new();
+        live_ifaces.insert(
+            "wlan0".to_string(),
+            WifiLiveState {
+                ssid: "Home-SSID".to_string(),
+                bssid: None,
+            },
+        );
+
+        let net_state =
+            NipartWpaConn::network_state_from_live_ifaces(&live_ifaces);
+        let ifaces: Vec<_> = net_state.ifaces.iter().collect();
+        assert_eq!(ifaces.len(), 1);
+        let Interface::WifiPhy(phy) = ifaces[0] else {
+            panic!("expected wifi-phy interface");
+        };
+        assert_eq!(phy.ssid(), Some("Home-SSID"));
     }
 }

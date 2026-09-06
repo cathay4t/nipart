@@ -1,5 +1,7 @@
 # TODO
 
+- Restart DHCPv6 service upon link local address changes
+- Support filtering full network query to a single interface
 - OVS bridge
 - MacSec
 - HSR
