@@ -34,7 +34,8 @@ fn has_wifi_ssid_up_request_requires_ssid() {
 #[tokio::test]
 async fn set_control_off_on_toggles_wifi_state() {
     let enabled_flag = Arc::new(AtomicBool::new(true));
-    let mut state = WifiClientState::new(enabled_flag.clone());
+    let wifi_live = Arc::new(Mutex::new(HashMap::new()));
+    let mut state = WifiClientState::new(enabled_flag.clone(), wifi_live);
 
     state.set_control(NipartWifiControl::Off).await.unwrap();
     assert!(!enabled_flag.load(Ordering::Acquire));
@@ -50,13 +51,67 @@ async fn set_control_off_on_toggles_wifi_state() {
 #[tokio::test]
 async fn restart_client_resets_connected_state() {
     let enabled_flag = Arc::new(AtomicBool::new(true));
-    let mut state = WifiClientState::new(enabled_flag);
+    let wifi_live = Arc::new(Mutex::new(HashMap::new()));
+    let mut state = WifiClientState::new(enabled_flag, wifi_live);
     state.connected = true;
 
     state.restart_client().await;
 
     assert!(!state.is_connected());
     assert!(!state.has_client());
+}
+
+#[test]
+fn live_state_tracks_connected_ifaces_per_interface() {
+    let enabled_flag = Arc::new(AtomicBool::new(true));
+    let wifi_live = Arc::new(Mutex::new(HashMap::new()));
+    let mut state = WifiClientState::new(enabled_flag, wifi_live.clone());
+
+    state.set_live_connected(
+        "wlan0",
+        WifiLiveState {
+            ssid: "Home-SSID".to_string(),
+            bssid: None,
+        },
+    );
+    state.set_live_connected(
+        "wlan1",
+        WifiLiveState {
+            ssid: "Office-SSID".to_string(),
+            bssid: None,
+        },
+    );
+    assert!(state.is_connected());
+
+    state.clear_live_iface("wlan0");
+    assert!(state.is_connected());
+    assert_eq!(
+        wifi_live.lock().unwrap().get("wlan1").unwrap().ssid,
+        "Office-SSID"
+    );
+
+    state.clear_live_iface("wlan1");
+    assert!(!state.is_connected());
+    assert!(wifi_live.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn set_control_off_clears_live_state() {
+    let enabled_flag = Arc::new(AtomicBool::new(true));
+    let wifi_live = Arc::new(Mutex::new(HashMap::new()));
+    let mut state = WifiClientState::new(enabled_flag, wifi_live.clone());
+    state.set_live_connected(
+        "wlan0",
+        WifiLiveState {
+            ssid: "Home-SSID".to_string(),
+            bssid: None,
+        },
+    );
+
+    state.set_control(NipartWifiControl::Off).await.unwrap();
+
+    assert!(!state.is_connected());
+    assert!(wifi_live.lock().unwrap().is_empty());
 }
 
 fn wifi_cfg(ssid: &str, password: Option<&str>) -> WifiConfig {

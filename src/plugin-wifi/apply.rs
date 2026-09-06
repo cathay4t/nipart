@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -30,24 +30,57 @@ pub(crate) struct WifiIfaceState {
     desired_networks: Vec<ShuliNetworkConfig>,
 }
 
+/// Live connection state of one wifi-phy, updated by the apply worker and
+/// read by `query_network_state()`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct WifiLiveState {
+    pub(crate) ssid: String,
+    pub(crate) bssid: Option<String>,
+}
+
 /// The plugin-side wifi state: one shuli `WifiClient` for all wifi-phy
 /// interfaces plus the per-interface metadata the apply flow needs.
 pub(crate) struct WifiClientState {
     client: Option<WifiClient>,
     ifaces: HashMap<String, WifiIfaceState>,
+    live_ifaces: Arc<Mutex<HashMap<String, WifiLiveState>>>,
     enabled: bool,
     enabled_flag: Arc<AtomicBool>,
     connected: bool,
 }
 
 impl WifiClientState {
-    pub(crate) fn new(enabled_flag: Arc<AtomicBool>) -> Self {
+    pub(crate) fn new(
+        enabled_flag: Arc<AtomicBool>,
+        live_ifaces: Arc<Mutex<HashMap<String, WifiLiveState>>>,
+    ) -> Self {
         Self {
             client: None,
             ifaces: HashMap::new(),
+            live_ifaces,
             enabled: true,
             enabled_flag,
             connected: false,
+        }
+    }
+
+    fn clear_live_ifaces(&self) {
+        if let Ok(mut live_ifaces) = self.live_ifaces.lock() {
+            live_ifaces.clear();
+        }
+    }
+
+    fn set_live_connected(&mut self, iface_name: &str, live: WifiLiveState) {
+        if let Ok(mut live_ifaces) = self.live_ifaces.lock() {
+            live_ifaces.insert(iface_name.to_string(), live);
+            self.connected = true;
+        }
+    }
+
+    fn clear_live_iface(&mut self, iface_name: &str) {
+        if let Ok(mut live_ifaces) = self.live_ifaces.lock() {
+            live_ifaces.remove(iface_name);
+            self.connected = !live_ifaces.is_empty();
         }
     }
 
@@ -77,6 +110,7 @@ impl WifiClientState {
                 self.enabled_flag.store(false, Ordering::Release);
                 self.connected = false;
                 self.shutdown().await;
+                self.clear_live_ifaces();
                 self.client = None;
             }
             NipartWifiControl::On => {
@@ -121,29 +155,35 @@ impl WifiClientState {
         match result.state {
             WifiState::ConnectedWithoutOffloadRekey
             | WifiState::ConnectedWithOffloadRekey => {
-                self.connected = true;
-                let ssid = client.current_ssid(iface_name).unwrap_or("unknown");
+                let ssid = client
+                    .current_ssid(iface_name)
+                    .unwrap_or("unknown")
+                    .to_string();
                 let bssid = client
                     .current_bssid(iface_name)
-                    .map(|mac| mac_to_string(&mac))
-                    .unwrap_or_else(|| "00:00:00:00:00:00".to_string());
+                    .filter(|mac| *mac != [0; 6])
+                    .map(|mac| mac_to_string(&mac));
                 log::info!(
-                    "WIFI connected on {iface_name}: SSID {ssid}, BSSID \
-                     {bssid}"
+                    "WIFI connected on {iface_name}: SSID {ssid}, BSSID {}",
+                    bssid.as_deref().unwrap_or("00:00:00:00:00:00")
+                );
+                self.set_live_connected(
+                    iface_name,
+                    WifiLiveState { ssid, bssid },
                 );
             }
             WifiState::Failed => {
-                self.connected = false;
+                self.clear_live_iface(iface_name);
                 log::warn!("WIFI {iface_name} connection failed, retrying");
             }
             WifiState::FailedAuthentication => {
-                self.connected = false;
+                self.clear_live_iface(iface_name);
                 log::error!(
                     "WIFI {iface_name} authentication failed, retrying"
                 );
             }
             state => {
-                self.connected = false;
+                self.clear_live_iface(iface_name);
                 log::trace!("WIFI {iface_name} state: {state:?}");
             }
         }
@@ -159,6 +199,8 @@ impl WifiClientState {
         if let Some(client) = self.client.as_mut() {
             client.shutdown().await;
         }
+        self.connected = false;
+        self.clear_live_ifaces();
     }
 
     /// Drop the current shuli client and start a fresh one with the
@@ -171,6 +213,7 @@ impl WifiClientState {
         }
         self.client = None;
         self.connected = false;
+        self.clear_live_ifaces();
         self.start_client().await;
     }
 
@@ -437,13 +480,14 @@ impl WifiClientState {
     }
 
     async fn start_client(&mut self) {
+        self.connected = false;
+        self.clear_live_ifaces();
         if self.ifaces.is_empty() {
             self.client = None;
             return;
         }
         // A fresh client starts disconnected; keep the watchdog on the
         // short timeout until the first connect state is reported.
-        self.connected = false;
         if let Some(client) = self.client.as_mut() {
             client.shutdown().await;
         }

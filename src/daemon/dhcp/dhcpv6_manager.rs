@@ -6,7 +6,8 @@ use nipart::{
 };
 
 use super::{
-    NipartDhcpV6Cmd, NipartDhcpV6Reply, NipartDhcpV6Worker, wait_wifi_ssid,
+    NipartDhcpV6Cmd, NipartDhcpV6Reply, NipartDhcpV6Worker, should_touch_dhcp,
+    wait_wifi_ssid, wifi_ssid_changed,
 };
 use crate::{TaskManager, log_debug};
 
@@ -118,6 +119,9 @@ impl NipartDhcpV6Manager {
             }
             apply_iface.base_iface_mut().iface_index =
                 merged_iface.merged.base_iface().iface_index;
+            // A diff touching only saved-only fields (e.g.
+            // `profile-name`) must not restart a healthy DHCPv6 client.
+            let ipv6_changed = apply_iface.base_iface().ipv6.is_some();
             // `for_apply` is a diff against the current state, so unchanged
             // DHCP settings may be omitted even when the SSID changed and
             // the DHCP client must be restarted. Fall back to the merged
@@ -126,17 +130,19 @@ impl NipartDhcpV6Manager {
                 apply_iface.base_iface_mut().ipv6 =
                     merged_iface.merged.base_iface().ipv6.clone();
             }
+            let ssid_changed = wifi_ssid_changed(
+                merged_iface.current.as_ref(),
+                merged_iface.desired.as_ref(),
+            );
+            if !should_touch_dhcp(
+                merged_state.option.force,
+                ssid_changed,
+                ipv6_changed,
+                apply_iface.is_up(),
+            ) {
+                continue;
+            }
             if apply_iface.is_up() {
-                let ssid_changed = matches!(
-                    (
-                        merged_iface.current.as_ref(),
-                        merged_iface.desired.as_ref(),
-                    ),
-                    (
-                        Some(Interface::WifiPhy(cur)),
-                        Some(Interface::WifiPhy(des)),
-                    ) if cur.ssid() != des.ssid()
-                );
                 if let Some(dhcp_enabled) = apply_iface
                     .base_iface()
                     .ipv6
