@@ -39,10 +39,9 @@ pub(crate) enum NipartConfReply {
 type FromManager =
     (NipartConfCmd, Sender<Result<NipartConfReply, NipartError>>);
 
-const INTERNAL_STATE_DIR: &str = "/etc/nipart/states/internal";
-const APPLIED_STATE_PATH: &str = "/etc/nipart/states/internal/applied.yml";
-const APPLIED_SECRETS_PATH: &str =
-    "/etc/nipart/states/internal/applied.secrets.yml";
+const CONF_DIR: &str = "/etc/nipart/";
+const APPLIED_STATE_PATH: &str = "/etc/nipart/applied.yml";
+const APPLIED_SECRETS_PATH: &str = "/etc/nipart/applied.secrets.yml";
 
 #[derive(Debug)]
 pub(crate) struct NipartConfWorker {
@@ -175,7 +174,7 @@ async fn save_state_to_file(
 }
 
 fn create_instal_state_dir() -> Result<(), NipartError> {
-    let dir_path = std::path::Path::new(INTERNAL_STATE_DIR);
+    let dir_path = std::path::Path::new(CONF_DIR);
     if !dir_path.exists() {
         log::debug!("Creating dir {}", dir_path.display());
         std::fs::create_dir_all(dir_path).map_err(|e| {
