@@ -227,8 +227,8 @@ def test_vrf_legacy_port_alias():
 
 def test_vrf_saved_config_restored_after_daemon_restart(vrf0_over_dummy):
     # The fixture applied the VRF (which also saved its config to
-    # /etc/nipart/states). Restart the daemon so it restores the whole VRF
-    # (table ID + ports) from the saved config.
+    # /etc/nipart/applied.yml). Restart the daemon so it restores the whole
+    # VRF (table ID + ports) from the saved config.
     stop_daemon()
     start_daemon()
 
