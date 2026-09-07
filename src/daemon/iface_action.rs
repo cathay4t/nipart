@@ -3,17 +3,23 @@
 use nipart::{
     ErrorKind, Interface, InterfaceIpv4, InterfaceIpv6, InterfaceState,
     InterfaceType, NetworkState, NipartApplyOption, NipartError,
-    NipartInterface, RouteEntry, RouteRuleEntry, RouteRuleState, RouteState,
+    NipartInterface, NipartQueryOption, RouteEntry, RouteRuleEntry,
+    RouteRuleState, RouteState,
 };
 
 use super::commander::NipartCommander;
+
+const IFACE_ACTION_WAIT_TIMEOUT_SECS: u64 = 60;
+const IFACE_ACTION_WAIT_INTERVAL_MS: u64 = 500;
 
 impl NipartCommander {
     /// Bring an interface or saved profile up.
     ///
     /// The full saved config is applied with `memory-only` so the persisted
-    /// state is untouched, and the `force` apply option restarts DHCP and
-    /// WIFI even when the kernel state already matches the saved config.
+    /// state is untouched. `force` sends the full saved config even when the
+    /// kernel already matches it, while `restart_auto_ip` restarts DHCP.
+    /// An explicit WIFI up rescans so shuli can pick a better BSSID even
+    /// when the requested SSID is already connected.
     pub(crate) async fn up_interface(
         &mut self,
         name: &str,
@@ -42,7 +48,10 @@ impl NipartCommander {
             .await?;
 
         let desired_state = gen_state_for_up(saved_iface, &saved_state);
-        let opt = NipartApplyOption::new().memory_only().force();
+        let opt = NipartApplyOption::new()
+            .memory_only()
+            .force()
+            .restart_auto_ip();
         self.apply_network_state_with_saved_config(
             None,
             desired_state,
@@ -50,6 +59,76 @@ impl NipartCommander {
             None,
         )
         .await
+    }
+
+    /// Wait until an explicit up/down one-time state is reflected in the
+    /// running state.
+    ///
+    /// The memory-only apply already uses verification retry for kernel
+    /// interfaces. A `wifi-cfg` is userspace-only, so its activation is only
+    /// visible when its SSID appears on (or disappears from) a wifi-phy.
+    /// This wait runs outside the daemon transaction lock and uses the
+    /// daemon query so the wifi plugin's live connection state is included.
+    pub(crate) async fn wait_for_iface_action(
+        &mut self,
+        name: &str,
+        is_up: bool,
+    ) -> Result<(), NipartError> {
+        let saved_state = self.conf_manager.query_state().await?;
+        let Some(Interface::WifiCfg(wifi_cfg)) =
+            find_saved_iface(&saved_state, name)
+        else {
+            return Ok(());
+        };
+        let Some(wifi) = wifi_cfg.wifi.as_ref() else {
+            return Ok(());
+        };
+        let ssid = wifi.ssid.as_str();
+        let base_iface = wifi.base_iface.as_deref();
+        let deadline = std::time::Instant::now()
+            + std::time::Duration::from_secs(IFACE_ACTION_WAIT_TIMEOUT_SECS);
+        loop {
+            let cur_state = self
+                .query_network_state(None, NipartQueryOption::running())
+                .await?;
+            let connected =
+                cur_state.ifaces.kernel_ifaces.values().any(|cur_iface| {
+                    let Interface::WifiPhy(wifi_phy) = cur_iface else {
+                        return false;
+                    };
+                    if wifi_phy.ssid() != Some(ssid) {
+                        return false;
+                    }
+                    base_iface.is_none_or(|base_iface| {
+                        base_iface == cur_iface.kernel_iface_name()
+                            || base_iface == cur_iface.name()
+                    })
+                });
+            if connected == is_up {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(
+                IFACE_ACTION_WAIT_INTERVAL_MS,
+            ))
+            .await;
+        }
+        Err(NipartError::new(
+            ErrorKind::Timeout,
+            if is_up {
+                format!(
+                    "Timed out waiting for wifi SSID {ssid} to be collected \
+                     on a wifi-phy"
+                )
+            } else {
+                format!(
+                    "Timed out waiting for wifi SSID {ssid} to be \
+                     disconnected from wifi-phy"
+                )
+            },
+        ))
     }
 
     /// Bring an interface or saved profile down.

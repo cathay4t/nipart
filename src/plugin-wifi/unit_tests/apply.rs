@@ -164,6 +164,77 @@ fn same_saved_networks_ignoring_prefered_only() {
     ));
 }
 
+#[test]
+fn forced_single_ssid_rescans_when_already_on_desired_ssid() {
+    let networks = [network("Home-SSID", None, true)];
+    assert!(should_reconnect_to_networks(
+        Some("Home-SSID"),
+        &networks,
+        true,
+        Some("Home-SSID")
+    ));
+}
+
+#[test]
+fn forced_apply_reconnects_when_ssid_differs_or_disconnected() {
+    let networks = [network("Office-SSID", None, true)];
+    assert!(should_reconnect_to_networks(
+        Some("Home-SSID"),
+        &networks,
+        true,
+        Some("Office-SSID")
+    ));
+    assert!(should_reconnect_to_networks(
+        None,
+        &networks,
+        true,
+        Some("Office-SSID")
+    ));
+    assert!(!should_reconnect_to_networks(
+        Some("Office-SSID"),
+        &networks,
+        false,
+        Some("Office-SSID")
+    ));
+}
+
+#[test]
+fn forced_full_list_keeps_connection_on_any_desired_ssid() {
+    let networks = [network("A", None, false), network("B", None, false)];
+    assert!(!should_reconnect_to_networks(
+        Some("A"),
+        &networks,
+        true,
+        None
+    ));
+    assert!(!should_reconnect_to_networks(
+        Some("B"),
+        &networks,
+        true,
+        None
+    ));
+    assert!(should_reconnect_to_networks(
+        Some("C"),
+        &networks,
+        true,
+        None
+    ));
+}
+
+#[test]
+fn forced_single_ssid_reconnects_when_other_saved_ssid_connected() {
+    let networks = [
+        network("Home-SSID", None, true),
+        network("Office-SSID", None, false),
+    ];
+    assert!(should_reconnect_to_networks(
+        Some("Office-SSID"),
+        &networks,
+        true,
+        Some("Home-SSID")
+    ));
+}
+
 fn network(
     ssid: &str,
     password: Option<&str>,

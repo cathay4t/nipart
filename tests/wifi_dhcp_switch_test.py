@@ -44,7 +44,7 @@ DHCP_SRV_IP4_2 = f"{DHCP_SRV_IP4_PREFIX_2}.1"
 DNSMASQ_CONF_PATH_2 = "/tmp/nipart_test_dnsmasq2.conf"
 DNSMASQ_PID_PATH_2 = "/tmp/nipart_test_dnsmasq2.pid"
 TEST_NET_NS_2 = "wifi-test-2"
-DUMMY_IFACE = "wifi-dhcp-dummy0"
+DUMMY_IFACE = "wifi-dhcp-dum0"
 HOSTAPD_CONF_2 = f"""
 interface={AP2_NIC}
 driver=nl80211
@@ -272,7 +272,9 @@ class TestWifiDhcpSwitch:
             ["sudo", "pkill", "-9", "-f", "nipart_test_dnsmasq.conf"],
             check=False,
         )
-        assert not _dhcp_server_1_running()
+        assert retry_till_true_or_timeout(
+            5, lambda: not _dhcp_server_1_running()
+        )
         nipart.apply(load_yaml(f"""---
                 interfaces:
                   - name: {WIFI_TEST_NIC}

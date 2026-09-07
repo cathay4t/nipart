@@ -10,6 +10,11 @@ use super::commander::NipartCommander;
 use crate::{log_debug, log_error, log_info, log_trace, log_warn};
 
 const RETRY_COUNT: usize = 10;
+// WIFI association can legitimately take longer than a kernel link change:
+// shuli's first host-side scan may miss the AP and retry after its scan
+// backoff (10s on mac80211_hwsim), so give wifi applies a longer window
+// before verification gives up.
+const WIFI_RETRY_COUNT: usize = 60;
 const RETRY_INTERVAL_MS: u64 = 500;
 
 impl NipartCommander {
@@ -286,7 +291,17 @@ impl NipartCommander {
 
         let mut result: Result<(), NipartError> = Ok(());
         if !merged_state.option.no_verify {
-            for cur_retry_count in 1..(RETRY_COUNT + 1) {
+            let retry_count = if merged_state.ifaces.iter().any(|iface| {
+                matches!(
+                    iface.merged.iface_type(),
+                    InterfaceType::WifiPhy | InterfaceType::WifiCfg
+                )
+            }) {
+                WIFI_RETRY_COUNT
+            } else {
+                RETRY_COUNT
+            };
+            for cur_retry_count in 1..(retry_count + 1) {
                 result = self
                     .verify(conn.as_deref_mut(), &merged_state_for_no_daemon)
                     .await;
@@ -294,7 +309,7 @@ impl NipartCommander {
                     log_info(
                         conn.as_deref_mut(),
                         format!(
-                            "Retrying({cur_retry_count}/{RETRY_COUNT}) on \
+                            "Retrying({cur_retry_count}/{retry_count}) on \
                              verification error: {e}"
                         ),
                     )

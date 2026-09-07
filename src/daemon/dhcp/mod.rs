@@ -42,16 +42,17 @@ pub(crate) fn wifi_ssid_changed(
 /// Whether an apply should touch the DHCP client of an interface.
 ///
 /// A merge diff can be caused by saved-only fields (e.g. `profile-name`)
-/// that do not require any DHCP change.  Force applies and SSID changes
-/// still restart DHCP even when the IP diff omitted the unchanged DHCP
-/// settings; interfaces going down always need their DHCP client stopped.
+/// that do not require any DHCP change. `restart_auto_ip` applies and SSID
+/// changes still restart DHCP even when the IP diff omitted the unchanged
+/// DHCP settings; interfaces going down always need their DHCP client
+/// stopped.
 pub(crate) fn should_touch_dhcp(
-    force: bool,
+    restart_auto_ip: bool,
     ssid_changed: bool,
     ip_conf_changed: bool,
     iface_is_up: bool,
 ) -> bool {
-    !iface_is_up || force || ssid_changed || ip_conf_changed
+    !iface_is_up || restart_auto_ip || ssid_changed || ip_conf_changed
 }
 
 /// Wait until the wifi-phy reports the desired SSID.

@@ -82,10 +82,13 @@ pub struct NipartApplyOption {
     /// This option makes no effect in daemon mode(via NipartClient).
     #[serde(default)]
     pub dhcp_in_no_daemon: bool,
+    /// When set to true, DHCP clients are restarted even when the IP
+    /// configuration is already applied. Default to false.
+    #[serde(default)]
+    pub restart_auto_ip: bool,
     /// When set to true, the full desired interface state is sent to the
-    /// backend even when it is identical to the current state. DHCP clients
-    /// and WIFI connections are restarted. Saved state is not modified unless
-    /// `memory_only` is false.
+    /// backend even when it is identical to the current state. Saved state
+    /// is not modified unless `memory_only` is false.
     #[serde(default)]
     pub force: bool,
 }
@@ -107,6 +110,11 @@ impl NipartApplyOption {
 
     pub fn dhcp_in_no_daemon(mut self) -> Self {
         self.memory_only = true;
+        self
+    }
+
+    pub fn restart_auto_ip(mut self) -> Self {
+        self.restart_auto_ip = true;
         self
     }
 

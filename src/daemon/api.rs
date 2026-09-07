@@ -107,13 +107,19 @@ pub(crate) async fn process_api_connection(
                     format!("Client process {peer_pid} acquired lock"),
                 )
                 .await;
-                let result = commander.up_interface(&name).await;
+                let mut result = commander.up_interface(&name).await;
                 log_info(
                     Some(&mut conn),
                     format!("Client process {peer_pid} released lock"),
                 )
                 .await;
                 drop(lock);
+                if result.is_ok()
+                    && let Err(e) =
+                        commander.wait_for_iface_action(&name, true).await
+                {
+                    result = Err(e);
+                }
                 conn.send(result).await?;
             }
             NipartClientCmd::DownInterface(name) => {
@@ -141,13 +147,19 @@ pub(crate) async fn process_api_connection(
                     format!("Client process {peer_pid} acquired lock"),
                 )
                 .await;
-                let result = commander.down_interface(&name).await;
+                let mut result = commander.down_interface(&name).await;
                 log_info(
                     Some(&mut conn),
                     format!("Client process {peer_pid} released lock"),
                 )
                 .await;
                 drop(lock);
+                if result.is_ok()
+                    && let Err(e) =
+                        commander.wait_for_iface_action(&name, false).await
+                {
+                    result = Err(e);
+                }
                 conn.send(result).await?;
             }
             NipartClientCmd::WaitOnline => {
