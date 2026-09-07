@@ -173,10 +173,14 @@ impl NipartCommander {
             .await?;
 
         self.dhcpv4_manager
-            .apply_dhcp_config(conn.as_deref_mut(), &merged_state)
+            .apply_dhcp_config(
+                conn.as_deref_mut(),
+                &merged_state,
+                &mut self.plugin_manager,
+            )
             .await?;
         self.dhcpv6_manager
-            .apply_dhcp_config(conn, &merged_state)
+            .apply_dhcp_config(conn, &merged_state, &mut self.plugin_manager)
             .await?;
 
         Ok(())
@@ -266,10 +270,18 @@ impl NipartCommander {
             .await?;
 
         self.dhcpv4_manager
-            .apply_dhcp_config(conn.as_deref_mut(), merged_state)
+            .apply_dhcp_config(
+                conn.as_deref_mut(),
+                merged_state,
+                &mut self.plugin_manager,
+            )
             .await?;
         self.dhcpv6_manager
-            .apply_dhcp_config(conn.as_deref_mut(), merged_state)
+            .apply_dhcp_config(
+                conn.as_deref_mut(),
+                merged_state,
+                &mut self.plugin_manager,
+            )
             .await?;
 
         let mut result: Result<(), NipartError> = Ok(());

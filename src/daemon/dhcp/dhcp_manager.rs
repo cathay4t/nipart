@@ -9,7 +9,7 @@ use super::{
     NipartDhcpCmd, NipartDhcpReply, NipartDhcpV4Worker, should_touch_dhcp,
     wait_wifi_ssid, wifi_ssid_changed,
 };
-use crate::{TaskManager, log_debug};
+use crate::{TaskManager, log_debug, plugin::NipartPluginManager};
 
 #[derive(Debug, Clone)]
 pub(crate) struct NipartDhcpV4Manager {
@@ -97,6 +97,7 @@ impl NipartDhcpV4Manager {
         &mut self,
         mut conn: Option<&mut NipartIpcConnection>,
         merged_state: &MergedNetworkState,
+        plugin_manager: &mut NipartPluginManager,
     ) -> Result<(), NipartError> {
         for merged_iface in merged_state
             .ifaces
@@ -181,6 +182,7 @@ impl NipartDhcpV4Manager {
                                     wait_wifi_ssid(
                                         apply_iface.kernel_iface_name(),
                                         ssid,
+                                        plugin_manager,
                                     )
                                     .await?;
                                 }
