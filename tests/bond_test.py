@@ -4,7 +4,6 @@ import pytest
 
 import nipart
 
-from .testlib.env import has_kernel_module
 from .testlib.statelib import load_yaml
 from .testlib.statelib import show_only
 from .testlib.statelib import show_saved_only
