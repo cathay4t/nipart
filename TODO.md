@@ -23,3 +23,5 @@
   the daemon still reads an empty SSID after shuli reports connected and
   hostapd completed the handshake.  The same test passes when run alone,
   but fails consistently when the full file runs.
+- `wait-ip: no|any|ipv4|ipv6|ipv4+ipv6` for whether wait IP applied.
+- NmPolicy support as nmstate does
