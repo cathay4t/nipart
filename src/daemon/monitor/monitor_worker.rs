@@ -592,6 +592,18 @@ impl NipartMonitorWorker {
                 // If change from down to up, emit now.
                 self.notify(event).await?;
             } else {
+                // Delay the event to debounce link flapping.  When a real
+                // down is being debounced, record it as the last known
+                // state right away: otherwise a quick reconnect (down -> up
+                // within the debounce window) is treated as a duplicate up
+                // and is dropped, losing saved wifi-cfg routes/IP config
+                // that must be applied on the re-association.
+                if !event.is_up && previous_event.is_up {
+                    self.emited.insert(
+                        event.iface_name.to_string(),
+                        LastLinkEvent::from_event(&event),
+                    );
+                }
                 // delay emit
                 self.delay_notify(event, Duration::from_secs(DOWN_WAIT_SEC));
             }

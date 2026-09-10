@@ -17,6 +17,7 @@ pub(crate) use self::{
     dhcpv6_manager::NipartDhcpV6Manager,
     dhcpv6_worker::{NipartDhcpV6Cmd, NipartDhcpV6Reply, NipartDhcpV6Worker},
 };
+use crate::plugin::NipartPluginManager;
 
 const WIFI_SSID_WAIT_TIMEOUT_SECS: u64 = 60;
 
@@ -61,17 +62,26 @@ pub(crate) fn should_touch_dhcp(
 pub(crate) async fn wait_wifi_ssid(
     iface_name: &str,
     ssid: &str,
+    plugin_manager: &mut NipartPluginManager,
 ) -> Result<(), NipartError> {
     let deadline = std::time::Instant::now()
         + Duration::from_secs(WIFI_SSID_WAIT_TIMEOUT_SECS);
     loop {
-        let state =
+        let mut state =
             NipartNoDaemon::query_network_state(NipartQueryOption::running())
                 .await?;
-        if let Some(iface) = state.ifaces.kernel_ifaces.get(iface_name)
-            && let Interface::WifiPhy(wifi_iface) = iface
-            && wifi_iface.ssid() == Some(ssid)
-        {
+        if wifi_state_has_ssid(&state, iface_name, ssid) || {
+            // mac80211_hwsim and some drivers do not expose the
+            // association SSID through nispor in time, while the wifi
+            // plugin's shuli client already knows it is connected.
+            let plugin_states = plugin_manager
+                .query_network_state(NipartQueryOption::running(), &state)
+                .await?;
+            for plugin_state in plugin_states {
+                state.merge(&plugin_state)?;
+            }
+            wifi_state_has_ssid(&state, iface_name, ssid)
+        } {
             return Ok(());
         }
         if std::time::Instant::now() >= deadline {
@@ -85,6 +95,25 @@ pub(crate) async fn wait_wifi_ssid(
             "Timed out waiting for wifi SSID {ssid} on interface {iface_name}"
         ),
     ))
+}
+
+fn wifi_state_has_ssid(
+    state: &nipart::NetworkState,
+    iface_name: &str,
+    ssid: &str,
+) -> bool {
+    state
+        .ifaces
+        .kernel_ifaces
+        .get(iface_name)
+        .and_then(|iface| {
+            if let Interface::WifiPhy(wifi_iface) = iface {
+                wifi_iface.ssid()
+            } else {
+                None
+            }
+        })
+        == Some(ssid)
 }
 
 #[cfg(test)]

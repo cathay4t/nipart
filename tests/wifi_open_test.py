@@ -80,7 +80,9 @@ def ping_peer():
     reason="Does not have 'mac80211_hwsim' module",
 )
 class TestWifiOpen:
-    def test_wifi_open_iface_static_ip(self, clean_up, wifi_open_env):  # noqa: F811
+    def test_wifi_open_iface_static_ip(
+        self, clean_up, wifi_open_env
+    ):  # noqa: F811
         nipart.apply(load_yaml(f"""---
                 interfaces:
                   - name: {WIFI_TEST_NIC}
@@ -96,7 +98,9 @@ class TestWifiOpen:
                           prefix-length: 24"""))
         assert retry_till_true_or_timeout(10, ping_peer)
 
-    def test_wifi_open_iface_dhcpv4(self, clean_up, wifi_open_env):  # noqa: F811
+    def test_wifi_open_iface_dhcpv4(
+        self, clean_up, wifi_open_env
+    ):  # noqa: F811
         nipart.apply(load_yaml(f"""---
                 interfaces:
                   - name: {WIFI_TEST_NIC}

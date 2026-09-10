@@ -227,7 +227,7 @@ def test_mac_id_kernel_iface_name_rename_keeps_original_alt_name():
     _create_ren_veth_pair()
     try:
         exec_cmd(f"ip link set {REN_VETH} address 02:00:00:00:00:03".split())
-        nipart.apply(load_yaml(f"""---
+        nipart.apply(load_yaml("""---
                 interfaces:
                 - name: port1
                   type: ethernet
@@ -255,7 +255,7 @@ def test_mac_id_kernel_iface_name_no_auto_alt_name_when_defined():
     _create_ren_veth_pair()
     try:
         exec_cmd(f"ip link set {REN_VETH} address 02:00:00:00:00:04".split())
-        nipart.apply(load_yaml(f"""---
+        nipart.apply(load_yaml("""---
                 interfaces:
                 - name: port2
                   type: ethernet
@@ -284,7 +284,7 @@ def test_boot_load_saved_rename_keeps_original_alt_name():
     _create_ren_veth_pair()
     try:
         exec_cmd(f"ip link set {REN_VETH} address 02:00:00:00:00:05".split())
-        nipart.apply(load_yaml(f"""---
+        nipart.apply(load_yaml("""---
                 interfaces:
                 - name: port3
                   type: ethernet

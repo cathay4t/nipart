@@ -276,6 +276,36 @@ fn test_try_notify_dedups_duplicate_up_events() {
 }
 
 #[test]
+fn test_down_then_quick_up_emits_up_event() {
+    let mut worker = gen_worker();
+    let (tx, _rx) = unbounded();
+    worker.msg_to_commander = Some(tx);
+    worker.iface_monitor_list.insert("enp1s0".to_string());
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    rt.block_on(worker.try_notify(gen_event("enp1s0"))).unwrap();
+    assert!(worker.emited["enp1s0"].is_up);
+
+    // A down event is debounced, but must update the last known state so
+    // the reconnect within the debounce window is not dropped as a
+    // duplicate up event.
+    let down_event = InterfaceLinkEvent::new(
+        "enp1s0".to_string(),
+        10,
+        InterfaceType::Ethernet,
+        false,
+        None,
+    );
+    rt.block_on(worker.try_notify(down_event)).unwrap();
+    assert!(!worker.emited["enp1s0"].is_up);
+    assert!(worker.delay_queue.contains_key("enp1s0"));
+
+    rt.block_on(worker.try_notify(gen_event("enp1s0"))).unwrap();
+    assert!(worker.emited["enp1s0"].is_up);
+    assert!(!worker.delay_queue.contains_key("enp1s0"));
+}
+
+#[test]
 fn test_explicit_down_updates_last_state_for_later_up() {
     let mut worker = gen_worker();
     let (tx, _rx) = unbounded();

@@ -26,7 +26,7 @@ fn new_scan_result(
 #[test]
 fn test_wifi_down_is_alias_of_off() {
     let matches = CommandWifi::new_cmd()
-        .try_get_matches_from(["npt", "wifi", "down"])
+        .try_get_matches_from(["wifi", "down"])
         .unwrap();
 
     assert!(matches.subcommand_matches("off").is_some());
@@ -35,7 +35,7 @@ fn test_wifi_down_is_alias_of_off() {
 #[test]
 fn test_wifi_up_is_alias_of_on() {
     let matches = CommandWifi::new_cmd()
-        .try_get_matches_from(["npt", "wifi", "up"])
+        .try_get_matches_from(["wifi", "up"])
         .unwrap();
 
     assert!(matches.subcommand_matches("on").is_some());

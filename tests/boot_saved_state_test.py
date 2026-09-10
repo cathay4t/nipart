@@ -8,7 +8,7 @@ from .testlib.cmdlib import exec_cmd
 from .testlib.retry import retry_till_true_or_timeout
 from .testlib.statelib import show_only
 
-SAVED_STATE_FILE = "/etc/nipart/states/internal/applied.yml"
+SAVED_STATE_FILE = "/etc/nipart/applied.yml"
 TEST_VETH = "veth-saved-mac0"
 TEST_VETH_PEER = "veth-saved-mac1"
 TEST_SAVED_ONLY_NIC = "saved-name-only0"
