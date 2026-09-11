@@ -17,6 +17,10 @@ use super::{api::process_api_connection, commander::NipartCommander};
 
 pub(crate) static DAEMON_IS_ONLINE: SetOnce<()> = SetOnce::const_new();
 const DAEMON_PID_FILE: &str = "/var/run/nipart/nipart.pid";
+/// How often the daemon checks DHCP learned nameservers for the DNS cache
+/// `auto-dns` upstream.
+const DNS_AUTO_REFRESH_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub(crate) enum NipartManagerCmd {
@@ -35,6 +39,8 @@ pub(crate) struct NipartDaemon {
     pid_file: String,
     sigterm: Signal,
     sigint: Signal,
+    dns_auto_timer: tokio::time::Interval,
+    last_auto_dns_servers: Vec<std::net::IpAddr>,
 }
 
 impl Drop for NipartDaemon {
@@ -118,6 +124,8 @@ impl NipartDaemon {
             pid_file: DAEMON_PID_FILE.to_string(),
             sigterm,
             sigint,
+            dns_auto_timer: tokio::time::interval(DNS_AUTO_REFRESH_INTERVAL),
+            last_auto_dns_servers: Vec::new(),
         })
     }
 
@@ -141,11 +149,34 @@ impl NipartDaemon {
                     log::info!("Received SIGINT, shutting down");
                     break;
                 },
+                _ = self.dns_auto_timer.tick() => {
+                    self.refresh_dns_cache_auto_dns().await;
+                }
                 else => break,
             }
         }
         log::info!("Shutting down workers");
         self.commander.shutdown().await;
+    }
+
+    /// Refresh the DNS cache `auto-dns` upstream when the DHCP learned
+    /// nameservers changed.  The DNS cache worker ignores the refresh when
+    /// no cache server is running.
+    async fn refresh_dns_cache_auto_dns(&mut self) {
+        let servers = match self.commander.auto_dns_servers().await {
+            Ok(s) => s,
+            Err(e) => {
+                log::debug!("Failed to query DHCP nameservers: {e}");
+                return;
+            }
+        };
+        if servers == self.last_auto_dns_servers {
+            return;
+        }
+        self.last_auto_dns_servers = servers;
+        if let Err(e) = self.commander.refresh_dns_cache_auto_dns().await {
+            log::debug!("Failed to refresh DNS cache upstreams: {e}");
+        }
     }
 
     async fn handle_api_connection(

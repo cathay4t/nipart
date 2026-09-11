@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
+
 use nipart::{
     BaseInterface, Interface, MergedNetworkState, NetworkState, NipartError,
     NipartInterface, NipartIpcConnection, NipartNoDaemon,
@@ -69,6 +71,20 @@ impl NipartDhcpV4Manager {
             ret.extend(threads.into_keys());
         }
         Ok(ret)
+    }
+
+    /// Nameservers learned from the current DHCPv4 leases, keyed by
+    /// interface name.
+    pub(crate) async fn nameservers(
+        &mut self,
+    ) -> Result<HashMap<String, Vec<String>>, NipartError> {
+        if let NipartDhcpReply::NameserverReply(nameservers) =
+            self.mgr.exec(NipartDhcpCmd::Nameservers).await?
+        {
+            Ok(nameservers)
+        } else {
+            Ok(HashMap::new())
+        }
     }
 
     pub(crate) async fn start_iface_dhcp(

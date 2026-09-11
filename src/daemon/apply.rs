@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use nipart::{
-    Interface, InterfaceType, MergedNetworkState, NetworkState,
-    NipartApplyOption, NipartError, NipartInterface, NipartIpcConnection,
-    NipartNoDaemon,
+    DnsResolver, ErrorKind, Interface, InterfaceType, MergedNetworkState,
+    NetworkState, NipartApplyOption, NipartError, NipartInterface,
+    NipartIpcConnection, NipartNoDaemon,
 };
 
 use super::commander::NipartCommander;
@@ -16,6 +16,13 @@ const RETRY_COUNT: usize = 10;
 // before verification gives up.
 const WIFI_RETRY_COUNT: usize = 60;
 const RETRY_INTERVAL_MS: u64 = 500;
+
+/// DNS resolver state captured before an apply, used by rollback.
+#[derive(Debug, Clone)]
+struct RevertDns {
+    resolver: DnsResolver,
+    dynamic_servers: Vec<String>,
+}
 
 impl NipartCommander {
     pub(crate) async fn apply_network_state(
@@ -60,9 +67,12 @@ impl NipartCommander {
         )
         .await;
 
-        let pre_apply_current_state = self
+        let mut pre_apply_current_state = self
             .query_network_state(conn.as_deref_mut(), Default::default())
             .await?;
+        pre_apply_current_state.dns_resolver =
+            NipartNoDaemon::query_dns_resolver().await?;
+        let revert_dns_resolver = pre_apply_current_state.dns_resolver.clone();
 
         let merged_state = MergedNetworkState::new(
             desired_state,
@@ -75,6 +85,10 @@ impl NipartCommander {
         log::debug!("State to save: {state_to_save}");
 
         let revert_state = merged_state.generate_revert()?;
+        let revert_dns = RevertDns {
+            resolver: revert_dns_resolver,
+            dynamic_servers: merged_state.dns.apply_dynamic_servers(),
+        };
 
         // TODO(Gris Ge): discard auto IPs
 
@@ -104,8 +118,9 @@ impl NipartCommander {
                 format!("Rollback to state before apply {revert_state}"),
             )
             .await;
-            if let Err(e) =
-                self.rollback(conn.as_deref_mut(), revert_state).await
+            if let Err(e) = self
+                .rollback(conn.as_deref_mut(), revert_state, revert_dns)
+                .await
             {
                 log_error(
                     conn.as_deref_mut(),
@@ -156,6 +171,7 @@ impl NipartCommander {
         &mut self,
         mut conn: Option<&mut NipartIpcConnection>,
         revert_state: NetworkState,
+        revert_dns: RevertDns,
     ) -> Result<(), NipartError> {
         let mut opt = NipartApplyOption::default();
         opt.no_verify = true;
@@ -173,6 +189,12 @@ impl NipartCommander {
         let apply_state = merged_state.gen_state_for_apply();
 
         NipartNoDaemon::apply_merged_state(&mut merged_state).await?;
+        apply_dns_resolver(
+            &mut self.dns_manager,
+            &revert_dns.resolver,
+            &revert_dns.dynamic_servers,
+        )
+        .await?;
         self.plugin_manager
             .apply_network_state(&apply_state, &opt)
             .await?;
@@ -245,6 +267,7 @@ impl NipartCommander {
         )
         .await;
         merged_state.verify(&post_apply_current_state)?;
+        verify_dns(merged_state, &post_apply_current_state)?;
         self.try_set_daemon_online(None, Some(&post_apply_current_state))
             .await?;
         Ok(())
@@ -270,6 +293,7 @@ impl NipartCommander {
 
         NipartNoDaemon::apply_merged_state(&mut merged_state_for_no_daemon)
             .await?;
+        self.apply_dns(merged_state).await?;
         self.plugin_manager
             .apply_network_state(&apply_state, &merged_state.option)
             .await?;
@@ -325,4 +349,143 @@ impl NipartCommander {
         }
         result
     }
+
+    /// Apply DNS resolver configuration: `/etc/resolv.conf` and the DNS
+    /// cache daemon task.
+    async fn apply_dns(
+        &mut self,
+        merged_state: &MergedNetworkState,
+    ) -> Result<(), NipartError> {
+        if merged_state.dns.is_unchanged() {
+            // `dns-resolver` not mentioned: preserve both the host
+            // resolver configuration and the running cache.
+            return Ok(());
+        }
+        let auto_dns_servers = self.auto_dns_servers().await?;
+        NipartNoDaemon::apply_dns_resolver_conf(
+            merged_state
+                .dns
+                .cache()
+                .filter(|cache| cache.enabled)
+                .and_then(|cache| cache.bind_addr())
+                .map(|addr| addr.ip()),
+            &merged_state.dns.servers,
+            &merged_state.dns.searches,
+            &merged_state.dns.options,
+            &merged_state.dns.apply_dynamic_servers(),
+        )
+        .await?;
+        self.dns_manager
+            .apply_config(merged_state.dns.cache(), &auto_dns_servers)
+            .await
+    }
+}
+
+/// Apply a previous DNS resolver state during rollback.
+async fn apply_dns_resolver(
+    dns_manager: &mut super::dns::NipartDnsManager,
+    resolver: &DnsResolver,
+    dynamic_servers: &[String],
+) -> Result<(), NipartError> {
+    let config = resolver.config.clone().unwrap_or_default();
+    let servers = config.server.clone().unwrap_or_default();
+    let searches = config.search.clone().unwrap_or_default();
+    let options = config.options.clone().unwrap_or_default();
+    let cache_bind_ip = resolver
+        .cache
+        .as_ref()
+        .filter(|cache| cache.enabled)
+        .and_then(|cache| cache.bind_addr())
+        .map(|addr| addr.ip());
+    NipartNoDaemon::apply_dns_resolver_conf(
+        cache_bind_ip,
+        &servers,
+        &searches,
+        &options,
+        dynamic_servers,
+    )
+    .await?;
+    dns_manager.apply_config(resolver.cache.as_ref(), &[]).await
+}
+
+/// Verify the applied DNS resolver state.
+///
+/// The daemon cannot query a cache server through the plugin path, so it
+/// checks the `/etc/resolv.conf` view: the static servers, search domains,
+/// options and the cache bind address must all be present.
+fn verify_dns(
+    merged_state: &MergedNetworkState,
+    post_apply_state: &NetworkState,
+) -> Result<(), NipartError> {
+    if merged_state.dns.is_unchanged() {
+        return Ok(());
+    }
+    let running = match post_apply_state.dns_resolver.running.as_ref() {
+        Some(running) => running,
+        None => {
+            return Err(NipartError::new(
+                ErrorKind::VerificationError,
+                "DNS resolver running state is not available after apply"
+                    .to_string(),
+            ));
+        }
+    };
+    let servers = running.server.as_deref().unwrap_or_default();
+    let searches = running.search.as_deref().unwrap_or_default();
+    let options = running.options.as_deref().unwrap_or_default();
+
+    for srv in &merged_state.dns.servers {
+        if !servers.contains(srv) {
+            return Err(NipartError::new(
+                ErrorKind::VerificationError,
+                format!(
+                    "DNS server {srv} is not present in /etc/resolv.conf \
+                     after apply"
+                ),
+            ));
+        }
+    }
+    for search in &merged_state.dns.searches {
+        if !searches.contains(search) {
+            return Err(NipartError::new(
+                ErrorKind::VerificationError,
+                format!(
+                    "DNS search domain {search} is not present in \
+                     /etc/resolv.conf after apply"
+                ),
+            ));
+        }
+    }
+    for opt in &merged_state.dns.options {
+        if !options.contains(opt) {
+            return Err(NipartError::new(
+                ErrorKind::VerificationError,
+                format!(
+                    "DNS option {opt} is not present in /etc/resolv.conf \
+                     after apply"
+                ),
+            ));
+        }
+    }
+    if let Some(cache_ip) = merged_state
+        .dns
+        .cache()
+        .filter(|cache| cache.enabled)
+        .and_then(|cache| cache.bind_addr())
+        .map(|addr| addr.ip().to_string())
+    {
+        match servers.first() {
+            Some(first) if first == &cache_ip => (),
+            _ => {
+                return Err(NipartError::new(
+                    ErrorKind::VerificationError,
+                    format!(
+                        "DNS cache bind address {cache_ip} is not the first \
+                         nameserver in /etc/resolv.conf after apply"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
 }

@@ -70,6 +70,7 @@ interfaces:
 * [Linux Bridge](features/bridge.md)
 * [OpenvSwitch Bridge](features/ovs.md)
 * [Wireguard](features/wireguard.md)
+* [DNS](features/dns.md)
 
 ## Installation
 

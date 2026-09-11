@@ -6,6 +6,8 @@ mod commander;
 mod conf;
 mod daemon;
 mod dhcp;
+mod dns;
+mod dns_auto;
 mod event;
 mod iface_action;
 mod lock;

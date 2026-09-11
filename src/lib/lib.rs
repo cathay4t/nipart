@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod client;
+mod dns;
 mod error;
 mod ipc;
 mod logging;
@@ -13,6 +14,10 @@ pub use nipart_derive::{JsonDisplay, JsonDisplayHideSecrets};
 
 pub use self::{
     client::{NipartClient, NipartClientCmd},
+    dns::{
+        DnsClass, DnsDomainName, DnsHeader, DnsNameCompressionMap, DnsPacket,
+        DnsQuestion, DnsResourceRecord, DnsResponseCode, DnsType, DnsUdpClient,
+    },
     error::{ErrorKind, NipartError},
     ipc::{NipartCanIpc, NipartIpcConnection},
     logging::{NipartLogEntry, NipartLogLevel},

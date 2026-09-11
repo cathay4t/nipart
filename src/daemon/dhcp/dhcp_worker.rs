@@ -26,6 +26,9 @@ pub(crate) enum NipartDhcpCmd {
     StartIfaceDhcp(Box<BaseInterface>),
     StopIfaceDhcp(String),
     Query,
+    /// Nameservers learned from the current leases, keyed by interface
+    /// name.  Used as `auto-dns` upstream of the DNS cache.
+    Nameservers,
 }
 
 impl std::fmt::Display for NipartDhcpCmd {
@@ -40,6 +43,9 @@ impl std::fmt::Display for NipartDhcpCmd {
             Self::Query => {
                 write!(f, "query-dhcp")
             }
+            Self::Nameservers => {
+                write!(f, "nameservers-dhcp")
+            }
         }
     }
 }
@@ -48,6 +54,7 @@ impl std::fmt::Display for NipartDhcpCmd {
 pub(crate) enum NipartDhcpReply {
     None,
     QueryReply(HashMap<String, DhcpState>),
+    NameserverReply(HashMap<String, Vec<String>>),
 }
 
 type FromManager =
@@ -103,6 +110,16 @@ impl TaskWorker for NipartDhcpV4Worker {
 
                 Ok(NipartDhcpReply::QueryReply(ret))
             }
+            NipartDhcpCmd::Nameservers => {
+                let mut ret = HashMap::new();
+                for (iface_name, thread) in self.threads.iter() {
+                    let nameservers = thread.get_nameservers()?;
+                    if !nameservers.is_empty() {
+                        ret.insert(iface_name.to_string(), nameservers);
+                    }
+                }
+                Ok(NipartDhcpReply::NameserverReply(ret))
+            }
         }
     }
 }
@@ -110,6 +127,7 @@ impl TaskWorker for NipartDhcpV4Worker {
 #[derive(Debug, Default)]
 struct NipartDhcpShareData {
     state: DhcpState,
+    nameservers: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -195,6 +213,20 @@ impl NipartDhcpV4Thread {
     pub(crate) fn get_state(&self) -> Result<DhcpState, NipartError> {
         match self.share_data.lock() {
             Ok(data) => Ok(data.state.clone()),
+            Err(e) => Err(NipartError::new(
+                ErrorKind::Bug,
+                format!(
+                    "Failed to lock share data of DHCP thread for interface \
+                     {}: {e}",
+                    self.base_iface.name
+                ),
+            )),
+        }
+    }
+
+    pub(crate) fn get_nameservers(&self) -> Result<Vec<String>, NipartError> {
+        match self.share_data.lock() {
+            Ok(data) => Ok(data.nameservers.clone()),
             Err(e) => Err(NipartError::new(
                 ErrorKind::Bug,
                 format!(
@@ -317,8 +349,8 @@ async fn dhcp_thread(
 async fn apply_lease(
     base_iface: &BaseInterface,
     lease: &DhcpV4Lease,
-    // TODO: Support hostname, systemd-resolved, /etc/resolv.conf
-    _share_data: Arc<Mutex<NipartDhcpShareData>>,
+    // TODO: Support hostname, systemd-resolved
+    share_data: Arc<Mutex<NipartDhcpShareData>>,
 ) -> Result<(), NipartError> {
     log::debug!(
         "Applying DHCPv4 lease {}/{} to interface {}({})",
@@ -327,6 +359,26 @@ async fn apply_lease(
         base_iface.name,
         base_iface.iface_type
     );
+
+    // Remember the nameservers of the current lease: the DNS cache uses
+    // them as `auto-dns` upstream.
+    match share_data.lock() {
+        Ok(mut share_data) => {
+            share_data.nameservers = lease
+                .dns_srvs
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(|srv| srv.to_string())
+                .collect();
+        }
+        Err(e) => {
+            log::warn!(
+                "Failed to store DHCPv4 nameservers for interface {}: {e}",
+                base_iface.name
+            );
+        }
+    }
 
     let mut ip_addr =
         InterfaceIpAddr::new(lease.yiaddr.into(), lease.prefix_length());

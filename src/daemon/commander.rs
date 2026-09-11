@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use futures_channel::mpsc::UnboundedSender;
 use nipart::{
-    BaseInterface, Interface, InterfaceIdentifier, InterfaceIpv4,
+    BaseInterface, DnsResolver, Interface, InterfaceIdentifier, InterfaceIpv4,
     InterfaceIpv6, InterfaceState, InterfaceType, NetworkState,
     NipartApplyOption, NipartError, NipartInterface, NipartNoDaemon,
     NipartQueryOption, NipartWifiControl, NipartWifiScanOption, WifiScanResult,
@@ -14,6 +14,7 @@ use super::{
     conf::NipartConfManager,
     daemon::NipartManagerCmd,
     dhcp::{NipartDhcpV4Manager, NipartDhcpV6Manager},
+    dns::NipartDnsManager,
     event::NipartEventManager,
     monitor::NipartMonitorManager,
     plugin::NipartPluginManager,
@@ -39,6 +40,7 @@ const BOOTUP_NIC_CHECK_INTERVAL_MS_QUICK: u64 = 500;
 pub(crate) struct NipartCommander {
     pub(crate) dhcpv4_manager: NipartDhcpV4Manager,
     pub(crate) dhcpv6_manager: NipartDhcpV6Manager,
+    pub(crate) dns_manager: NipartDnsManager,
     pub(crate) monitor_manager: NipartMonitorManager,
     pub(crate) conf_manager: NipartConfManager,
     pub(crate) plugin_manager: NipartPluginManager,
@@ -52,6 +54,7 @@ impl NipartCommander {
         let mut ret = Self {
             dhcpv4_manager: NipartDhcpV4Manager::new().await?,
             dhcpv6_manager: NipartDhcpV6Manager::new().await?,
+            dns_manager: NipartDnsManager::new().await?,
             monitor_manager: NipartMonitorManager::new(sender.clone()).await?,
             conf_manager: NipartConfManager::new().await?,
             plugin_manager: NipartPluginManager::new().await?,
@@ -70,6 +73,7 @@ impl NipartCommander {
         self.monitor_manager.shutdown().await;
         self.dhcpv4_manager.shutdown().await;
         self.dhcpv6_manager.shutdown().await;
+        self.dns_manager.shutdown().await;
         self.conf_manager.shutdown().await;
         self.event_manager.shutdown().await;
     }
@@ -98,6 +102,23 @@ impl NipartCommander {
         // Interfaces with `auto-connect: false` are only activated upon
         // explicit apply action, not at boot.
         remove_manual_activation(&mut saved_state);
+        // The DNS resolver state is not tied to a kernel NIC: the cache
+        // server is a daemon task and `/etc/resolv.conf` is not part of
+        // the kernel state, so both are restored once here.  Removing it
+        // from the pending saved state also lets the interface retry loop
+        // below terminate.
+        let saved_dns_resolver = std::mem::take(&mut saved_state.dns_resolver);
+        if !saved_dns_resolver.is_empty()
+            && let Err(e) =
+                self.restore_saved_dns_resolver(&saved_dns_resolver).await
+        {
+            // Do not abort the boot apply on a DNS failure: the
+            // interfaces still need to be applied and a later `npt
+            // apply` can retry the DNS configuration.
+            log::warn!(
+                "Failed to restore saved DNS resolver configuration: {e}"
+            );
+        }
         if saved_state.is_empty() {
             log::info!("Saved state is empty");
         } else {
@@ -286,6 +307,66 @@ impl NipartCommander {
             }
         }
         Ok(())
+    }
+
+    /// Restore the saved DNS resolver configuration at daemon startup.
+    ///
+    /// Start the DNS cache when the saved configuration enables it and
+    /// rewrite `/etc/resolv.conf` with the saved static configuration.
+    /// Nameservers which nipart never wrote (e.g. learned from
+    /// DHCP/IPv6-RA/VPN) are kept.
+    async fn restore_saved_dns_resolver(
+        &mut self,
+        saved: &DnsResolver,
+    ) -> Result<(), NipartError> {
+        let auto_dns_servers = self.auto_dns_servers().await?;
+        let config = saved.config.clone().unwrap_or_default();
+        let static_servers = config.server.clone().unwrap_or_default();
+        let cache_bind_ip = saved
+            .cache
+            .as_ref()
+            .filter(|cache| cache.enabled)
+            .and_then(|cache| cache.bind_addr())
+            .map(|addr| addr.ip());
+        let cache_bind_str = cache_bind_ip.map(|ip| ip.to_string());
+
+        // The static configuration of the saved state is what nipart
+        // wrote into `/etc/resolv.conf` before; every other nameserver in
+        // the file was learned dynamically or added by another tool and
+        // must be kept.
+        let dynamic_servers: Vec<String> = NipartNoDaemon::query_dns_resolver()
+            .await?
+            .running
+            .and_then(|running| running.server)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|srv| {
+                !static_servers.contains(srv)
+                    && cache_bind_str.as_deref() != Some(srv.as_str())
+            })
+            .collect();
+
+        NipartNoDaemon::apply_dns_resolver_conf(
+            cache_bind_ip,
+            &static_servers,
+            &config.search.clone().unwrap_or_default(),
+            &config.options.clone().unwrap_or_default(),
+            &dynamic_servers,
+        )
+        .await?;
+        log::info!(
+            "Restored saved DNS resolver configuration: {} static \
+             nameserver(s), cache {}",
+            static_servers.len(),
+            if cache_bind_ip.is_some() {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
+        self.dns_manager
+            .apply_config(saved.cache.as_ref(), &auto_dns_servers)
+            .await
     }
 
     pub(crate) async fn wifi_scan(

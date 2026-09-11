@@ -10,6 +10,7 @@ impl MergedNetworkState {
             ifaces: self.ifaces.gen_diff()?,
             routes: self.routes.gen_diff(),
             route_rules: self.route_rules.gen_diff(),
+            dns_resolver: self.dns.gen_diff(),
             wait_online: if self.wait_online == Default::default() {
                 None
             } else {
@@ -32,6 +33,7 @@ impl NetworkState {
             ifaces: self.ifaces.gen_diff(&old.ifaces)?,
             routes: self.routes.gen_diff(&old.routes),
             route_rules: self.route_rules.gen_diff(&old.route_rules),
+            dns_resolver: self.dns_resolver.gen_diff(&old.dns_resolver),
             wait_online: self
                 .wait_online
                 .clone()

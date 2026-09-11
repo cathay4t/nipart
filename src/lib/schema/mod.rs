@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod auto_connect;
+mod dns;
 mod gen_diff;
 mod iface;
 mod iface_identifier;
@@ -31,6 +32,11 @@ pub(crate) use iface_search::IfaceSearch;
 
 pub use self::{
     auto_connect::InterfaceAutoConnect,
+    dns::{
+        DnsCacheConfig, DnsResolver, DnsResolverClient, DnsUpstreamServer,
+        NipartDnsDoh, NipartDnsFallback, NipartDnsUpstreamGroup,
+        doh_url_hostname,
+    },
     iface::Interface,
     iface_identifier::InterfaceIdentifier,
     iface_state::InterfaceState,
@@ -58,8 +64,8 @@ pub use self::{
     link_event::InterfaceLinkEvent,
     link_state::InterfaceLinkState,
     merged::{
-        MergedInterface, MergedInterfaces, MergedNetworkState,
-        MergedRouteRules, MergedRoutes,
+        MergedDnsResolver, MergedInterface, MergedInterfaces,
+        MergedNetworkState, MergedRouteRules, MergedRoutes,
     },
     net_state::NetworkState,
     route::{RouteEntry, RouteState, RouteType, Routes},

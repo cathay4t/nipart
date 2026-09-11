@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    InterfaceType, JsonDisplayHideSecrets, MergedInterfaces, MergedRouteRules,
-    MergedRoutes, NetworkState, NipartApplyOption, NipartError,
-    NipartInterface, NipartWaitOnline,
+    InterfaceType, JsonDisplayHideSecrets, MergedDnsResolver, MergedInterfaces,
+    MergedRouteRules, MergedRoutes, NetworkState, NipartApplyOption,
+    NipartError, NipartInterface, NipartWaitOnline,
 };
 
 #[derive(
@@ -24,6 +24,7 @@ pub struct MergedNetworkState {
     pub ifaces: MergedInterfaces,
     pub routes: MergedRoutes,
     pub route_rules: MergedRouteRules,
+    pub dns: MergedDnsResolver,
     pub wait_online: NipartWaitOnline,
     pub option: NipartApplyOption,
     pub desired: NetworkState,
@@ -37,12 +38,18 @@ impl MergedNetworkState {
         option: NipartApplyOption,
     ) -> Result<Self, NipartError> {
         let desired_clone = desired.clone();
+        desired.validate()?;
 
-        let (saved_ifaces, saved_routes, saved_route_rules) = match saved_config
-        {
-            Some(c) => (Some(c.ifaces), Some(c.routes), Some(c.route_rules)),
-            None => (None, None, None),
-        };
+        let (saved_ifaces, saved_routes, saved_route_rules, saved_dns) =
+            match saved_config {
+                Some(c) => (
+                    Some(c.ifaces),
+                    Some(c.routes),
+                    Some(c.route_rules),
+                    Some(c.dns_resolver),
+                ),
+                None => (None, None, None, None),
+            };
 
         let merged_ifaces = MergedInterfaces::new_with_force(
             desired.ifaces,
@@ -71,12 +78,22 @@ impl MergedNetworkState {
             merged_route_rules.remove_rules_to_ignored_ifaces(&ignored_ifaces);
         }
 
+        // DNS resolver: the current state is not queried from the kernel.
+        // The caller (daemon) injects the `/etc/resolv.conf` derived state
+        // into `current.dns_resolver` before merge.
+        let merged_dns = MergedDnsResolver::new(
+            desired.dns_resolver.clone(),
+            current.dns_resolver.clone(),
+            saved_dns,
+        )?;
+
         Ok(Self {
             version: desired.version,
             description: desired.description.clone(),
             ifaces: merged_ifaces,
             routes: merged_routes,
             route_rules: merged_route_rules,
+            dns: merged_dns,
             wait_online: desired
                 .wait_online
                 .or(current.wait_online)
@@ -88,7 +105,11 @@ impl MergedNetworkState {
 
     pub fn verify(&self, current: &NetworkState) -> Result<(), NipartError> {
         self.ifaces.verify(&current.ifaces)?;
-        self.route_rules.verify(&current.route_rules)
+        self.route_rules.verify(&current.route_rules)?;
+        // DNS resolver verification requires reading /etc/resolv.conf which
+        // is not available from the schema crate; the daemon verifies DNS
+        // separately via `NipartNoDaemon::query_dns_resolver()`.
+        Ok(())
     }
 
     /// Generate a NetworkState with desired and impact changes only.
@@ -97,6 +118,7 @@ impl MergedNetworkState {
             ifaces: self.ifaces.gen_state_for_apply(),
             routes: self.routes.gen_state_for_apply(),
             route_rules: self.route_rules.gen_state_for_apply(),
+            dns_resolver: self.dns.gen_state_for_apply(),
             wait_online: self.desired.wait_online.clone(),
             version: self.version,
             description: self.description.clone(),
@@ -110,6 +132,7 @@ impl MergedNetworkState {
             ifaces: self.ifaces.gen_state_for_save(),
             routes: self.routes.gen_state_for_save(),
             route_rules: self.route_rules.gen_state_for_save(),
+            dns_resolver: self.dns.gen_state_for_save(),
             wait_online: self.desired.wait_online.clone(),
             version: self.version,
             description: self.description.clone(),
@@ -180,6 +203,7 @@ impl NetworkState {
             .or_else(|| self.description.clone());
         self.routes = self.routes.merge(&new_state.routes)?;
         self.route_rules = self.route_rules.merge(&new_state.route_rules)?;
+        self.dns_resolver.merge(&new_state.dns_resolver)?;
         self.ifaces.merge(&new_state.ifaces)?;
         self.wait_online =
             new_state.wait_online.clone().or(self.wait_online.clone());

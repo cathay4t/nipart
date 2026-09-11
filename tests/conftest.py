@@ -88,11 +88,15 @@ def _wait_daemon_ready():
 
 
 def start_daemon():
-    log_f = open(DAEMON_LOG, "a")
+    # Detach the daemon from pytest's stdio: a restarted daemon that
+    # inherits pytest's capture streams dies of SIGPIPE when pytest
+    # closes them at the end of the session (the socket would then
+    # disappear and later tests could no longer connect).
     subprocess.Popen(
         [DAEMON_BIN_PATH],
-        stdout=subprocess.DEVNULL,
-        stderr=log_f,
+        stdout=open(DAEMON_LOG, "a"),
+        stderr=open(DAEMON_LOG, "a"),
+        start_new_session=True,
     )
     _wait_daemon_ready()
 

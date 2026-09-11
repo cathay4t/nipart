@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CUR_SCHEMA_VERSION, ErrorKind, Interfaces, JsonDisplayHideSecrets,
-    NipartError, NipartWaitOnline, RouteRules, Routes,
+    CUR_SCHEMA_VERSION, DnsResolver, ErrorKind, Interfaces,
+    JsonDisplayHideSecrets, NipartError, NipartWaitOnline, RouteRules, Routes,
 };
 
 #[derive(
@@ -38,6 +38,13 @@ pub struct NetworkState {
         skip_serializing_if = "RouteRules::is_empty"
     )]
     pub route_rules: RouteRules,
+    /// DNS resolver configuration
+    #[serde(
+        default,
+        rename = "dns-resolver",
+        skip_serializing_if = "DnsResolver::is_empty"
+    )]
+    pub dns_resolver: DnsResolver,
     /// Network interfaces
     #[serde(default, rename = "interfaces")]
     pub ifaces: Interfaces,
@@ -52,6 +59,7 @@ impl Default for NetworkState {
             ifaces: Default::default(),
             routes: Default::default(),
             route_rules: Default::default(),
+            dns_resolver: Default::default(),
         }
     }
 }
@@ -68,6 +76,11 @@ impl NetworkState {
         self.ifaces.hide_secrets();
     }
 
+    /// Validate schema level constraints of the state.
+    pub(crate) fn validate(&self) -> Result<(), NipartError> {
+        self.dns_resolver.validate()
+    }
+
     pub fn extract_secrets(&mut self) -> Result<Self, NipartError> {
         let old = self.clone();
         self.ifaces.hide_secrets();
@@ -81,7 +94,8 @@ impl NetworkState {
         } || (self.ifaces.is_empty()
             && self.routes.is_empty()
             && self.route_rules.is_empty()
-            && self.wait_online.is_none())
+            && self.wait_online.is_none()
+            && self.dns_resolver.is_empty())
     }
 
     pub fn new() -> Self {

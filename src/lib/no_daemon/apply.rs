@@ -5,8 +5,8 @@ use super::{
     route_rule::apply_route_rules,
 };
 use crate::{
-    InterfaceType, MergedNetworkState, NetworkState, NipartApplyOption,
-    NipartError, NipartInterface, NipartNoDaemon,
+    ErrorKind, InterfaceType, MergedNetworkState, NetworkState,
+    NipartApplyOption, NipartError, NipartInterface, NipartNoDaemon,
 };
 
 const RETRY_COUNT_COMMON: usize = 10;
@@ -45,6 +45,7 @@ impl NipartNoDaemon {
         //  * controller and IP setting for `wifi-cfg` interface
 
         Self::apply_merged_state(&mut merged_state).await?;
+        Self::apply_dns_resolver(&merged_state).await?;
         if option.dhcp_in_no_daemon {
             Self::run_dhcp_once(&merged_state.ifaces).await?;
         }
@@ -62,6 +63,7 @@ impl NipartNoDaemon {
                 if cur_retry_count == max_retry_count / 2 {
                     log::info!("Apply the desired state again");
                     Self::apply_merged_state(&mut merged_state).await?;
+                    Self::apply_dns_resolver(&merged_state).await?;
                     if option.dhcp_in_no_daemon {
                         Self::run_dhcp_once(&merged_state.ifaces).await?;
                     }
@@ -95,6 +97,42 @@ impl NipartNoDaemon {
         apply_routes(&merged_state.routes).await?;
         apply_route_rules(&merged_state.route_rules).await?;
         Ok(())
+    }
+
+    /// Apply the standard DNS resolver configuration in no-daemon mode.
+    ///
+    /// The DNS cache is a daemon task: in no-daemon mode an enabled cache
+    /// is rejected instead of silently left running without supervision.
+    pub async fn apply_dns_resolver(
+        merged_state: &MergedNetworkState,
+    ) -> Result<(), NipartError> {
+        if merged_state.dns.is_unchanged() {
+            return Ok(());
+        }
+        if let Some(cache) = merged_state.dns.cache()
+            && cache.enabled
+        {
+            return Err(NipartError::new(
+                ErrorKind::NoSupport,
+                "DNS cache requires the nipart daemon; it is not supported in \
+                 no-daemon mode"
+                    .to_string(),
+            ));
+        }
+        let cache_bind_ip = merged_state
+            .dns
+            .cache()
+            .filter(|cache| cache.enabled)
+            .and_then(|cache| cache.bind_addr())
+            .map(|addr| addr.ip());
+        Self::apply_dns_resolver_conf(
+            cache_bind_ip,
+            &merged_state.dns.servers,
+            &merged_state.dns.searches,
+            &merged_state.dns.options,
+            &merged_state.dns.apply_dynamic_servers(),
+        )
+        .await
     }
 }
 

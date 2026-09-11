@@ -4,6 +4,7 @@ mod absent;
 mod alt_name;
 mod auto_connect;
 mod deserializer;
+mod dns;
 mod iface;
 mod iface_type;
 mod inter_ifaces;
