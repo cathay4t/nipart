@@ -18,3 +18,4 @@
 * [OpenvSwitch 网桥](features/ovs.md)
 * [Wireguard](features/wireguard.md)
 * [DNS](features/dns.md)
+* [插件设计](features/plugin_design.md)
