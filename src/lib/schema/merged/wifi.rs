@@ -159,9 +159,15 @@ impl MergedInterfaces {
                         .contains(merged_iface.merged.kernel_iface_name())
             })
         {
-            merged_iface.mark_as_changed();
-            if let Some(iface) = merged_iface.for_apply.as_mut() {
-                iface.base_iface_mut().state = InterfaceState::Up;
+            // The wifi-cfg may already have expanded its IP/DHCP config onto
+            // this phy (see `expand_wifi_cfg_to_connected_phy()`); that
+            // `for_apply` must not be replaced by a name/type-only up
+            // marker, or the IP change is silently dropped.
+            if merged_iface.for_apply.is_none() {
+                merged_iface.mark_as_changed();
+                if let Some(iface) = merged_iface.for_apply.as_mut() {
+                    iface.base_iface_mut().state = InterfaceState::Up;
+                }
             }
         }
     }

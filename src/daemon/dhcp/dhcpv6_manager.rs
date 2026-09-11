@@ -136,7 +136,7 @@ impl NipartDhcpV6Manager {
                 merged_iface.desired.as_ref(),
             );
             if !should_touch_dhcp(
-                merged_state.option.force,
+                merged_state.option.restart_auto_ip,
                 ssid_changed,
                 ipv6_changed,
                 apply_iface.is_up(),
@@ -151,7 +151,7 @@ impl NipartDhcpV6Manager {
                     .map(|i| i.dhcp == Some(true))
                 {
                     if dhcp_enabled {
-                        if merged_state.option.force || ssid_changed {
+                        if merged_state.option.restart_auto_ip || ssid_changed {
                             log_debug(
                                 conn.as_deref_mut(),
                                 format!(

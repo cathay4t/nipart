@@ -9,7 +9,13 @@ from .schema.state_option import NipartApplyOption
 _LOG = logging.getLogger(__name__)
 
 
-def apply(desired_state, *, verify_change=True, memory_only=False):
+def apply(
+    desired_state,
+    *,
+    verify_change=True,
+    memory_only=False,
+    restart_auto_ip=False,
+):
     try:
         cli = NipartClient()
     except OSError as e:
@@ -18,6 +24,8 @@ def apply(desired_state, *, verify_change=True, memory_only=False):
             return
         raise
     opt = NipartApplyOption(
-        verify_change=verify_change, memory_only=memory_only
+        verify_change=verify_change,
+        memory_only=memory_only,
+        restart_auto_ip=restart_auto_ip,
     )
     cli.apply_network_state(desired_state, opt)

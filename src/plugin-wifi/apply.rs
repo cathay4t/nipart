@@ -441,9 +441,34 @@ impl WifiClientState {
 
         // Update the existing client in place when no interface was
         // added, removed, or recreated.
+        let preferred_ssids: HashMap<String, Option<String>> = desired
+            .iter()
+            .filter(|(_, wifi_cfgs)| force && wifi_cfgs.len() == 1)
+            .map(|(iface_name, wifi_cfgs)| {
+                (iface_name.clone(), Some(wifi_cfgs[0].ssid.clone()))
+            })
+            .collect();
+        let force_reconnects: HashMap<String, bool> = pending_networks
+            .iter()
+            .map(|(iface_name, networks)| {
+                let live_ssid = self.live_ssid(iface_name);
+                let preferred_ssid = preferred_ssids
+                    .get(iface_name)
+                    .and_then(|ssid| ssid.as_deref());
+                (
+                    iface_name.clone(),
+                    should_reconnect_to_networks(
+                        live_ssid.as_deref(),
+                        networks,
+                        force,
+                        preferred_ssid,
+                    ),
+                )
+            })
+            .collect();
         if let Some(client) = self.client.as_mut() {
             for (iface_name, networks) in pending_networks {
-                if force && !networks.is_empty() {
+                if force_reconnects.get(&iface_name).copied().unwrap_or(false) {
                     log::info!(
                         "Restarting WIFI on {iface_name} to force connection"
                     );
@@ -477,6 +502,14 @@ impl WifiClientState {
         }
 
         Ok(())
+    }
+
+    fn live_ssid(&self, iface_name: &str) -> Option<String> {
+        if let Ok(live_ifaces) = self.live_ifaces.lock() {
+            live_ifaces.get(iface_name).map(|live| live.ssid.clone())
+        } else {
+            None
+        }
     }
 
     async fn start_client(&mut self) {
@@ -583,6 +616,33 @@ fn same_saved_networks_ignoring_prefered(
             des.prefered = false;
             cur == des
         })
+}
+
+/// Whether a forced apply must restart shuli's scan selection by clearing
+/// and re-adding the network list.
+///
+/// A forced single-SSID request (e.g. `npt up <SSID>`) always restarts
+/// scan selection so shuli re-scans and can pick a better BSSID, even when
+/// the current SSID is already the requested one.  Full-list and unrelated
+/// forced applies keep an existing connection when the phy is already on
+/// one of the desired networks: `update_networks()` refreshes the list
+/// without dropping it.
+fn should_reconnect_to_networks(
+    live_ssid: Option<&str>,
+    networks: &[ShuliNetworkConfig],
+    force: bool,
+    preferred_ssid: Option<&str>,
+) -> bool {
+    if !force || networks.is_empty() {
+        return false;
+    }
+    if preferred_ssid.is_some() {
+        // Deliberately ignore `live_ssid` here: an explicit up of one SSID
+        // must rescan even when it is already the connected SSID.
+        return true;
+    }
+    !live_ssid
+        .is_some_and(|ssid| networks.iter().any(|network| network.ssid == ssid))
 }
 
 fn build_shuli_network(wifi_cfg: &WifiConfig) -> ShuliNetworkConfig {

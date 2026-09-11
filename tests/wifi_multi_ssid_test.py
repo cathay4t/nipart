@@ -228,18 +228,16 @@ class TestWifiMultiSsid:
         assert wait_for_ssid(TEST_WIFI_SSID) or wait_for_ssid(TEST_WIFI_SSID_2)
         connected = connected_ssid()
         assert connected in (TEST_WIFI_SSID, TEST_WIFI_SSID_2)
-        other = (
-            TEST_WIFI_SSID_2 if connected == TEST_WIFI_SSID else TEST_WIFI_SSID
-        )
 
         rc, out, err = exec_cmd([CLI_PATH, "down", connected], check=False)
         assert rc == 0, f"npt down failed:\n{out}\n{err}"
-        assert wait_for_ssid(
-            other
-        ), f"expected wifi to move from {connected} to {other}"
+        assert connected_ssid() != connected, (
+            f"expected wifi to leave {connected} before `npt down` returned"
+        )
 
         rc, out, err = exec_cmd([CLI_PATH, "up", connected], check=False)
         assert rc == 0, f"npt up failed:\n{out}\n{err}"
-        assert wait_for_ssid(
-            connected
-        ), f"expected wifi to reconnect to {connected}"
+        assert connected_ssid() == connected, (
+            f"expected wifi to reconnect to {connected} before `npt up` "
+            "returned"
+        )

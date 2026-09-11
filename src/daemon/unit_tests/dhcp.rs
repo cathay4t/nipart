@@ -76,7 +76,7 @@ fn test_saved_only_diff_does_not_touch_running_dhcp() {
 }
 
 #[test]
-fn test_dhcp_touched_when_force_ssid_or_ip_changed() {
+fn test_dhcp_touched_when_restart_auto_ip_ssid_or_ip_changed() {
     assert!(should_touch_dhcp(true, false, false, true));
     assert!(should_touch_dhcp(false, true, false, true));
     assert!(should_touch_dhcp(false, false, true, true));

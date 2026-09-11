@@ -45,11 +45,13 @@ class NipartApplyOption:
         version=LATEST_SCHEMA_VERSION,
         verify_change=True,
         memory_only=False,
+        restart_auto_ip=False,
         force=False,
     ):
         self.version = version
         self.no_verify = not verify_change
         self.memory_only = memory_only
+        self.restart_auto_ip = restart_auto_ip
         self.force = force
 
     def to_dict(self):
@@ -57,5 +59,6 @@ class NipartApplyOption:
             "version": self.version,
             "no-verify": self.no_verify,
             "memory-only": self.memory_only,
+            "restart-auto-ip": self.restart_auto_ip,
             "force": self.force,
         }
