@@ -11,6 +11,7 @@ rust-version.workspace = true
 [dependencies]
 nipart = { path = "../lib" }
 serde = { workspace = true }
+data-encoding = { workspace = true }
 env_logger = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }
@@ -18,6 +19,12 @@ rmsd_yaml = { workspace = true }
 tokio = { workspace = true }
 futures-util = { workspace = true }
 futures-channel = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-rustls = { workspace = true }
+hyper-util = { workspace = true }
+tower-service = { workspace = true }
+rand = { workspace = true }
 uuid = { workspace = true }
 mozim = { workspace = true }
 rtnetlink = { workspace = true }

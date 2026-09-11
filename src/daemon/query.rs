@@ -46,6 +46,7 @@ impl NipartCommander {
             &mut saved_state,
             &mut HashSet::new(),
         );
+        fill_saved_dns_resolver(&mut net_state, &saved_state);
         self.fill_dhcp_states(&mut net_state).await?;
         if !opt.include_secrets {
             net_state.hide_secrets();
@@ -121,6 +122,7 @@ impl NipartCommander {
         );
         append_saved_only_route_rules(&mut net_state, &saved_state);
 
+        fill_saved_dns_resolver(&mut net_state, &saved_state);
         self.fill_dhcp_states(&mut net_state).await?;
         if !opt.include_secrets {
             net_state.hide_secrets();
@@ -143,6 +145,9 @@ impl NipartCommander {
         for plugins_net_state in plugins_net_states {
             net_state.merge(&plugins_net_state)?;
         }
+        // The DNS resolver state is not a kernel property: it lives in
+        // `/etc/resolv.conf`.
+        net_state.dns_resolver = NipartNoDaemon::query_dns_resolver().await?;
         Ok(net_state)
     }
 
@@ -154,6 +159,19 @@ impl NipartCommander {
         self.dhcpv6_manager.fill_dhcp_states(net_state).await?;
         Ok(())
     }
+}
+
+/// Fill the static part of the DNS resolver state from the saved state.
+///
+/// The `running` section is queried from `/etc/resolv.conf`, the static
+/// `config` section and the `cache` section are only known by the daemon
+/// state file.
+fn fill_saved_dns_resolver(
+    net_state: &mut NetworkState,
+    saved_state: &NetworkState,
+) {
+    net_state.dns_resolver.config = saved_state.dns_resolver.config.clone();
+    net_state.dns_resolver.cache = saved_state.dns_resolver.cache.clone();
 }
 
 /// Merge saved config properties which cannot be queried from kernel state

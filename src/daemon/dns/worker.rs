@@ -1,0 +1,162 @@
+// SPDX-License-Identifier: Apache-2.0
+
+use std::net::IpAddr;
+
+use futures_channel::{mpsc::UnboundedReceiver, oneshot::Sender};
+use nipart::NipartError;
+use tokio::{sync::oneshot as tokio_oneshot, task::JoinHandle};
+
+use super::{DnsCacheServer, NipartDnsServerConfig};
+use crate::TaskWorker;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NipartDnsCmd {
+    Start(NipartDnsServerConfig),
+    RefreshAutoDns(Vec<IpAddr>),
+    Stop,
+    /// Query whether the cache server is running.  Kept for status
+    /// reporting of future `npt` DNS commands.
+    #[allow(dead_code)]
+    Query,
+}
+
+impl std::fmt::Display for NipartDnsCmd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Start(config) => write!(f, "start:{}", config.bind),
+            Self::RefreshAutoDns(servers) => {
+                write!(f, "refresh-auto-dns:{}", servers.len())
+            }
+            Self::Stop => write!(f, "stop"),
+            Self::Query => write!(f, "query"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NipartDnsReply {
+    None,
+    Running(bool),
+}
+
+type FromManager = (NipartDnsCmd, Sender<Result<NipartDnsReply, NipartError>>);
+
+/// A running DNS cache server task.
+#[derive(Debug)]
+struct RunningDnsServer {
+    config: NipartDnsServerConfig,
+    shutdown: tokio_oneshot::Sender<()>,
+    handle: JoinHandle<()>,
+}
+
+#[derive(Debug)]
+pub(crate) struct NipartDnsWorker {
+    running: Option<RunningDnsServer>,
+    receiver: UnboundedReceiver<FromManager>,
+}
+
+impl TaskWorker for NipartDnsWorker {
+    type Cmd = NipartDnsCmd;
+    type Reply = NipartDnsReply;
+
+    async fn new(
+        receiver: UnboundedReceiver<(
+            Self::Cmd,
+            Sender<Result<Self::Reply, NipartError>>,
+        )>,
+    ) -> Result<Self, NipartError> {
+        Ok(Self {
+            running: None,
+            receiver,
+        })
+    }
+
+    fn receiver(&mut self) -> &mut UnboundedReceiver<FromManager> {
+        &mut self.receiver
+    }
+
+    async fn process_cmd(
+        &mut self,
+        cmd: NipartDnsCmd,
+    ) -> Result<NipartDnsReply, NipartError> {
+        match cmd {
+            NipartDnsCmd::Start(config) => {
+                self.stop_server().await;
+                self.start_server(config).await?;
+                Ok(NipartDnsReply::None)
+            }
+            NipartDnsCmd::RefreshAutoDns(servers) => {
+                if let Some(running) = self.running.as_mut()
+                    && running.config.auto_dns_servers != servers
+                {
+                    let mut config = running.config.clone();
+                    config.set_auto_dns_servers(&servers);
+                    // Auto-DNS changes only affect upstream selection;
+                    // restarting the server is the simplest way to apply
+                    // them without a shared mutable config.
+                    self.stop_server().await;
+                    self.start_server(config).await?;
+                }
+                Ok(NipartDnsReply::None)
+            }
+            NipartDnsCmd::Stop => {
+                self.stop_server().await;
+                Ok(NipartDnsReply::None)
+            }
+            NipartDnsCmd::Query => {
+                Ok(NipartDnsReply::Running(self.running.is_some()))
+            }
+        }
+    }
+}
+
+impl NipartDnsWorker {
+    async fn start_server(
+        &mut self,
+        config: NipartDnsServerConfig,
+    ) -> Result<(), NipartError> {
+        let server = DnsCacheServer::new(config.clone()).await?;
+        let (shutdown, shutdown_rx) = tokio_oneshot::channel::<()>();
+        let bind = config.bind;
+        let handle = tokio::spawn(async move {
+            if let Err(e) = server
+                .run_with_shutdown(async move {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+            {
+                log::error!("DNS cache server on {bind} failed: {e}");
+            }
+        });
+        self.running = Some(RunningDnsServer {
+            config,
+            shutdown,
+            handle,
+        });
+        log::info!("DNS cache server started on {bind}");
+        Ok(())
+    }
+
+    async fn stop_server(&mut self) {
+        if let Some(running) = self.running.take() {
+            let bind = running.config.bind;
+            let _ = running.shutdown.send(());
+            if let Err(e) = running.handle.await {
+                log::error!("DNS cache server task on {bind} panicked: {e}");
+            } else {
+                log::info!("DNS cache server stopped on {bind}");
+            }
+        }
+    }
+}
+
+impl Drop for NipartDnsWorker {
+    fn drop(&mut self) {
+        if let Some(running) = self.running.take() {
+            // The daemon is exiting: signal the server task and let the
+            // runtime drop it.  We cannot await in Drop.
+            let _ = running.shutdown.send(());
+            running.handle.abort();
+        }
+    }
+}

@@ -2,6 +2,7 @@
 
 mod base_iface;
 mod controller;
+mod dns;
 mod ethernet;
 mod iface;
 mod inter_iface;
@@ -12,7 +13,7 @@ mod route_rule;
 mod wifi;
 
 pub use self::{
-    iface::MergedInterface, inter_iface::MergedInterfaces,
-    net_state::MergedNetworkState, route::MergedRoutes,
-    route_rule::MergedRouteRules,
+    dns::MergedDnsResolver, iface::MergedInterface,
+    inter_iface::MergedInterfaces, net_state::MergedNetworkState,
+    route::MergedRoutes, route_rule::MergedRouteRules,
 };

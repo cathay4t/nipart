@@ -11,6 +11,7 @@ mod ip;
 mod linux_bridge;
 mod linux_bridge_vlan;
 mod query;
+mod resolv_conf;
 mod route;
 mod route_rule;
 mod vlan;

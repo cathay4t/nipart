@@ -129,6 +129,7 @@ impl NipartNoDaemon {
 
         net_state.routes = get_routes(&net_state.ifaces).await;
         net_state.route_rules = get_route_rules(&np_state.rules);
+        net_state.dns_resolver = super::resolv_conf::query_running_dns()?;
 
         net_state
             .routes
