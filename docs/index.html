@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nipart Documentation</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f7f9;
+        --fg: #1b1f24;
+        --muted: #5c6670;
+        --card: #ffffff;
+        --border: #d8dee4;
+        --accent: #2f6feb;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d1117;
+          --fg: #e6edf3;
+          --muted: #9198a1;
+          --card: #161b22;
+          --border: #30363d;
+          --accent: #58a6ff;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+          "Noto Sans CJK SC", Helvetica, Arial, sans-serif;
+      }
+
+      main {
+        width: min(760px, 92vw);
+        padding: 3rem 0;
+        text-align: center;
+      }
+
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: clamp(2rem, 6vw, 3rem);
+      }
+
+      .tagline {
+        margin: 0 0 2.5rem;
+        color: var(--muted);
+        font-size: 1.1rem;
+      }
+
+      .languages {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+      }
+
+      .card {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        padding: 1.75rem 1.5rem;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--card);
+        color: inherit;
+        text-decoration: none;
+        transition:
+          border-color 0.15s ease,
+          transform 0.15s ease;
+      }
+
+      .card:hover,
+      .card:focus-visible {
+        border-color: var(--accent);
+        transform: translateY(-2px);
+      }
+
+      .language {
+        font-size: 1.35rem;
+        font-weight: 600;
+      }
+
+      .description {
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+
+      footer {
+        margin-top: 2.5rem;
+        font-size: 0.9rem;
+      }
+
+      footer a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      footer a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Nipart</h1>
+      <p class="tagline">Declarative Linux network management</p>
+      <nav class="languages">
+        <a class="card" href="english/">
+          <span class="language">English</span>
+          <span class="description">Nipart documentation</span>
+        </a>
+        <a class="card" href="chinese/" lang="zh">
+          <span class="language">中文</span>
+          <span class="description">Nipart 文档</span>
+        </a>
+      </nav>
+      <footer>
+        <a href="https://github.com/cathay4t/nipart">GitHub repository</a>
+      </footer>
+    </main>
+  </body>
+</html>

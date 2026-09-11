@@ -18,3 +18,4 @@
 * [OpenvSwitch Bridge](features/ovs.md)
 * [Wireguard](features/wireguard.md)
 * [DNS](features/dns.md)
+* [Plugin Design](features/plugin_design.md)
