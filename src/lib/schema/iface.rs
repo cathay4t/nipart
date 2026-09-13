@@ -567,7 +567,14 @@ impl NipartInterface for Interface {
 }
 
 impl From<BaseInterface> for Interface {
-    fn from(base_iface: BaseInterface) -> Self {
+    fn from(mut base_iface: BaseInterface) -> Self {
+        // The kernel and nispor report veth NICs as `Veth` while nipart
+        // treats them as ethernet (see
+        // `Interfaces::unify_veth_and_ethernet()`): normalize before
+        // matching, otherwise this conversion panics for veth NICs.
+        if base_iface.iface_type == InterfaceType::Veth {
+            base_iface.iface_type = InterfaceType::Ethernet;
+        }
         let mut iface = match &base_iface.iface_type {
             InterfaceType::Ethernet => Interface::Ethernet(Default::default()),
             InterfaceType::Hsr => todo!(),

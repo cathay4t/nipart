@@ -94,6 +94,53 @@ impl NipartCommander {
 
         // Suppress the monitor during applying
         self.monitor_manager.pause().await?;
+        let result = self
+            .apply_network_state_inner(
+                conn.as_deref_mut(),
+                merged_state,
+                state_to_save,
+                revert_state,
+                revert_dns,
+            )
+            .await;
+        // Always resume the monitor, even when the apply failed: a pause
+        // left behind here would make the daemon deaf to link events (e.g.
+        // wifi re-association) for the rest of its life.
+        self.monitor_manager.resume().await?;
+        let (merged_state, saved_state) = result?;
+
+        let mut diff_state = match merged_state.gen_diff() {
+            Ok(s) => s,
+            Err(e) => {
+                log_warn(
+                    conn,
+                    format!("Returning full state instead of diff state: {e}"),
+                )
+                .await;
+                merged_state.gen_state_for_apply()
+            }
+        };
+        diff_state.hide_secrets();
+
+        self.try_set_daemon_online(Some(&saved_state), None).await?;
+
+        Ok(diff_state)
+    }
+
+    /// Apply `merged_state` with the interface monitor paused.
+    ///
+    /// The caller pauses the monitor and resumes it on every code path, so
+    /// this function only has to report the state needed afterwards: the
+    /// `merged_state` for the diff state and the saved state for
+    /// `try_set_daemon_online()`.
+    async fn apply_network_state_inner(
+        &mut self,
+        mut conn: Option<&mut NipartIpcConnection>,
+        merged_state: MergedNetworkState,
+        state_to_save: NetworkState,
+        revert_state: NetworkState,
+        revert_dns: RevertDns,
+    ) -> Result<(MergedNetworkState, NetworkState), NipartError> {
         if let Err(e) = self
             .apply_merged_state(conn.as_deref_mut(), &merged_state)
             .await
@@ -122,11 +169,7 @@ impl NipartCommander {
                 .rollback(conn.as_deref_mut(), revert_state, revert_dns)
                 .await
             {
-                log_error(
-                    conn.as_deref_mut(),
-                    format!("Failed to rollback: {e}"),
-                )
-                .await;
+                log_error(conn, format!("Failed to rollback: {e}")).await;
             }
             return Err(e);
         }
@@ -135,7 +178,7 @@ impl NipartCommander {
             && let Err(e) = self.conf_manager.save_state(state_to_save).await
         {
             log_warn(
-                conn.as_deref_mut(),
+                conn,
                 format!("BUG: Failed to persistent desired state: {e}"),
             )
             .await;
@@ -147,24 +190,7 @@ impl NipartCommander {
             .setup_monitor(&merged_state, &saved_state)
             .await?;
 
-        self.monitor_manager.resume().await?;
-
-        let mut diff_state = match merged_state.gen_diff() {
-            Ok(s) => s,
-            Err(e) => {
-                log_warn(
-                    conn,
-                    format!("Returning full state instead of diff state: {e}"),
-                )
-                .await;
-                merged_state.gen_state_for_apply()
-            }
-        };
-        diff_state.hide_secrets();
-
-        self.try_set_daemon_online(Some(&saved_state), None).await?;
-
-        Ok(diff_state)
+        Ok((merged_state, saved_state))
     }
 
     async fn rollback(

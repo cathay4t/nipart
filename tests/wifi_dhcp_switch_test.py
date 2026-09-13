@@ -241,6 +241,41 @@ def _has_ipv4_prefix(prefix):
     return any(addr.startswith(f"{prefix}.") for addr in _ipv4_addrs())
 
 
+def _wifi_cfg_profile_yaml(ssid, password=None):
+    lines = [
+        "---",
+        "interfaces:",
+        f"  - name: {ssid}",
+        "    type: wifi-cfg",
+        "    state: up",
+        "    wifi:",
+        f"      ssid: {ssid}",
+    ]
+    if password is not None:
+        lines.append(f"      password: {password}")
+    lines += [
+        "    ipv4:",
+        "      enabled: true",
+        "      dhcp: true",
+    ]
+    return load_yaml("\n".join(lines))
+
+
+def _cleanup_wifi_profiles():
+    """Drop leftover wifi profiles so the test starts from a known state."""
+    nipart.apply(load_yaml(f"""---
+        interfaces:
+          - name: {WIFI_TEST_NIC}
+            type: wifi-phy
+            state: absent"""))
+    for ssid in (TEST_WIFI_SSID, TEST_WIFI_SSID_2):
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {ssid}
+                type: wifi-cfg
+                state: absent"""))
+
+
 @pytest.mark.skipif(
     not has_kernel_module("mac80211_hwsim"),
     reason="Does not have 'mac80211_hwsim' kernel module",
@@ -291,6 +326,37 @@ class TestWifiDhcpSwitch:
         assert retry_till_true_or_timeout(
             60, lambda: not _has_ipv4_prefix(DHCP_SRV_IP4_PREFIX)
         ), "previous DHCP address was not purged after SSID switch"
+
+    def test_wifi_cfg_profile_switch_purges_previous_dhcp(
+        self, two_dhcp_ap_env  # noqa: F811
+    ):
+        _cleanup_wifi_profiles()
+        try:
+            # Start from the second AP: unlike the first one its DHCP
+            # server is not stopped by the other tests of this module.
+            nipart.apply(_wifi_cfg_profile_yaml(TEST_WIFI_SSID_2))
+            assert retry_till_true_or_timeout(
+                60, lambda: _connected_ssid() == TEST_WIFI_SSID_2
+            )
+            assert retry_till_true_or_timeout(
+                60, lambda: _has_ipv4_prefix(DHCP_SRV_IP4_PREFIX_2)
+            )
+
+            # Applying a wifi-cfg profile for another SSID must restart
+            # the DHCP client within the apply: the previous network's
+            # address is purged before the client is started again.
+            nipart.apply(
+                _wifi_cfg_profile_yaml(TEST_WIFI_SSID, TEST_WIFI_PSK)
+            )
+            assert not _has_ipv4_prefix(DHCP_SRV_IP4_PREFIX_2), (
+                "previous DHCP address was not purged by the wifi-cfg "
+                "profile switch"
+            )
+            assert retry_till_true_or_timeout(
+                60, lambda: _connected_ssid() == TEST_WIFI_SSID
+            )
+        finally:
+            _cleanup_wifi_profiles()
 
     def test_unrelated_npt_up_does_not_restart_wifi_dhcp(
         self, clean_up, two_dhcp_ap_env  # noqa: F811
