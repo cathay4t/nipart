@@ -14,7 +14,7 @@ use mozim::{DhcpV4Client, DhcpV4Config, DhcpV4Lease, DhcpV4State};
 use nipart::{
     BaseInterface, DhcpState, ErrorKind, Interface, InterfaceIpAddr,
     InterfaceIpv4, NetworkState, NipartApplyOption, NipartError,
-    NipartNoDaemon, RouteEntry, Routes,
+    NipartNoDaemon, NipartQueryOption, RouteEntry, RouteState, Routes,
 };
 
 use crate::TaskWorker;
@@ -328,6 +328,11 @@ async fn dhcp_thread(
     };
 
     if let Err(e) = result {
+        log::error!(
+            "DHCPv4 client on {}({}) stopped: {e}",
+            base_iface.name,
+            base_iface.iface_type,
+        );
         match share_data.lock() {
             Ok(mut share_data) => {
                 share_data.state = DhcpState::Error(e.to_string());
@@ -401,11 +406,73 @@ async fn apply_lease(
     let mut net_state = NetworkState::new();
     net_state.ifaces.push(iface_state);
 
-    net_state.routes = gen_routes(lease, base_iface);
+    let cur_routes =
+        NipartNoDaemon::query_network_state(NipartQueryOption::running())
+            .await?
+            .routes;
+    let mut routes = gen_routes(lease, base_iface);
+    mark_replaced_routes_absent(&mut routes, &cur_routes);
+    net_state.routes = routes;
 
     let apply_opt = NipartApplyOption::new().memory_only().no_verify();
     NipartNoDaemon::apply_network_state(net_state, apply_opt).await?;
     Ok(())
+}
+
+/// Mark the installed routes which the new lease replaces as absent.
+///
+/// The gateway route of a DHCP lease uses a metric derived from the
+/// interface index, so the gateway route of a lease learned from another
+/// network (e.g. before a daemon restart) carries the same destination
+/// and metric.  Without removing it first, the route apply refuses the
+/// new gateway route (`Multiple routes to 0.0.0.0/0 are sharing the same
+/// metric`) and the interface is left without any default gateway.
+fn mark_replaced_routes_absent(routes: &mut Routes, cur_routes: &Routes) {
+    let Some(desired_routes) = routes.config.clone() else {
+        return;
+    };
+    let mut absent_routes: Vec<RouteEntry> = Vec::new();
+    for cur_route in cur_routes
+        .running
+        .iter()
+        .chain(cur_routes.config.iter())
+        .flatten()
+    {
+        if cur_route.is_absent() {
+            continue;
+        }
+        for desired_route in desired_routes.iter() {
+            if !route_is_replaced_by(cur_route, desired_route) {
+                continue;
+            }
+            let mut absent_route = cur_route.clone();
+            absent_route.state = Some(RouteState::Absent);
+            absent_routes.push(absent_route);
+        }
+    }
+    if let Some(config_routes) = routes.config.as_mut() {
+        config_routes.extend(absent_routes);
+    }
+}
+
+/// Whether `desired_route` replaces the installed `cur_route`: same next
+/// hop interface, destination, metric and table, but another gateway.
+fn route_is_replaced_by(
+    cur_route: &RouteEntry,
+    desired_route: &RouteEntry,
+) -> bool {
+    cur_route.next_hop_iface.is_some()
+        && cur_route.next_hop_iface == desired_route.next_hop_iface
+        && cur_route.destination == desired_route.destination
+        && cur_route.metric == desired_route.metric
+        && route_table_id(cur_route) == route_table_id(desired_route)
+        && cur_route.next_hop_addr != desired_route.next_hop_addr
+}
+
+fn route_table_id(route: &RouteEntry) -> u32 {
+    route
+        .table_id
+        .unwrap_or(RouteEntry::USE_DEFAULT_ROUTE_TABLE)
 }
 
 // TODO:

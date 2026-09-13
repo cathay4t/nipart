@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    Interface, InterfaceIdentifier, InterfaceState, InterfaceType,
-    NipartInterface,
+    BaseInterface, Interface, InterfaceIdentifier, InterfaceState,
+    InterfaceType, NipartInterface,
 };
 
 #[test]
@@ -16,6 +16,18 @@ fn test_iface_de_ethernet() {
     .unwrap();
     assert!(matches!(iface, Interface::Ethernet(_)));
     assert_eq!(iface.name(), "eth1");
+}
+
+#[test]
+fn test_iface_from_veth_base_iface() {
+    // A veth NIC is reported with `Veth` type by the kernel while nipart
+    // treats it as ethernet; the conversion must not panic.
+    let base_iface =
+        BaseInterface::new("veth0".to_string(), InterfaceType::Veth);
+    let iface: Interface = base_iface.into();
+    assert!(matches!(iface, Interface::Ethernet(_)));
+    assert_eq!(iface.name(), "veth0");
+    assert_eq!(iface.iface_type(), &InterfaceType::Ethernet);
 }
 
 #[test]
