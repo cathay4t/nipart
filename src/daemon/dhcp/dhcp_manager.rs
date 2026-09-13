@@ -3,13 +3,14 @@
 use std::collections::HashMap;
 
 use nipart::{
-    BaseInterface, Interface, MergedNetworkState, NetworkState, NipartError,
+    BaseInterface, MergedNetworkState, NetworkState, NipartError,
     NipartInterface, NipartIpcConnection, NipartNoDaemon,
 };
 
 use super::{
-    NipartDhcpCmd, NipartDhcpReply, NipartDhcpV4Worker, should_touch_dhcp,
-    wait_wifi_ssid, wifi_ssid_changed,
+    NipartDhcpCmd, NipartDhcpReply, NipartDhcpV4Worker, desired_ssid_for_phy,
+    should_touch_dhcp, wait_wifi_ssid, wifi_cfg_ssid_changed,
+    wifi_ssid_changed,
 };
 use crate::{TaskManager, log_debug, plugin::NipartPluginManager};
 
@@ -146,10 +147,11 @@ impl NipartDhcpV4Manager {
                 apply_iface.base_iface_mut().ipv4 =
                     merged_iface.merged.base_iface().ipv4.clone();
             }
-            let ssid_changed = wifi_ssid_changed(
-                merged_iface.current.as_ref(),
-                merged_iface.desired.as_ref(),
-            );
+            let ssid_changed =
+                wifi_ssid_changed(
+                    merged_iface.current.as_ref(),
+                    merged_iface.desired.as_ref(),
+                ) || wifi_cfg_ssid_changed(&merged_state.ifaces, merged_iface);
             if !should_touch_dhcp(
                 merged_state.option.restart_auto_ip,
                 ssid_changed,
@@ -191,13 +193,13 @@ impl NipartDhcpV4Manager {
                                         .map(|i| i.base_iface()),
                                 )
                                 .await?;
-                                if let Some(Interface::WifiPhy(des_iface)) =
-                                    merged_iface.desired.as_ref()
-                                    && let Some(ssid) = des_iface.ssid()
-                                {
+                                if let Some(ssid) = desired_ssid_for_phy(
+                                    &merged_state.ifaces,
+                                    merged_iface,
+                                ) {
                                     wait_wifi_ssid(
                                         apply_iface.kernel_iface_name(),
-                                        ssid,
+                                        &ssid,
                                         plugin_manager,
                                     )
                                     .await?;

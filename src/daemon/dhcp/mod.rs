@@ -5,10 +5,12 @@ mod dhcp_worker;
 mod dhcpv6_manager;
 mod dhcpv6_worker;
 
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use nipart::{
-    ErrorKind, Interface, NipartError, NipartNoDaemon, NipartQueryOption,
+    ErrorKind, Interface, MergedInterface, MergedInterfaces, NipartError,
+    NipartInterface, NipartNoDaemon, NipartQueryOption, WifiCfgInterface,
+    WifiPhyInterface,
 };
 
 pub(crate) use self::{
@@ -37,6 +39,103 @@ pub(crate) fn wifi_ssid_changed(
             .is_some_and(|des_ssid| cur.ssid() != Some(des_ssid)),
         _ => false,
     }
+}
+
+/// Whether the `wifi-cfg` profiles handed to a wifi-phy switch its SSID.
+///
+/// A `wifi-cfg` is userspace-only: the kernel phy only receives a
+/// name/type up marker, so `wifi_ssid_changed()` cannot see the profile
+/// SSID.  When the apply hands a single SSID to this phy through
+/// `wifi-cfg` profiles, the plugin will associate the phy with it and a
+/// DHCP client still renewing the previous network's lease has to be
+/// restarted.  An apply carrying several different SSIDs (e.g. the boot
+/// pass handing over all saved profiles) has no single target SSID, hence
+/// keeps relying on the link event path.
+pub(crate) fn wifi_cfg_ssid_changed(
+    ifaces: &MergedInterfaces,
+    merged_iface: &MergedInterface,
+) -> bool {
+    let Some(Interface::WifiPhy(cur_phy)) = merged_iface.current.as_ref()
+    else {
+        return false;
+    };
+    // An explicit desired wifi-phy SSID is covered by
+    // `wifi_ssid_changed()`.
+    if matches!(
+        merged_iface.desired.as_ref(),
+        Some(Interface::WifiPhy(des_phy)) if des_phy.ssid().is_some()
+    ) {
+        return false;
+    }
+    wifi_cfg_apply_ssid(ifaces, cur_phy)
+        .is_some_and(|ssid| cur_phy.ssid() != Some(ssid.as_str()))
+}
+
+/// The SSID this apply wants on the wifi-phy of `merged_iface`.
+///
+/// This is the explicit desired wifi-phy `wifi` section when present,
+/// otherwise the SSID shared by the `wifi-cfg` profiles handed to the phy.
+pub(crate) fn desired_ssid_for_phy(
+    ifaces: &MergedInterfaces,
+    merged_iface: &MergedInterface,
+) -> Option<String> {
+    if let Some(Interface::WifiPhy(des_phy)) = merged_iface.desired.as_ref()
+        && let Some(ssid) = des_phy.ssid()
+    {
+        return Some(ssid.to_string());
+    }
+    let Interface::WifiPhy(cur_phy) = merged_iface.current.as_ref()? else {
+        return None;
+    };
+    wifi_cfg_apply_ssid(ifaces, cur_phy)
+}
+
+/// The single SSID this apply hands to `phy` via `wifi-cfg` profiles.
+///
+/// `None` means the apply does not hand over any profile, or it hands
+/// over profiles with different SSIDs, where nipart cannot tell which
+/// SSID the phy will end up on.
+fn wifi_cfg_apply_ssid(
+    ifaces: &MergedInterfaces,
+    phy: &WifiPhyInterface,
+) -> Option<String> {
+    let mut ssids: HashSet<&str> = HashSet::new();
+    for merged_iface in ifaces.user_ifaces.values() {
+        let Some(Interface::WifiCfg(wifi_cfg)) =
+            merged_iface.for_apply.as_ref()
+        else {
+            continue;
+        };
+        if !wifi_cfg.is_up() || !wifi_cfg_targets_phy(wifi_cfg, phy) {
+            continue;
+        }
+        if let Some(ssid) = wifi_cfg.ssid() {
+            ssids.insert(ssid);
+        }
+    }
+    if ssids.len() == 1 {
+        ssids.iter().next().map(|ssid| (*ssid).to_string())
+    } else {
+        None
+    }
+}
+
+/// Whether the `wifi-cfg` profile targets `phy`: a profile without
+/// `base-iface` is bound to any wifi-phy.
+fn wifi_cfg_targets_phy(
+    wifi_cfg: &WifiCfgInterface,
+    phy: &WifiPhyInterface,
+) -> bool {
+    let Some(base_iface) = wifi_cfg.parent() else {
+        return true;
+    };
+    base_iface == phy.kernel_iface_name()
+        || base_iface == phy.name()
+        || phy
+            .base
+            .mac_address
+            .as_deref()
+            .is_some_and(|mac| mac.eq_ignore_ascii_case(base_iface))
 }
 
 /// Whether an apply should touch the DHCP client of an interface.
