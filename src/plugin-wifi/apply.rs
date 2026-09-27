@@ -246,7 +246,6 @@ impl WifiClientState {
             self.enabled_flag.store(true, Ordering::Release);
         }
 
-        let mut available_wifi_phys: Vec<String> = Vec::new();
         // Map of wifi-phy name to its current kernel if_index, used to
         // detect a phy that was recreated (e.g. wifi driver module
         // reload): the cached shuli client is then bound to a dead
@@ -260,7 +259,6 @@ impl WifiClientState {
             {
                 for np_iface in np_state.ifaces.values() {
                     if np_iface.iface_type == nispor::IfaceType::Wifi {
-                        available_wifi_phys.push(np_iface.name.to_string());
                         wifi_phys_if_index
                             .insert(np_iface.name.to_string(), np_iface.index);
                     }
@@ -273,6 +271,11 @@ impl WifiClientState {
         let mut desired: HashMap<String, Vec<&WifiConfig>> = HashMap::new();
         let mut iface_names_to_delete: HashSet<&str> = HashSet::new();
         let mut ssids_to_delete: HashSet<&str> = HashSet::new();
+        // A `wifi-cfg` without `base-iface` binds to any eligible phy:
+        // target every wifi-phy this apply brings up, never an arbitrary
+        // one (a transient `mac80211_hwsim` radio could otherwise take the
+        // only slot and leave the real wifi-phy without the profile).
+        let up_wifi_phys = up_wifi_phys(ifaces);
 
         for iface in ifaces {
             let wifi_cfg = match iface {
@@ -306,21 +309,18 @@ impl WifiClientState {
                 continue;
             };
             log::trace!("Applying {wifi_cfg}");
-            let iface_name = if iface.iface_type() == &InterfaceType::WifiPhy {
-                iface.kernel_iface_name().to_string()
-            } else if let Some(iface_name) = wifi_cfg.base_iface.as_ref() {
-                iface_name.clone()
-            } else if let Some(iface_name) = available_wifi_phys.first() {
-                iface_name.clone()
-            } else {
+            let phy_names = wifi_cfg_phy_names(iface, wifi_cfg, &up_wifi_phys);
+            if phy_names.is_empty() {
                 log::warn!(
                     "WifiCfg interface {} has no base_iface specified, no \
                      wifi-phy available to bind to",
                     iface.name()
                 );
                 continue;
-            };
-            desired.entry(iface_name).or_default().push(wifi_cfg);
+            }
+            for phy_name in phy_names {
+                desired.entry(phy_name).or_default().push(wifi_cfg);
+            }
         }
 
         let mut recreate = false;
@@ -575,6 +575,38 @@ fn has_wifi_ssid_up_request(ifaces: &[Interface]) -> bool {
         };
         wifi_cfg.is_some_and(|cfg| !cfg.ssid.is_empty())
     })
+}
+
+/// Kernel names of the up `wifi-phy` interfaces carried by this apply.
+///
+/// A `wifi-cfg` without `base-iface` binds to any eligible wifi-phy, so it
+/// must be configured on every phy this apply brings up instead of one
+/// arbitrary phy.
+fn up_wifi_phys(ifaces: &[Interface]) -> Vec<String> {
+    ifaces
+        .iter()
+        .filter(|iface| {
+            iface.iface_type() == &InterfaceType::WifiPhy && iface.is_up()
+        })
+        .map(|iface| iface.kernel_iface_name().to_string())
+        .collect()
+}
+
+/// Kernel names of the wifi phys a desired wifi config targets:
+/// its own phy for a `wifi-phy`, the explicit `base-iface` for a bound
+/// `wifi-cfg`, or every eligible `wifi-phy` for an unbound `wifi-cfg`.
+fn wifi_cfg_phy_names(
+    iface: &Interface,
+    wifi_cfg: &WifiConfig,
+    up_wifi_phys: &[String],
+) -> Vec<String> {
+    if iface.iface_type() == &InterfaceType::WifiPhy {
+        vec![iface.kernel_iface_name().to_string()]
+    } else if let Some(base_iface) = wifi_cfg.base_iface.as_ref() {
+        vec![base_iface.clone()]
+    } else {
+        up_wifi_phys.to_vec()
+    }
 }
 
 fn mac_to_string(mac: &[u8; 6]) -> String {
