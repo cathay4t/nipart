@@ -99,7 +99,7 @@ TIMEOUT_SECS_SIM_WIFI_NICS = 30
 WIFI_TEST_NIC = "test-wlan0"
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="class")
 def wifi_env():
     exec_cmd("modprobe -r mac80211_hwsim".split(), check=False)
     exec_cmd(f"ip netns del {TEST_NET_NS}".split(), check=False)
