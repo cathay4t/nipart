@@ -312,3 +312,77 @@ fn merge_preferred_networks_rejects_conflicting_password() {
 
     assert!(merge_preferred_networks(&[], &refs).is_err());
 }
+
+fn phy_iface(name: &str, state: InterfaceState) -> Interface {
+    let mut phy = WifiPhyInterface::default();
+    phy.base = BaseInterface::new(name.to_string(), InterfaceType::WifiPhy);
+    phy.base.kernel_iface_name = name.to_string();
+    phy.base.state = state;
+    Interface::WifiPhy(Box::new(phy))
+}
+
+fn cfg_iface(name: &str, base_iface: Option<&str>) -> (Interface, WifiConfig) {
+    let mut cfg = wifi_cfg(name, None);
+    cfg.base_iface = base_iface.map(str::to_string);
+    let mut iface = WifiCfgInterface::new(BaseInterface::new(
+        name.to_string(),
+        InterfaceType::WifiCfg,
+    ));
+    iface.wifi = Some(cfg.clone());
+    (Interface::WifiCfg(Box::new(iface)), cfg)
+}
+
+#[test]
+fn up_wifi_phys_keeps_up_kernel_phys_only() {
+    let ifaces = [
+        phy_iface("wlan0", InterfaceState::Up),
+        phy_iface("wlan1", InterfaceState::Down),
+        phy_iface("wlan2", InterfaceState::Up),
+    ];
+
+    assert_eq!(
+        up_wifi_phys(&ifaces),
+        vec!["wlan0".to_string(), "wlan2".to_string()]
+    );
+}
+
+#[test]
+fn unbound_wifi_cfg_targets_every_up_wifi_phy() {
+    let up_phys = vec!["wlan0".to_string(), "wlan1".to_string()];
+    let (iface, cfg) = cfg_iface("Test-WIFI", None);
+
+    assert_eq!(wifi_cfg_phy_names(&iface, &cfg, &up_phys), up_phys);
+}
+
+#[test]
+fn unbound_wifi_cfg_without_phy_targets_none() {
+    let (iface, cfg) = cfg_iface("Test-WIFI", None);
+
+    assert!(wifi_cfg_phy_names(&iface, &cfg, &[]).is_empty());
+}
+
+#[test]
+fn bound_wifi_cfg_targets_base_iface_only() {
+    let up_phys = vec!["wlan0".to_string(), "wlan1".to_string()];
+    let (iface, cfg) = cfg_iface("Test-WIFI", Some("wlan1"));
+
+    assert_eq!(
+        wifi_cfg_phy_names(&iface, &cfg, &up_phys),
+        vec!["wlan1".to_string()]
+    );
+    assert_eq!(
+        wifi_cfg_phy_names(&iface, &cfg, &[]),
+        vec!["wlan1".to_string()]
+    );
+}
+
+#[test]
+fn wifi_phy_targets_its_own_kernel_name() {
+    let iface = phy_iface("wlan0", InterfaceState::Up);
+    let cfg = wifi_cfg("Test-WIFI", None);
+
+    assert_eq!(
+        wifi_cfg_phy_names(&iface, &cfg, &["wlan1".to_string()]),
+        vec!["wlan0".to_string()]
+    );
+}
