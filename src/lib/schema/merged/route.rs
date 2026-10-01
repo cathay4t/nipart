@@ -76,6 +76,16 @@ impl MergedRoutes {
         desired.validate()?;
         desired.resolve_vrf_name(merged_ifaces)?;
 
+        // Inherit undefined properties (e.g. the metric) of a desired route
+        // from the saved route it matches, mirroring `MergedInterface`: a
+        // partial re-apply keeps the effective settings and the saved route
+        // is not persisted right next to its desired copy.
+        let consumed_saved_routes = inherit_saved_route_fields(
+            &mut desired,
+            saved.as_ref(),
+            merged_ifaces,
+        );
+
         let iface_lists = collect_iface_lists(merged_ifaces);
 
         let desired_routes =
@@ -108,8 +118,8 @@ impl MergedRoutes {
         if let Some(saved) = saved.as_ref()
             && let Some(saved_rts) = saved.config.as_ref()
         {
-            for rt in saved_rts {
-                if rt.is_absent() {
+            for (index, rt) in saved_rts.iter().enumerate() {
+                if rt.is_absent() || consumed_saved_routes.contains(&index) {
                     continue;
                 }
                 if let Some(via) = rt.next_hop_iface.as_ref()
@@ -146,6 +156,7 @@ impl MergedRoutes {
             &iface_lists,
             &ignored_ifaces,
             merged_ifaces,
+            &consumed_saved_routes,
         );
 
         Ok(ret)
@@ -212,6 +223,7 @@ fn gen_routes_for_save(
     iface_lists: &IfaceLists,
     ignored_ifaces: &[String],
     merged_ifaces: &MergedInterfaces,
+    consumed_saved_routes: &HashSet<usize>,
 ) -> Routes {
     let mut routes: HashSet<RouteEntry> = HashSet::new();
     if let Some(rts) = desired.config.as_ref() {
@@ -222,7 +234,10 @@ fn gen_routes_for_save(
     if let Some(saved) = saved
         && let Some(saved_rts) = saved.config.as_ref()
     {
-        for rt in saved_rts.iter().filter(|rt| !rt.is_absent()) {
+        for (index, rt) in saved_rts.iter().enumerate() {
+            if rt.is_absent() || consumed_saved_routes.contains(&index) {
+                continue;
+            }
             if saved_route_is_removed(
                 rt,
                 desired,
@@ -414,6 +429,120 @@ fn collect_iface_lists(merged_ifaces: &MergedInterfaces) -> IfaceLists<'_> {
         will_delete,
         saved_only,
         desired_ifaces,
+    }
+}
+
+/// Inherit undefined properties of desired routes from the saved route each
+/// of them matches, returning the indexes of the consumed saved routes.
+fn inherit_saved_route_fields(
+    desired: &mut Routes,
+    saved: Option<&Routes>,
+    merged_ifaces: &MergedInterfaces,
+) -> HashSet<usize> {
+    let mut consumed_saved_routes: HashSet<usize> = HashSet::new();
+    let Some(saved_routes) = saved.and_then(|saved| saved.config.as_ref())
+    else {
+        return consumed_saved_routes;
+    };
+    let resolved_saved_routes: Vec<(usize, RouteEntry)> = saved_routes
+        .iter()
+        .enumerate()
+        .filter(|(_, rt)| !rt.is_absent())
+        .map(|(index, rt)| {
+            let mut resolved_route = rt.clone();
+            resolve_route_next_hop(&mut resolved_route, merged_ifaces);
+            (index, resolved_route)
+        })
+        .collect();
+    let Some(desired_routes) = desired.config.as_mut() else {
+        return consumed_saved_routes;
+    };
+    for desired_route in desired_routes.iter_mut().filter(|rt| !rt.is_absent())
+    {
+        let mut resolved_desired = desired_route.clone();
+        resolve_route_next_hop(&mut resolved_desired, merged_ifaces);
+        for (index, resolved_saved) in resolved_saved_routes.iter() {
+            if consumed_saved_routes.contains(index) {
+                continue;
+            }
+            if resolved_desired.is_match(resolved_saved) {
+                fill_undefined_route_fields(
+                    desired_route,
+                    &saved_routes[*index],
+                );
+                consumed_saved_routes.insert(*index);
+                break;
+            }
+        }
+    }
+    consumed_saved_routes
+}
+
+/// Resolve the next hop interface profile or logical name of a route to the
+/// kernel interface name, leaving unresolvable names unchanged.
+fn resolve_route_next_hop(
+    rt: &mut RouteEntry,
+    merged_ifaces: &MergedInterfaces,
+) {
+    if let Some(name) = rt.next_hop_iface.as_deref()
+        && let Some(kernel_iface_name) =
+            merged_ifaces.resolve_route_next_hop_iface(name)
+    {
+        rt.next_hop_iface = Some(kernel_iface_name);
+    }
+}
+
+/// Fill properties undefined in `rt` with the value from the saved `saved`
+/// route it matches.
+fn fill_undefined_route_fields(rt: &mut RouteEntry, saved: &RouteEntry) {
+    if rt.destination.is_none() {
+        rt.destination.clone_from(&saved.destination);
+    }
+    if rt.next_hop_iface.is_none() {
+        rt.next_hop_iface.clone_from(&saved.next_hop_iface);
+    }
+    if rt.next_hop_addr.is_none() {
+        rt.next_hop_addr.clone_from(&saved.next_hop_addr);
+    }
+    if rt.metric.is_none() || rt.metric == Some(RouteEntry::USE_DEFAULT_METRIC)
+    {
+        rt.metric = saved.metric;
+    }
+    if rt.table_id.is_none() {
+        rt.table_id = saved.table_id;
+    }
+    if rt.weight.is_none() {
+        rt.weight = saved.weight;
+    }
+    if rt.route_type.is_none() {
+        rt.route_type = saved.route_type;
+    }
+    if rt.cwnd.is_none() {
+        rt.cwnd = saved.cwnd;
+    }
+    if rt.source.is_none() {
+        rt.source.clone_from(&saved.source);
+    }
+    if rt.initcwnd.is_none() {
+        rt.initcwnd = saved.initcwnd;
+    }
+    if rt.initrwnd.is_none() {
+        rt.initrwnd = saved.initrwnd;
+    }
+    if rt.mtu.is_none() {
+        rt.mtu = saved.mtu;
+    }
+    if rt.quickack.is_none() {
+        rt.quickack = saved.quickack;
+    }
+    if rt.advmss.is_none() {
+        rt.advmss = saved.advmss;
+    }
+    if rt.onlink.is_none() {
+        rt.onlink = saved.onlink;
+    }
+    if rt.vrf_name.is_none() {
+        rt.vrf_name.clone_from(&saved.vrf_name);
     }
 }
 
@@ -694,7 +823,18 @@ impl Routes {
                 }
             }
             for new_route in new_routes.iter().filter(|r| !r.is_absent()) {
-                route_sets.insert(new_route.clone());
+                let mut new_route = new_route.clone();
+                // Undefined properties (e.g. the metric) are inherited from
+                // the old route this one matches, so re-stating a route
+                // without them does not silently reset them.
+                if let Some(old_route) = self.config.as_ref().and_then(|c| {
+                    c.iter().find(|old_route| {
+                        !old_route.is_absent() && new_route.is_match(old_route)
+                    })
+                }) {
+                    fill_undefined_route_fields(&mut new_route, old_route);
+                }
+                route_sets.insert(new_route);
             }
             if let Some(old_routes) = self.config.as_ref() {
                 for old_route in old_routes {

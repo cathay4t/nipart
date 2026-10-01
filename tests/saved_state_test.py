@@ -3,6 +3,8 @@
 import nipart
 
 from .conftest import CLI_PATH
+from .conftest import start_daemon
+from .conftest import stop_daemon
 from .testlib.cmdlib import exec_cmd
 from .testlib.statelib import load_yaml, show_saved_only
 
@@ -10,6 +12,9 @@ SAVED_ONLY_IFACE = "saved-dummy0"
 ACTIVE_IFACE = "active-dummy0"
 SAVED_ROUTE_DST = "198.51.100.0/24"
 SAVED_ROUTE_DST2 = "198.51.100.128/25"
+ROUTE_METRIC_IFACE = "rt-metric-d0"
+ROUTE_METRIC_DST = "203.0.113.0/24"
+ROUTE_METRIC = 600
 
 
 def _iface_exists(iface_name):
@@ -136,6 +141,63 @@ routes:
         nipart.apply(load_yaml(f"""---
 interfaces:
   - name: {ACTIVE_IFACE}
+    type: dummy
+    state: absent
+"""))
+
+
+def test_reapply_route_without_metric_keeps_saved_metric():
+    nipart.apply(load_yaml(f"""---
+interfaces:
+  - name: {ROUTE_METRIC_IFACE}
+    type: dummy
+    state: up
+    ipv4:
+      enabled: true
+      dhcp: false
+      address:
+        - ip: 192.0.2.1
+          prefix-length: 24
+routes:
+  config:
+    - destination: {ROUTE_METRIC_DST}
+      next-hop-interface: {ROUTE_METRIC_IFACE}
+      metric: {ROUTE_METRIC}
+"""))
+    try:
+        nipart.apply(load_yaml(f"""---
+routes:
+  config:
+    - destination: {ROUTE_METRIC_DST}
+      next-hop-interface: {ROUTE_METRIC_IFACE}
+"""))
+        saved_routes = (
+            nipart.NipartClient()
+            .query_network_state(nipart.NipartQueryOption.saved())
+            .get("routes", {})
+            .get("config", [])
+        )
+        matching = [
+            route
+            for route in saved_routes
+            if route.get("destination") == ROUTE_METRIC_DST
+        ]
+        assert len(matching) == 1, matching
+        assert matching[0].get("metric") == ROUTE_METRIC, matching
+
+        # Simulate a reboot: remove the kernel route, restart the daemon and
+        # let the boot apply restore it with the saved metric.
+        exec_cmd(["ip", "route", "del", ROUTE_METRIC_DST])
+        stop_daemon()
+        start_daemon()
+        rc, out, _ = exec_cmd(
+            ["ip", "route", "show", ROUTE_METRIC_DST], check=False
+        )
+        assert f"metric {ROUTE_METRIC}" in out, out
+    finally:
+        nipart.apply(load_yaml(f"""---
+interfaces:
+  - name: {ROUTE_METRIC_IFACE}
     type: dummy
     state: absent
 """))
