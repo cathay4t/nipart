@@ -300,6 +300,9 @@ fn append_saved_only_route_rules(
         if rule.action.is_none() && rule.table_id.is_none() {
             rule.table_id = Some(RouteRuleEntry::DEFAULT_ROUTE_TABLE_ID);
         }
+        // A saved rule may reference its interface by profile or logical
+        // name while the kernel rule carries the kernel interface name.
+        resolve_rule_iif(&mut rule, net_state);
         if kernel_rules
             .is_some_and(|rules| rules.iter().any(|cur| rule.is_match(cur)))
         {
@@ -312,6 +315,25 @@ fn append_saved_only_route_rules(
             net_state.route_rules.config.take().unwrap_or_default();
         config_rules.extend(pending_rules);
         net_state.route_rules.config = Some(config_rules);
+    }
+}
+
+/// Resolve the `iif` of a route rule to the kernel interface name using the
+/// interfaces of `net_state`.
+fn resolve_rule_iif(rule: &mut RouteRuleEntry, net_state: &NetworkState) {
+    let Some(iif) = rule.iif.as_deref() else {
+        return;
+    };
+    let kernel_iface_name = net_state.ifaces.iter().find_map(|iface| {
+        (iface.kernel_iface_name() == iif
+            || iface.name() == iif
+            || iface.base_iface().profile_name.as_deref() == Some(iif))
+        .then(|| iface.kernel_iface_name().to_string())
+    });
+    if let Some(kernel_iface_name) = kernel_iface_name
+        && kernel_iface_name != iif
+    {
+        rule.iif = Some(kernel_iface_name);
     }
 }
 

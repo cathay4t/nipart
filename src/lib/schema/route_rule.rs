@@ -82,8 +82,10 @@ impl RouteRules {
     }
 
     /// Merge route rules into `self`, preserving the partial editing
-    /// semantics: non-absent rules are added and absent rules remove the
-    /// matching existing rules.
+    /// semantics: non-absent rules are added, absent rules remove the
+    /// matching existing rules. An absent rule matching no existing rule is
+    /// kept in the merged state so that applying it still removes matching
+    /// kernel rules.
     pub(crate) fn merge(&self, new_rules: &Self) -> Result<Self, NipartError> {
         new_rules.validate()?;
 
@@ -92,6 +94,17 @@ impl RouteRules {
         };
 
         let mut rule_set: HashSet<RouteRuleEntry> = HashSet::new();
+        // An absent rule matching an old rule only removes that old rule.
+        // An absent rule matching no old rule is kept as a removal request
+        // so applying the merged state still deletes it from the kernel.
+        for new_rule in new_rules.iter().filter(|r| r.is_absent()) {
+            let matches_old = self.config.as_ref().is_some_and(|old_rules| {
+                old_rules.iter().any(|old_rule| new_rule.is_match(old_rule))
+            });
+            if !matches_old {
+                rule_set.insert(new_rule.clone());
+            }
+        }
         for new_rule in new_rules.iter().filter(|r| !r.is_absent()) {
             rule_set.insert(new_rule.clone());
         }
@@ -100,6 +113,16 @@ impl RouteRules {
                 if new_rules
                     .iter()
                     .any(|r| r.is_absent() && r.is_match(old_rule))
+                {
+                    continue;
+                }
+                // A desired rule supersedes an old absent rule, otherwise
+                // applying the merged state would delete the rule and add
+                // it back.
+                if old_rule.is_absent()
+                    && new_rules
+                        .iter()
+                        .any(|r| !r.is_absent() && old_rule.is_match(r))
                 {
                     continue;
                 }

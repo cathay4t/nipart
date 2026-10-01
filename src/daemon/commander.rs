@@ -7,7 +7,8 @@ use nipart::{
     BaseInterface, DnsResolver, Interface, InterfaceIdentifier, InterfaceIpv4,
     InterfaceIpv6, InterfaceState, InterfaceType, NetworkState,
     NipartApplyOption, NipartError, NipartInterface, NipartNoDaemon,
-    NipartQueryOption, NipartWifiControl, NipartWifiScanOption, WifiScanResult,
+    NipartQueryOption, NipartWifiControl, NipartWifiScanOption, RouteRuleEntry,
+    WifiScanResult,
 };
 
 use super::{
@@ -783,21 +784,31 @@ fn remove_ready_state(
     // Global route rules (no `iif`) can be applied at boot immediately.
     // Rules with an `iif` are deferred until the referenced interface is
     // ready, just like routes are deferred until their next-hop interface is
-    // ready.
+    // ready. Rules may reference the interface by kernel name, logical name
+    // or profile name, so collect all of them.
+    let mut ready_rule_targets: HashSet<String> = HashSet::new();
+    for iface_name in pending_ifaces.keys() {
+        ready_rule_targets.insert(iface_name.clone());
+        if let Some(iface) = state.ifaces.kernel_ifaces.get(iface_name.as_str())
+        {
+            ready_rule_targets.insert(iface.name().to_string());
+            if let Some(profile_name) = iface.base_iface().profile_name.as_ref()
+            {
+                ready_rule_targets.insert(profile_name.to_string());
+            }
+        }
+    }
+    let rule_target_ready = |rule: &RouteRuleEntry| {
+        rule.iif
+            .as_ref()
+            .is_none_or(|iif| ready_rule_targets.contains(iif.as_str()))
+    };
     ret.route_rules = state.route_rules.clone();
     if let Some(config_rules) = ret.route_rules.config.as_mut() {
-        config_rules.retain(|rule| {
-            rule.iif
-                .as_ref()
-                .is_none_or(|iif| pending_ifaces.contains_key(iif))
-        });
+        config_rules.retain(rule_target_ready);
     }
     if let Some(state_rules) = state.route_rules.config.as_mut() {
-        state_rules.retain(|rule| {
-            rule.iif
-                .as_ref()
-                .is_some_and(|iif| !pending_ifaces.contains_key(iif))
-        });
+        state_rules.retain(|rule| !rule_target_ready(rule));
     }
 
     for (iface_name, iface_type) in pending_ifaces.drain() {

@@ -218,3 +218,51 @@ fn test_down_iface_still_marks_routes_absent() {
     assert_eq!(absent_routes.len(), 1);
     assert_eq!(absent_routes[0].next_hop_iface.as_deref(), Some("eth1"));
 }
+
+#[test]
+fn test_route_merge_keeps_absent_route() {
+    let new_routes: Routes = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - destination: 198.51.100.0/24
+            next-hop-interface: eth1
+            state: absent
+        "#,
+    )
+    .unwrap();
+
+    let merged = Routes::default().merge(&new_routes).unwrap();
+    let routes = merged.config.unwrap();
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].state, Some(RouteState::Absent));
+    assert_eq!(routes[0].destination.as_deref(), Some("198.51.100.0/24"));
+}
+
+#[test]
+fn test_route_merge_present_supersedes_absent() {
+    let old_routes: Routes = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - destination: 198.51.100.0/24
+            next-hop-interface: eth1
+            state: absent
+        "#,
+    )
+    .unwrap();
+    let new_routes: Routes = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - destination: 198.51.100.0/24
+            next-hop-interface: eth1
+        "#,
+    )
+    .unwrap();
+
+    let merged = old_routes.merge(&new_routes).unwrap();
+    let routes = merged.config.unwrap();
+
+    assert_eq!(routes.len(), 1);
+    assert_ne!(routes[0].state, Some(RouteState::Absent));
+    assert_eq!(routes[0].destination.as_deref(), Some("198.51.100.0/24"));
+}

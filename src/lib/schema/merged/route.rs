@@ -678,6 +678,21 @@ impl Routes {
 
         if let Some(new_routes) = new_routes.config.as_ref() {
             let mut route_sets: HashSet<RouteEntry> = HashSet::new();
+            // An absent route matching an old route only removes that old
+            // route (kept as absent route below). An absent route matching
+            // no old route is kept as a removal request so applying the
+            // merged state still deletes it from the kernel.
+            for new_route in new_routes.iter().filter(|r| r.is_absent()) {
+                let matches_old =
+                    self.config.as_ref().is_some_and(|old_routes| {
+                        old_routes
+                            .iter()
+                            .any(|old_route| new_route.is_match(old_route))
+                    });
+                if !matches_old {
+                    route_sets.insert(new_route.clone());
+                }
+            }
             for new_route in new_routes.iter().filter(|r| !r.is_absent()) {
                 route_sets.insert(new_route.clone());
             }
@@ -690,6 +705,15 @@ impl Routes {
                         let mut absent_route = old_route.clone();
                         absent_route.state = Some(RouteState::Absent);
                         route_sets.insert(absent_route);
+                    } else if old_route.is_absent()
+                        && new_routes
+                            .iter()
+                            .any(|r| !r.is_absent() && old_route.is_match(r))
+                    {
+                        // A desired route supersedes an old absent route,
+                        // otherwise applying the merged state would delete
+                        // the route and add it back.
+                        continue;
                     } else {
                         route_sets.insert(old_route.clone());
                     }
