@@ -240,6 +240,141 @@ fn test_route_merge_keeps_absent_route() {
 }
 
 #[test]
+fn test_route_reapply_without_metric_inherits_saved_metric() {
+    let des_ifaces: Interfaces = rmsd_yaml::from_str(
+        r#"
+    - name: dummy0
+      type: dummy
+      state: up
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+        - ip: 192.0.2.1
+          prefix-length: 24
+      ipv6:
+        enabled: false
+    "#,
+    )
+    .unwrap();
+    let merged_ifaces =
+        MergedInterfaces::new(des_ifaces, Interfaces::default(), None).unwrap();
+
+    let desired: Routes = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - destination: 198.51.100.0/24
+            next-hop-interface: dummy0
+            table-id: 100
+        "#,
+    )
+    .unwrap();
+    let current: Routes = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - destination: 198.51.100.0/24
+            next-hop-interface: dummy0
+            table-id: 100
+            metric: 500
+        "#,
+    )
+    .unwrap();
+    let saved = current.clone();
+
+    let merged =
+        MergedRoutes::new(desired, current, Some(saved), &merged_ifaces)
+            .unwrap();
+
+    assert!(merged.changed_routes.is_empty());
+    let saved_routes = merged.gen_state_for_save().config.unwrap();
+    assert_eq!(saved_routes.len(), 1);
+    assert_eq!(saved_routes[0].metric, Some(500));
+}
+
+#[test]
+fn test_route_reapply_without_metric_self_heals_saved_metric() {
+    let des_ifaces: Interfaces = rmsd_yaml::from_str(
+        r#"
+    - name: dummy0
+      type: dummy
+      state: up
+      ipv4:
+        enabled: true
+        dhcp: false
+        address:
+        - ip: 192.0.2.1
+          prefix-length: 24
+      ipv6:
+        enabled: false
+    "#,
+    )
+    .unwrap();
+    let merged_ifaces =
+        MergedInterfaces::new(des_ifaces, Interfaces::default(), None).unwrap();
+
+    let desired: Routes = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - destination: 198.51.100.0/24
+            next-hop-interface: dummy0
+            table-id: 100
+        "#,
+    )
+    .unwrap();
+    let saved: Routes = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - destination: 198.51.100.0/24
+            next-hop-interface: dummy0
+            table-id: 100
+            metric: 500
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedRoutes::new(
+        desired,
+        Routes::default(),
+        Some(saved),
+        &merged_ifaces,
+    )
+    .unwrap();
+
+    assert_eq!(merged.changed_routes.len(), 1);
+    assert_eq!(merged.changed_routes[0].metric, Some(500));
+    let saved_routes = merged.gen_state_for_save().config.unwrap();
+    assert_eq!(saved_routes.len(), 1);
+    assert_eq!(saved_routes[0].metric, Some(500));
+}
+
+#[test]
+fn test_route_merge_inherits_old_metric() {
+    let old_routes: Routes = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - destination: 198.51.100.0/24
+            next-hop-interface: dummy0
+            metric: 500
+        "#,
+    )
+    .unwrap();
+    let new_routes: Routes = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - destination: 198.51.100.0/24
+            next-hop-interface: dummy0
+        "#,
+    )
+    .unwrap();
+
+    let merged = old_routes.merge(&new_routes).unwrap();
+    let routes = merged.config.unwrap();
+
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].metric, Some(500));
+}
+
+#[test]
 fn test_route_merge_present_supersedes_absent() {
     let old_routes: Routes = rmsd_yaml::from_str(
         r#"---
