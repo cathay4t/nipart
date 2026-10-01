@@ -67,6 +67,76 @@ fn test_route_rule_default_route_table() {
 }
 
 #[test]
+fn test_route_rule_merge_keeps_absent_when_no_old_rule() {
+    let new = RouteRules {
+        config: Some(vec![rule_from_yaml(
+            r#"
+            state: absent
+            route-table: 500
+            "#,
+        )]),
+    };
+
+    let rules = RouteRules::default().merge(&new).unwrap().config.unwrap();
+
+    assert_eq!(rules.len(), 1);
+    assert!(rules[0].is_absent());
+    assert_eq!(rules[0].table_id, Some(500));
+}
+
+#[test]
+fn test_route_rule_merge_absent_consumed_by_matching_old_rule() {
+    let old = RouteRules {
+        config: Some(vec![rule_from_yaml(
+            r#"
+            ip-from: 203.0.113.0/24
+            route-table: 500
+            priority: 1000
+            "#,
+        )]),
+    };
+    let new = RouteRules {
+        config: Some(vec![rule_from_yaml(
+            r#"
+            state: absent
+            route-table: 500
+            "#,
+        )]),
+    };
+
+    let rules = old.merge(&new).unwrap().config.unwrap();
+
+    assert!(rules.is_empty());
+}
+
+#[test]
+fn test_route_rule_merge_present_supersedes_old_absent() {
+    let old = RouteRules {
+        config: Some(vec![rule_from_yaml(
+            r#"
+            state: absent
+            route-table: 500
+            "#,
+        )]),
+    };
+    let new = RouteRules {
+        config: Some(vec![rule_from_yaml(
+            r#"
+            ip-from: 203.0.113.0/24
+            route-table: 500
+            priority: 1000
+            "#,
+        )]),
+    };
+
+    let rules = old.merge(&new).unwrap().config.unwrap();
+
+    assert_eq!(rules.len(), 1);
+    assert!(!rules[0].is_absent());
+    assert_eq!(rules[0].ip_from.as_deref(), Some("203.0.113.0/24"));
+}
+
+#[test]
 fn test_route_rule_merge_is_partial() {
     let old: RouteRules = rmsd_yaml::from_str(
         r#"

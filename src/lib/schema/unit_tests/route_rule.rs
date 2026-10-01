@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    AddressFamily, MergedRouteRules, NetworkState, RouteRuleEntry,
-    RouteRuleState, RouteRules,
+    AddressFamily, Interfaces, MergedInterfaces, MergedRouteRules,
+    NetworkState, RouteRuleEntry, RouteRuleState, RouteRules,
 };
 
 #[test]
@@ -60,7 +60,13 @@ fn test_route_rule_absent_marks_current_rule_for_removal() {
     )
     .unwrap();
 
-    let merged = MergedRouteRules::new(desired, current, None).unwrap();
+    let merged = MergedRouteRules::new(
+        desired,
+        current,
+        None,
+        &MergedInterfaces::default(),
+    )
+    .unwrap();
     assert_eq!(merged.changed_rules.len(), 1);
     let absent_rule = &merged.changed_rules[0];
     assert!(absent_rule.is_absent());
@@ -89,7 +95,13 @@ fn test_existing_route_rule_is_not_changed() {
     )
     .unwrap();
 
-    let merged = MergedRouteRules::new(desired, current, None).unwrap();
+    let merged = MergedRouteRules::new(
+        desired,
+        current,
+        None,
+        &MergedInterfaces::default(),
+    )
+    .unwrap();
     assert!(merged.changed_rules.is_empty());
     assert!(!merged.is_changed());
 }
@@ -114,7 +126,13 @@ fn test_new_route_rule_without_priority_gets_auto_priority() {
     )
     .unwrap();
 
-    let merged = MergedRouteRules::new(desired, current, None).unwrap();
+    let merged = MergedRouteRules::new(
+        desired,
+        current,
+        None,
+        &MergedInterfaces::default(),
+    )
+    .unwrap();
     assert_eq!(merged.changed_rules.len(), 1);
     let new_rule = &merged.changed_rules[0];
     assert!(!new_rule.is_absent());
@@ -141,7 +159,13 @@ fn test_route_rule_absent_wildcard_matches_saved_config() {
     )
     .unwrap();
 
-    let merged = MergedRouteRules::new(desired, current, Some(saved)).unwrap();
+    let merged = MergedRouteRules::new(
+        desired,
+        current,
+        Some(saved),
+        &MergedInterfaces::default(),
+    )
+    .unwrap();
     assert!(merged.gen_state_for_save().config.is_none());
 }
 
@@ -155,8 +179,13 @@ fn test_route_rule_for_save_is_sanitized() {
     )
     .unwrap();
 
-    let merged =
-        MergedRouteRules::new(desired, RouteRules::default(), None).unwrap();
+    let merged = MergedRouteRules::new(
+        desired,
+        RouteRules::default(),
+        None,
+        &MergedInterfaces::default(),
+    )
+    .unwrap();
     let saved_rules = merged.gen_state_for_save().config.unwrap();
 
     assert_eq!(saved_rules.len(), 1);
@@ -190,7 +219,13 @@ fn test_route_rule_absent_removes_noncanonical_saved_rule() {
     )
     .unwrap();
 
-    let merged = MergedRouteRules::new(desired, current, Some(saved)).unwrap();
+    let merged = MergedRouteRules::new(
+        desired,
+        current,
+        Some(saved),
+        &MergedInterfaces::default(),
+    )
+    .unwrap();
     assert!(merged.gen_state_for_save().config.is_none());
 }
 
@@ -204,4 +239,191 @@ fn test_route_rule_state_absent_is_default() {
         ..Default::default()
     };
     assert!(absent.is_absent());
+}
+
+#[test]
+fn test_reapply_without_priority_inherits_saved_priority() {
+    let desired: RouteRules = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - ip-from: 198.51.100.0/24
+            route-table: 500
+        "#,
+    )
+    .unwrap();
+    let current: RouteRules = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - ip-from: 198.51.100.0/24
+            route-table: 500
+            priority: 40000
+        "#,
+    )
+    .unwrap();
+    let saved = current.clone();
+
+    let merged = MergedRouteRules::new(
+        desired,
+        current,
+        Some(saved),
+        &MergedInterfaces::default(),
+    )
+    .unwrap();
+
+    assert!(merged.changed_rules.is_empty());
+    let saved_rules = merged.gen_state_for_save().config.unwrap();
+    assert_eq!(saved_rules.len(), 1);
+    assert_eq!(saved_rules[0].priority, Some(40000));
+}
+
+#[test]
+fn test_reapply_without_priority_self_heals_saved_priority() {
+    let desired: RouteRules = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - ip-from: 198.51.100.0/24
+            route-table: 500
+        "#,
+    )
+    .unwrap();
+    let saved: RouteRules = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - ip-from: 198.51.100.0/24
+            route-table: 500
+            priority: 40000
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedRouteRules::new(
+        desired,
+        RouteRules::default(),
+        Some(saved),
+        &MergedInterfaces::default(),
+    )
+    .unwrap();
+
+    assert_eq!(merged.changed_rules.len(), 1);
+    assert_eq!(merged.changed_rules[0].priority, Some(40000));
+    let saved_rules = merged.gen_state_for_save().config.unwrap();
+    assert_eq!(saved_rules.len(), 1);
+    assert_eq!(saved_rules[0].priority, Some(40000));
+}
+
+#[test]
+fn test_deleted_iface_removes_rule_from_kernel_and_saved() {
+    let desired_ifaces: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: dummy0
+          type: dummy
+          state: absent
+        "#,
+    )
+    .unwrap();
+    let current_ifaces: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: dummy0
+          type: dummy
+          state: up
+          ipv4:
+            enabled: false
+          ipv6:
+            enabled: false
+        "#,
+    )
+    .unwrap();
+    let merged_ifaces =
+        MergedInterfaces::new(desired_ifaces, current_ifaces, None).unwrap();
+
+    let current: RouteRules = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - family: ipv4
+            iif: dummy0
+            route-table: 500
+            priority: 100
+        "#,
+    )
+    .unwrap();
+    let saved = current.clone();
+
+    let merged = MergedRouteRules::new(
+        RouteRules::default(),
+        current,
+        Some(saved),
+        &merged_ifaces,
+    )
+    .unwrap();
+
+    assert_eq!(merged.changed_rules.len(), 1);
+    assert!(merged.changed_rules[0].is_absent());
+    assert!(merged.gen_state_for_save().config.is_none());
+}
+
+#[test]
+fn test_rule_iif_profile_name_resolved_for_apply() {
+    let desired_ifaces: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth1
+          type: ethernet
+          state: up
+          profile-name: wan0
+          ipv4:
+            enabled: false
+          ipv6:
+            enabled: false
+        "#,
+    )
+    .unwrap();
+    let current_ifaces: Interfaces = rmsd_yaml::from_str(
+        r#"---
+        - name: eth1
+          type: ethernet
+          state: up
+        "#,
+    )
+    .unwrap();
+    let merged_ifaces =
+        MergedInterfaces::new(desired_ifaces, current_ifaces, None).unwrap();
+
+    let desired: RouteRules = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - family: ipv4
+            iif: wan0
+            route-table: 500
+        "#,
+    )
+    .unwrap();
+
+    let merged = MergedRouteRules::new(
+        desired,
+        RouteRules::default(),
+        None,
+        &merged_ifaces,
+    )
+    .unwrap();
+
+    assert_eq!(merged.changed_rules.len(), 1);
+    assert_eq!(merged.changed_rules[0].iif.as_deref(), Some("eth1"));
+
+    // The profile name is persisted so it still resolves when the kernel
+    // interface name changes across reboots.
+    let saved_rules = merged.gen_state_for_save().config.unwrap();
+    assert_eq!(saved_rules.len(), 1);
+    assert_eq!(saved_rules[0].iif.as_deref(), Some("wan0"));
+
+    // Verification uses the kernel interface name.
+    let current: RouteRules = rmsd_yaml::from_str(
+        r#"---
+        config:
+          - family: ipv4
+            iif: eth1
+            route-table: 500
+            priority: 30000
+        "#,
+    )
+    .unwrap();
+    merged.verify(&current).unwrap();
 }

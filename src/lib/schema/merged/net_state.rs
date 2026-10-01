@@ -88,6 +88,7 @@ impl MergedNetworkState {
             desired.route_rules,
             current.route_rules,
             saved_route_rules,
+            &merged_ifaces,
         )?;
         let ignored_ifaces: Vec<&str> = merged_ifaces
             .kernel_ifaces
@@ -199,6 +200,9 @@ impl MergedNetworkState {
                 });
                 self.route_rules
                     .changed_rules
+                    .retain(|rule| rule.iif.as_deref() != Some(iface_name));
+                self.route_rules
+                    .for_verify
                     .retain(|rule| rule.iif.as_deref() != Some(iface_name));
                 if let Some(config_rules) =
                     self.route_rules.desired.config.as_mut()

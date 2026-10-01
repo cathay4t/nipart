@@ -4,7 +4,9 @@ import json
 
 import nipart
 import pytest
+import yaml
 
+from .conftest import CLI_PATH
 from .conftest import start_daemon
 from .conftest import stop_daemon
 from .testlib.cmdlib import exec_cmd
@@ -22,6 +24,7 @@ REPLACE_RULE_OLD_PRIORITY = 40100
 REPLACE_RULE_NEW_PRIORITY = 40101
 TEST_TABLE_ID = 500
 IIF_IFACE = "rr-dummy0"
+IIF_PROFILE = "rr-profile0"
 
 
 def _ip_rule_output(ipv6=False):
@@ -908,3 +911,158 @@ def test_route_rule_restored_after_daemon_restart():
         nipart.apply(
             load_yaml(_absent_route_rule_state(RULE_IP_FROM, RULE_IP_TO))
         )
+
+
+def test_route_rule_absent_via_cli_apply_file(tmp_path):
+    add_state = _rule_state(
+        _rule_entry(
+            ip_from=RULE_IP_FROM,
+            route_table=TEST_TABLE_ID,
+            priority=40240,
+        )
+    )
+    add_file = tmp_path / "route_rule_add.yml"
+    add_file.write_text(yaml.safe_dump(add_state))
+    exec_cmd([CLI_PATH, "apply", str(add_file)])
+    try:
+        assert _matching_rules(
+            ip_from=RULE_IP_FROM,
+            table_id=TEST_TABLE_ID,
+            priority=40240,
+        )
+        absent_file = tmp_path / "route_rule_absent.yml"
+        absent_file.write_text(
+            yaml.safe_dump(_absent_table_state(TEST_TABLE_ID))
+        )
+        exec_cmd([CLI_PATH, "apply", str(absent_file)])
+        assert not _matching_rules(table_id=TEST_TABLE_ID)
+    finally:
+        nipart.apply(_absent_table_state(TEST_TABLE_ID))
+
+
+def _saved_route_rules():
+    saved_state = nipart.NipartClient().query_network_state(
+        nipart.NipartQueryOption.saved()
+    )
+    return saved_state.get("route-rules", {}).get("config", [])
+
+
+def test_reapply_without_priority_keeps_single_saved_rule():
+    nipart.apply(
+        _rule_state(
+            _rule_entry(
+                ip_from=RULE_IP_FROM,
+                route_table=TEST_TABLE_ID,
+                priority=40245,
+            )
+        )
+    )
+    try:
+        nipart.apply(
+            _rule_state(
+                _rule_entry(ip_from=RULE_IP_FROM, route_table=TEST_TABLE_ID)
+            )
+        )
+        matching = [
+            rule
+            for rule in _saved_route_rules()
+            if rule.get("ip-from") == RULE_IP_FROM
+            and rule.get("route-table") == TEST_TABLE_ID
+        ]
+        assert len(matching) == 1, matching
+        assert matching[0].get("priority") == 40245, matching
+    finally:
+        nipart.apply(_absent_table_state(TEST_TABLE_ID))
+
+
+def test_delete_iface_removes_route_rules():
+    nipart.apply(load_yaml(f"""---
+interfaces:
+  - name: {IIF_IFACE}
+    type: dummy
+    state: up
+route-rules:
+  config:
+    - family: ipv4
+      iif: {IIF_IFACE}
+      route-table: {TEST_TABLE_ID}
+      priority: 40255
+"""))
+    try:
+        assert _matching_rules(
+            table_id=TEST_TABLE_ID, iif=IIF_IFACE, priority=40255
+        ), _ip_rule_output()
+        nipart.apply(load_yaml(f"""---
+interfaces:
+  - name: {IIF_IFACE}
+    type: dummy
+    state: absent
+"""))
+        assert not _matching_rules(
+            table_id=TEST_TABLE_ID, iif=IIF_IFACE
+        ), _ip_rule_output()
+        assert not any(
+            rule.get("iif") == IIF_IFACE for rule in _saved_route_rules()
+        ), _saved_route_rules()
+    finally:
+        nipart.apply(load_yaml(f"""---
+interfaces:
+  - name: {IIF_IFACE}
+    type: dummy
+    state: absent
+"""))
+        nipart.apply(_absent_table_state(TEST_TABLE_ID))
+
+
+def test_route_rule_iif_profile_name_is_resolved():
+    nipart.apply(load_yaml(f"""---
+interfaces:
+  - name: {IIF_IFACE}
+    type: dummy
+    state: up
+    profile-name: {IIF_PROFILE}
+route-rules:
+  config:
+    - family: ipv4
+      iif: {IIF_PROFILE}
+      route-table: {TEST_TABLE_ID}
+      priority: 40256
+"""))
+    try:
+        assert _matching_rules(
+            table_id=TEST_TABLE_ID, iif=IIF_IFACE, priority=40256
+        ), _ip_rule_output()
+        assert any(
+            rule.get("iif") == IIF_PROFILE
+            and rule.get("route-table") == TEST_TABLE_ID
+            for rule in _saved_route_rules()
+        ), _saved_route_rules()
+
+        # The running-and-saved view must not report the rule twice (once
+        # with the kernel name and once with the profile name).
+        combined_state = nipart.NipartClient().query_network_state(
+            nipart.NipartQueryOption(running=True, saved=True)
+        )
+        matching = [
+            rule
+            for rule in combined_state.get("route-rules", {}).get("config", [])
+            if rule.get("priority") == 40256
+        ]
+        assert len(matching) == 1, matching
+
+        # Simulate a reboot: drop the kernel rule and let the daemon boot
+        # restore it from the saved profile name.
+        exec_cmd(["ip", "rule", "del", "priority", "40256"])
+        stop_daemon()
+        start_daemon()
+        assert _matching_rules(
+            table_id=TEST_TABLE_ID, iif=IIF_IFACE, priority=40256
+        ), _ip_rule_output()
+    finally:
+        nipart.apply(_absent_table_state(TEST_TABLE_ID))
+        nipart.apply(load_yaml(f"""---
+interfaces:
+  - name: {IIF_IFACE}
+    type: dummy
+    state: absent
+"""))
