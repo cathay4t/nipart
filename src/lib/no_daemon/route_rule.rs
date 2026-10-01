@@ -6,10 +6,9 @@
 //  * Wen Liang <liangwen12year@gmail.com>
 //  * Íñigo Huguet <ihuguet@redhat.com>
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
 use crate::{
-    AddressFamily, NipartError, RouteRuleAction, RouteRuleEntry, RouteRules,
+    AddressFamily, ErrorKind, NipartError, RouteRuleAction, RouteRuleEntry,
+    RouteRules,
 };
 
 // The kernel adds `ip rule` entries with protocol boot by default, while
@@ -82,152 +81,83 @@ pub(crate) async fn apply_route_rules(
         return Ok(());
     }
 
-    let (connection, handle, _) = rtnetlink::new_connection().map_err(|e| {
-        NipartError::new(
-            crate::ErrorKind::Bug,
-            format!("Failed to create rtnetlink connection: {e}"),
-        )
-    })?;
-    tokio::spawn(connection);
-
+    let mut rule_confs: Vec<nispor::RouteRuleConf> = Vec::new();
+    // Remove absent rules before adding new ones, so a rule replaced in a
+    // single transaction never conflicts with its old entry.
     for rule in merged_rules
         .changed_rules
         .iter()
         .filter(|rule| rule.is_absent())
     {
         log::debug!("Removing route rule {rule}");
-        let msg = nipart_rule_to_netlink_rule(rule)?;
-        handle.rule().del(msg).execute().await.map_err(|e| {
-            NipartError::new(
-                crate::ErrorKind::Bug,
-                format!("Failed to remove route rule {rule}: {e}"),
-            )
-        })?;
+        rule_confs.push(nipart_to_nispor_rule_conf(rule)?);
     }
-
     for rule in merged_rules
         .changed_rules
         .iter()
         .filter(|rule| !rule.is_absent())
     {
         log::debug!("Adding route rule {rule}");
-        let msg = nipart_rule_to_netlink_rule(rule)?;
-        let mut add_request = handle.rule().add();
-        *add_request.message_mut() = msg;
-        add_request.execute().await.map_err(|e| {
-            NipartError::new(
-                crate::ErrorKind::Bug,
-                format!("Failed to add route rule {rule}: {e}"),
-            )
-        })?;
+        rule_confs.push(nipart_to_nispor_rule_conf(rule)?);
     }
 
+    let mut net_conf = nispor::NetConf::default();
+    net_conf.rules = Some(rule_confs);
+    log::trace!(
+        "Pending kernel route rule changes {}",
+        serde_json::to_string(&net_conf).unwrap_or_default()
+    );
+    if let Err(e) = net_conf.apply_async().await {
+        return Err(NipartError::new(
+            ErrorKind::Bug,
+            format!("Failed to change route rules: {e}"),
+        ));
+    }
     Ok(())
 }
 
-fn nipart_rule_to_netlink_rule(
+fn nipart_to_nispor_rule_conf(
     rule: &RouteRuleEntry,
-) -> Result<rtnetlink::packet_route::rule::RuleMessage, NipartError> {
-    use rtnetlink::packet_route::{
-        AddressFamily as NlAddressFamily,
-        route::RouteHeader,
-        rule::{RuleAction, RuleAttribute, RuleMessage},
+) -> Result<nispor::RouteRuleConf, NipartError> {
+    let Some(priority) = rule.priority else {
+        return Err(NipartError::new(
+            ErrorKind::InvalidArgument,
+            format!("Route rule {rule} has no priority defined"),
+        ));
     };
-    let is_ipv6 = rule.is_ipv6();
-    let family = if is_ipv6 {
-        NlAddressFamily::Inet6
-    } else {
-        NlAddressFamily::Inet
-    };
-
-    let mut msg = RuleMessage::default();
-    msg.header.family = family;
-    msg.header.action = match rule.action {
-        Some(RouteRuleAction::Blackhole) => RuleAction::Blackhole,
-        Some(RouteRuleAction::Unreachable) => RuleAction::Unreachable,
-        Some(RouteRuleAction::Prohibit) => RuleAction::Prohibit,
-        None => RuleAction::ToTable,
-    };
-
-    if let Some(table_id) = rule.table_id {
-        if table_id <= u8::MAX.into() {
-            msg.header.table = table_id as u8;
-        } else {
-            msg.attributes.push(RuleAttribute::Table(table_id));
-        }
-    } else if msg.header.action == RuleAction::ToTable {
-        msg.header.table = RouteHeader::RT_TABLE_MAIN;
-    }
-
-    if let Some(ip_from) = rule.ip_from.as_ref() {
-        let (ip, prefix_len) = parse_ip_network(ip_from, is_ipv6)?;
-        msg.header.src_len = prefix_len;
-        msg.attributes.push(RuleAttribute::Source(ip));
-    }
-    if let Some(ip_to) = rule.ip_to.as_ref() {
-        let (ip, prefix_len) = parse_ip_network(ip_to, is_ipv6)?;
-        msg.header.dst_len = prefix_len;
-        msg.attributes.push(RuleAttribute::Destination(ip));
-    }
-    if let Some(priority) = rule.priority {
-        let priority = u32::try_from(priority).map_err(|_| {
-            NipartError::new(
-                crate::ErrorKind::InvalidArgument,
-                format!(
-                    "Invalid route rule priority {priority}, expecting a \
-                     non-negative integer"
-                ),
-            )
-        })?;
-        msg.attributes.push(RuleAttribute::Priority(priority));
-    }
-    if let Some(fwmark) = rule.fwmark {
-        msg.attributes.push(RuleAttribute::FwMark(fwmark));
-    }
-    if let Some(fwmask) = rule.fwmask {
-        msg.attributes.push(RuleAttribute::FwMask(fwmask));
-    }
-    if let Some(iif) = rule.iif.as_ref() {
-        msg.attributes.push(RuleAttribute::Iifname(iif.clone()));
-    }
-    if let Some(suppress_prefix_length) = rule.suppress_prefix_length {
-        msg.attributes
-            .push(RuleAttribute::SuppressPrefixLen(suppress_prefix_length));
-    }
-
-    Ok(msg)
-}
-
-fn parse_ip_network(
-    ip_net: &str,
-    expect_ipv6: bool,
-) -> Result<(IpAddr, u8), NipartError> {
-    let (ip, prefix_len) = ip_net.rsplit_once('/').ok_or_else(|| {
+    let priority = u32::try_from(priority).map_err(|_| {
         NipartError::new(
-            crate::ErrorKind::InvalidArgument,
-            format!("Invalid route rule network '{ip_net}'"),
+            ErrorKind::InvalidArgument,
+            format!(
+                "Invalid route rule priority {priority}, expecting a \
+                 non-negative integer no greater than {}",
+                u32::MAX
+            ),
         )
     })?;
-    let prefix_len = prefix_len.parse::<u8>().map_err(|e| {
-        NipartError::new(
-            crate::ErrorKind::InvalidArgument,
-            format!("Invalid route rule prefix length '{prefix_len}': {e}"),
-        )
-    })?;
-    let ip = if expect_ipv6 {
-        IpAddr::V6(ip.parse::<Ipv6Addr>().map_err(|e| {
-            NipartError::new(
-                crate::ErrorKind::InvalidArgument,
-                format!("Invalid IPv6 route rule network '{ip_net}': {e}"),
-            )
-        })?)
+
+    let mut conf = nispor::RouteRuleConf::default();
+    conf.remove = rule.is_absent();
+    conf.address_family = if rule.is_ipv6() {
+        nispor::AddressFamily::Ipv6
     } else {
-        IpAddr::V4(ip.parse::<Ipv4Addr>().map_err(|e| {
-            NipartError::new(
-                crate::ErrorKind::InvalidArgument,
-                format!("Invalid IPv4 route rule network '{ip_net}': {e}"),
-            )
-        })?)
+        nispor::AddressFamily::Ipv4
     };
-    Ok((ip, prefix_len))
+    conf.action = match rule.action {
+        Some(RouteRuleAction::Blackhole) => nispor::RuleAction::Blackhole,
+        Some(RouteRuleAction::Unreachable) => nispor::RuleAction::Unreachable,
+        Some(RouteRuleAction::Prohibit) => nispor::RuleAction::Prohibit,
+        None => nispor::RuleAction::Table,
+    };
+    conf.table = rule.table_id.filter(|table_id| {
+        *table_id != RouteRuleEntry::USE_DEFAULT_ROUTE_TABLE
+    });
+    conf.src = rule.ip_from.clone();
+    conf.dst = rule.ip_to.clone();
+    conf.iif = rule.iif.clone();
+    conf.priority = priority;
+    conf.fw_mark = rule.fwmark;
+    conf.fw_mask = rule.fwmask;
+    conf.suppress_prefix_len = rule.suppress_prefix_length;
+    Ok(conf)
 }
