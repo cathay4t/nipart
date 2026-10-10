@@ -2,12 +2,12 @@
 
 use nipart::{
     Interface, MergedInterface, MergedNetworkState, NetworkState,
-    NipartApplyOption,
+    NipartApplyOption, NipartInterface,
 };
 
 use super::{
-    desired_ssid_for_phy, should_touch_dhcp, wifi_cfg_ssid_changed,
-    wifi_ssid_changed,
+    desired_ssid_for_phy, should_touch_dhcp, should_touch_unchanged_dhcp,
+    wifi_cfg_ssid_changed, wifi_ssid_changed,
 };
 
 fn wifi_phy(ssid: Option<&str>) -> Interface {
@@ -91,6 +91,86 @@ fn test_dhcp_touched_when_restart_auto_ip_ssid_or_ip_changed() {
 #[test]
 fn test_dhcp_touched_when_interface_down() {
     assert!(should_touch_dhcp(false, false, false, false));
+}
+
+/// An explicit `npt up <iface>` sets `restart_auto_ip` for the whole apply,
+/// so it must only restart interfaces nipart has a configuration for.  The
+/// kernel state of a kernel-only interface carries no config-only
+/// `auto-gateway`/`auto-route-metric`, hence a restart from it would install
+/// the DHCP gateway route of an `auto-gateway: false` interface on the next
+/// lease.
+#[test]
+fn test_unchanged_iface_without_config_is_not_restarted() {
+    assert!(should_touch_unchanged_dhcp(true, true));
+    assert!(!should_touch_unchanged_dhcp(true, false));
+    assert!(!should_touch_unchanged_dhcp(false, true));
+    assert!(!should_touch_unchanged_dhcp(false, false));
+}
+
+fn merge_up_dummy(current_yaml: &str) -> MergedNetworkState {
+    let desired: NetworkState = rmsd_yaml::from_str(
+        r#"---
+        interfaces:
+          - name: dummy0
+            type: dummy
+            state: up
+        "#,
+    )
+    .unwrap();
+    let current: NetworkState = rmsd_yaml::from_str(current_yaml).unwrap();
+    MergedNetworkState::new(
+        desired,
+        current,
+        None,
+        NipartApplyOption::new().force().restart_auto_ip(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn test_restart_hand_off_skips_kernel_only_iface() {
+    let merged = merge_up_dummy(
+        r#"---
+        interfaces:
+          - name: dummy0
+            type: dummy
+            state: up
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+              dhcp-state: done
+              address:
+                - ip: 192.0.2.100
+                  prefix-length: 24
+        "#,
+    );
+
+    for merged_iface in merged.ifaces.iter() {
+        let has_config =
+            merged_iface.desired.is_some() || merged_iface.for_save.is_some();
+        match merged_iface.merged.kernel_iface_name() {
+            "dummy0" => assert!(
+                has_config
+                    && should_touch_unchanged_dhcp(
+                        merged.option.restart_auto_ip,
+                        has_config,
+                    ),
+                "the desired dummy0 must be restarted"
+            ),
+            "eth1" => assert!(
+                !has_config
+                    && !should_touch_unchanged_dhcp(
+                        merged.option.restart_auto_ip,
+                        has_config,
+                    ),
+                "the kernel-only eth1 must not be restarted"
+            ),
+            other => panic!("unexpected interface {other}"),
+        }
+    }
 }
 
 fn wifi_cfg_profile(

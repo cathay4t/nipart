@@ -7,7 +7,7 @@ use nipart::{
 
 use super::{
     NipartDhcpV6Cmd, NipartDhcpV6Reply, NipartDhcpV6Worker, should_touch_dhcp,
-    wait_wifi_ssid, wifi_ssid_changed,
+    should_touch_unchanged_dhcp, wait_wifi_ssid, wifi_ssid_changed,
 };
 use crate::{TaskManager, log_debug, plugin::NipartPluginManager};
 
@@ -97,8 +97,15 @@ impl NipartDhcpV6Manager {
             // `restart_auto_ip` (the boot hand-off) must restart the DHCP
             // client even for an interface whose kernel state already
             // matches: the client process died with the previous daemon.
+            // Interfaces without any desired or saved config are skipped:
+            // their kernel state lacks config-only properties.
+            let has_config = merged_iface.desired.is_some()
+                || merged_iface.for_save.is_some();
             if !merged_iface.is_changed()
-                && !merged_state.option.restart_auto_ip
+                && !should_touch_unchanged_dhcp(
+                    merged_state.option.restart_auto_ip,
+                    has_config,
+                )
             {
                 continue;
             }
