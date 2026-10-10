@@ -108,6 +108,11 @@ async fn delete_ifaces_before_apply(
 /// an explicit `kernel-iface-name` renames the matched interface).  nispor
 /// cannot rename an existing interface, so the rename must be done before
 /// the nispor batch below (which looks the interface up by its new name).
+///
+/// This order is also required when the desired `alt-names` lists the
+/// current kernel name: the kernel rejects an alt-name equal to the
+/// interface's own name, so that alt-name can only be applied after the
+/// rename freed the old name.
 async fn rename_ifaces_before_apply(
     merged_ifaces: &MergedInterfaces,
 ) -> Result<(), NipartError> {

@@ -387,7 +387,11 @@ def dhcpv6_server(wifi_env):  # noqa: F811
 
 
 def connected_ssid():
-    rc, out, _ = exec_cmd(f"iw dev {WIFI_TEST_NIC} link".split(), check=False)
+    return iface_connected_ssid(WIFI_TEST_NIC)
+
+
+def iface_connected_ssid(iface_name):
+    rc, out, _ = exec_cmd(f"iw dev {iface_name} link".split(), check=False)
     if rc != 0:
         return None
     match = re.search(r"SSID: (.+)", out)
@@ -1082,6 +1086,92 @@ class TestWifiBootAutoConnect:
                       - name: {TEST_WIFI_SSID_OPEN}
                         type: wifi-cfg
                         state: absent"""))
+
+
+@pytest.mark.skipif(
+    not has_kernel_module("mac80211_hwsim"),
+    reason="Does not have 'mac80211_hwsim' kernel module",
+)
+class TestWifiRenameTarget:
+    """A saved `kernel-iface-name` is a rename instruction: the daemon must
+    rename the NIC to it and the WIFI connection must come up on the new
+    name (the pre-rename name is kept as an alt-name)."""
+
+    START_NAME = "wlp-renamed0"
+    # Kernel interface names are limited to 15 characters (IFNAMSIZ - 1).
+    TARGET_NAME = "wlp-renamed0-t"
+    SAVED_STATE_FILE = "/etc/nipart/applied.yml"
+
+    def test_rename_target_boot_connects(self, wifi_env):  # noqa: F811
+        try:
+            stop_daemon()
+            exec_cmd(["ip", "link", "del", self.START_NAME], check=False)
+            exec_cmd(["ip", "link", "del", self.TARGET_NAME], check=False)
+            exec_cmd(
+                f"ip link set {WIFI_TEST_NIC} name {self.START_NAME}".split()
+            )
+            mac = (
+                exec_cmd(
+                    f"cat /sys/class/net/{self.START_NAME}/address".split()
+                )[1]
+                .strip()
+                .upper()
+            )
+            os.makedirs(os.path.dirname(self.SAVED_STATE_FILE), exist_ok=True)
+            with open(self.SAVED_STATE_FILE, "w") as state_f:
+                state_f.write(f"""---
+version: 1
+interfaces:
+- name: {self.START_NAME}
+  kernel-iface-name: {self.TARGET_NAME}
+  profile-name: {self.START_NAME}
+  type: wifi-phy
+  identifier: mac-address
+  state: up
+  mac-address: {mac}
+  alt-names:
+  - name: {self.START_NAME}
+- name: {TEST_WIFI_SSID}
+  type: wifi-cfg
+  state: up
+  wifi:
+    ssid: {TEST_WIFI_SSID}
+    password: {TEST_WIFI_PSK}
+  ipv4:
+    enabled: true
+    dhcp: true
+""")
+            start_daemon()
+
+            assert retry_till_true_or_timeout(
+                60,
+                lambda: iface_connected_ssid(self.TARGET_NAME)
+                == TEST_WIFI_SSID,
+            ), (
+                "WIFI did not connect on the rename target: "
+                f"{iface_connected_ssid(self.TARGET_NAME)}"
+            )
+            # The target is the primary name, the original name is kept as
+            # an alt-name.
+            rc, out, _ = exec_cmd(
+                ["ip", "-o", "link", "show", self.START_NAME], check=False
+            )
+            assert rc == 0, f"{self.START_NAME} disappeared"
+            primary = out.split(":")[1].strip().split("@")[0]
+            assert (
+                primary == self.TARGET_NAME
+            ), f"NIC was not renamed to {self.TARGET_NAME}: {out}"
+            rc, out, _ = exec_cmd(
+                ["ip", "link", "show", self.TARGET_NAME], check=False
+            )
+            assert (
+                f"altname {self.START_NAME}" in out
+            ), f"original name not kept as alt-name: {out}"
+        finally:
+            if os.path.exists(self.SAVED_STATE_FILE):
+                os.remove(self.SAVED_STATE_FILE)
+            stop_daemon()
+            start_daemon()
 
 
 @pytest.mark.skipif(

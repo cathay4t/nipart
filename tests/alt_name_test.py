@@ -358,3 +358,34 @@ def test_boot_load_saved_rename_keeps_original_alt_name():
         exec_cmd(["ip", "link", "del", "renamed0"], check=False)
         exec_cmd(["ip", "link", "del", REN_VETH], check=False)
         _remove_ren_veth_pair()
+
+
+def test_rename_with_explicit_alt_name_equal_to_current_name():
+    # The desired state lists the current kernel name as an alt-name while
+    # asking for an interface rename.  The rename must be applied first,
+    # then the alt-name (the kernel rejects an alt-name equal to the own
+    # interface name).
+    _create_ren_veth_pair()
+    try:
+        exec_cmd(f"ip link set {REN_VETH} address 02:00:00:00:00:06".split())
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                - name: port6
+                  type: ethernet
+                  identifier: mac-address
+                  mac-address: 02:00:00:00:00:06
+                  kernel-iface-name: renamed6
+                  alt-names:
+                    - name: {REN_VETH}
+                """))
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT,
+            _iface_has_alt_names,
+            "renamed6",
+            [REN_VETH],
+        ), "Rename + explicit alt-name equal to the old name not applied"
+    finally:
+        _purge_saved_mac_profile("port6", "02:00:00:00:00:06")
+        exec_cmd(["ip", "link", "del", "renamed6"], check=False)
+        exec_cmd(["ip", "link", "del", REN_VETH], check=False)
+        _remove_ren_veth_pair()
