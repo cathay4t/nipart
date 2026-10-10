@@ -2,10 +2,11 @@
 
 import os
 import signal
+import time
 
 import nipart
 
-from .conftest import DAEMON_LOG, start_daemon, stop_daemon
+from .conftest import CLI_PATH, DAEMON_LOG, start_daemon, stop_daemon
 from .testlib.cmdlib import exec_cmd
 from .testlib.dhcp import DHCP_SRV_NIC
 from .testlib.dhcp import start_dhcp_server
@@ -14,6 +15,7 @@ from .testlib.retry import retry_till_true_or_timeout
 from .testlib.statelib import load_yaml
 
 DHCP_CLI_NIC = "dhcpcli-restore"
+DUMMY_IFACE = "dhcp-up-dummy0"
 TEST_NET_NS = "nipart_dhcp_restore_test"
 DEFAULT_TIMEOUT = 30
 DHCP_SRV_IP4_PREFIX_2 = "198.51.100"
@@ -194,6 +196,61 @@ def test_dhcp_auto_gateway_false_after_daemon_restart():
         ), "DHCPv4 client did not re-acquire the lease after daemon restart"
         assert not _has_gateway_route()
     finally:
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                - name: {DHCP_CLI_NIC}
+                  type: ethernet
+                  state: absent"""))
+        _remove_veth_pair(DHCP_CLI_NIC, TEST_NET_NS)
+        stop_dhcp_server()
+
+
+def test_unrelated_npt_up_keeps_auto_gateway_false():
+    exec_cmd(f"ip netns del {TEST_NET_NS}".split(), check=False)
+    exec_cmd(f"ip netns add {TEST_NET_NS}".split())
+    _create_veth_pair(DHCP_CLI_NIC, DHCP_SRV_NIC, TEST_NET_NS)
+    start_dhcp_server(TEST_NET_NS)
+
+    try:
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                - name: {DHCP_CLI_NIC}
+                  type: ethernet
+                  state: up
+                  ipv4:
+                    enabled: true
+                    dhcp: true
+                    auto-gateway: false"""))
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT, _has_dhcp_addr
+        ), f"{DHCP_CLI_NIC} did not get a DHCPv4 lease"
+        assert not _has_gateway_route()
+
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                - name: {DUMMY_IFACE}
+                  type: dummy
+                  state: up"""))
+
+        # `npt up` sets `restart_auto_ip` for the whole apply: it must only
+        # restart the DHCP client of the requested interface, never of an
+        # unrelated interface whose kernel state carries no config-only
+        # `auto-gateway: false`.  A restarted client re-applies the lease
+        # from that state and installs the DHCP gateway route.
+        rc, out, err = exec_cmd([CLI_PATH, "up", DUMMY_IFACE], check=False)
+        assert rc == 0, f"npt up {DUMMY_IFACE} failed:\n{out}\n{err}"
+        time.sleep(5)
+        assert not _has_gateway_route(), (
+            f"`npt up {DUMMY_IFACE}` restarted the DHCP client of "
+            f"{DHCP_CLI_NIC} and installed its gateway route despite "
+            "`auto-gateway: false`"
+        )
+    finally:
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                - name: {DUMMY_IFACE}
+                  type: dummy
+                  state: absent"""))
         nipart.apply(load_yaml(f"""---
                 interfaces:
                 - name: {DHCP_CLI_NIC}

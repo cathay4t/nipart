@@ -162,6 +162,23 @@ pub(crate) fn should_touch_dhcp(
     !iface_is_up || restart_auto_ip || ssid_changed || ip_conf_changed
 }
 
+/// Whether the `restart_auto_ip` hand-off may (re)start the DHCP client of
+/// an interface whose kernel state already matches.
+///
+/// Only interfaces nipart holds a configuration for qualify: the kernel
+/// state of an interface present only in the kernel carries no config-only
+/// properties such as `auto-gateway` or `auto-route-metric`, so restarting
+/// its DHCP client from that state would lose them.  For example, an
+/// explicit `npt up <iface>` otherwise restarts every auto interface of
+/// the host and makes an `auto-gateway: false` interface install the DHCP
+/// gateway route on the next lease.
+pub(crate) fn should_touch_unchanged_dhcp(
+    restart_auto_ip: bool,
+    has_config: bool,
+) -> bool {
+    restart_auto_ip && has_config
+}
+
 /// Wait until the wifi-phy reports the desired SSID.
 ///
 /// Used when an apply switches a wifi-phy to a different SSID: DHCP must
