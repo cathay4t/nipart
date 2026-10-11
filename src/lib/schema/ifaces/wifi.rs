@@ -537,6 +537,11 @@ impl WifiConfig {
         if let Some(mac) = self.bssid.as_ref() {
             self.bssid = Some(mac.to_uppercase());
         }
+        // An empty `base-iface` means the profile is not bound to any phy,
+        // same as an undefined one.
+        if self.base_iface.as_deref() == Some("") {
+            self.base_iface = None;
+        }
     }
 
     pub fn hide_secrets(&mut self) {

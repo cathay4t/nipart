@@ -173,17 +173,24 @@ impl MergedDnsResolver {
     /// The DNS resolver diff to report to the client.
     pub(crate) fn gen_state_for_apply(&self) -> DnsResolver {
         let mut ret = self.desired.clone().unwrap_or_default();
+        // A nameserver may be both the static server and a dynamic one (e.g.
+        // the cache bind address is also the current resolver): report it
+        // once, keeping the first occurrence order.
+        let mut servers: Vec<String> = Vec::new();
+        for server in self.servers.iter().chain(self.dynamic_servers.iter()) {
+            if !servers.contains(server) {
+                servers.push(server.clone());
+            }
+        }
         ret.running = Some(DnsResolverClient {
-            server: Some(
-                self.servers
-                    .iter()
-                    .cloned()
-                    .chain(self.dynamic_servers.iter().cloned())
-                    .collect(),
-            ),
+            server: Some(servers),
             search: Some(self.searches.clone()),
             options: Some(self.options.clone()),
         });
         ret
     }
 }
+
+#[cfg(test)]
+#[path = "../unit_tests/merged_dns.rs"]
+mod tests;

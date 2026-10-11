@@ -3,17 +3,18 @@
 use std::time::SystemTime;
 
 use nipart::{
-    Interface, InterfaceAutoConnect, InterfaceIpv4, InterfaceLinkEvent,
-    InterfaceState, InterfaceType, MergedNetworkState, NetworkState,
-    NipartInterface,
+    Interface, InterfaceAutoConnect, InterfaceIpv4, InterfaceIpv6,
+    InterfaceLinkEvent, InterfaceState, InterfaceType, MergedNetworkState,
+    NetworkState, NipartInterface,
 };
 
 use super::{
-    gen_desired_iface_down, gen_missing_virtual_dependents,
-    gen_routes_for_iface_up, gen_routes_for_wifi_cfg_up,
-    gen_wifi_plugin_state_for_phy, handle_event_auto_connect,
-    handle_wifi_phy_event, is_route_matching_iface, is_stale_link_down_event,
-    nic_is_gone, wifi_cfg_to_wifi_phy, wifi_phy_ssid,
+    auto_connect_targets_event_nic, gen_desired_iface_down,
+    gen_missing_virtual_dependents, gen_routes_for_iface_up,
+    gen_routes_for_wifi_cfg_up, gen_wifi_cfg_for_new_phy,
+    gen_wifi_phy_ip_purge, handle_event_auto_connect, handle_wifi_phy_event,
+    is_route_matching_iface, is_stale_link_down_event, nic_is_gone,
+    wifi_cfg_to_wifi_phy, wifi_phy_ssid,
 };
 
 fn gen_wifi_cfg_iface() -> Interface {
@@ -190,55 +191,7 @@ fn test_wifi_cfg_routes_included_on_wifi_phy_up() {
 }
 
 #[test]
-fn test_gen_wifi_plugin_state_refreshes_stale_kernel_name() {
-    let state: NetworkState = rmsd_yaml::from_str(
-        r#"---
-            interfaces:
-              - name: wifi-pro0
-                kernel-iface-name: wlan0
-                profile-name: wifi-pro0
-                type: wifi-phy
-                identifier: mac-address
-                state: up
-                mac-address: 02:00:00:00:00:03
-              - name: Test-WIFI
-                type: wifi-cfg
-                state: up
-                wifi:
-                  ssid: Test-WIFI
-            "#,
-    )
-    .unwrap();
-
-    // The phy was renamed to its saved profile name: the plugin state handed
-    // over for that event must carry the current kernel name so the plugin
-    // binds to the live device.
-    let wifi_state = gen_wifi_plugin_state_for_phy("wifi-pro0", &state);
-    let phy = wifi_state
-        .ifaces
-        .iter()
-        .find(|iface| iface.iface_type() == &InterfaceType::WifiPhy)
-        .unwrap();
-    assert_eq!(phy.kernel_iface_name(), "wifi-pro0");
-}
-
-#[test]
-fn test_is_route_matching_iface() {
-    let state = gen_saved_state();
-    let wan0 = find_iface(&state, "wan0");
-    let vpn0_rt = state
-        .routes
-        .config
-        .as_ref()
-        .unwrap()
-        .iter()
-        .find(|rt| rt.destination.as_deref() == Some("192.0.2.0/24"))
-        .unwrap();
-    assert!(!is_route_matching_iface(vpn0_rt, wan0));
-}
-
-#[test]
-fn test_gen_wifi_plugin_state_matches_phy_only() {
+fn test_gen_wifi_cfg_for_new_phy_matches_base_iface() {
     let state: NetworkState = rmsd_yaml::from_str(
         r#"---
             interfaces:
@@ -254,33 +207,42 @@ fn test_gen_wifi_plugin_state_matches_phy_only() {
                 wifi:
                   ssid: Test-WIFI
                   base-iface: wlan0
+              - name: Empty-Base-WIFI
+                type: wifi-cfg
+                state: up
+                wifi:
+                  ssid: Empty-Base-WIFI
+                  base-iface: ""
+              - name: Unbound-WIFI
+                type: wifi-cfg
+                state: up
+                wifi:
+                  ssid: Unbound-WIFI
               - name: Other-WIFI
                 type: wifi-cfg
                 state: up
                 wifi:
                   ssid: Other-WIFI
                   base-iface: wlan1
-              - name: Any-WIFI
-                type: wifi-cfg
-                state: up
-                wifi:
-                  ssid: Any-WIFI
             "#,
     )
     .unwrap();
 
-    let wifi_state = gen_wifi_plugin_state_for_phy("wlan0", &state);
-    // eth0, the wifi-phy for wlan1 and the profile bound to wlan1 are out;
-    // the bound and the unbound profiles are in.
-    assert_eq!(wifi_state.ifaces.iter().count(), 3);
-    let names: Vec<&str> = wifi_state.ifaces.iter().map(|i| i.name()).collect();
-    assert!(names.contains(&"wlan0"));
-    assert!(names.contains(&"Test-WIFI"));
-    assert!(names.contains(&"Any-WIFI"));
+    let names: Vec<String> = gen_wifi_cfg_for_new_phy("wlan0", &state)
+        .iter()
+        .map(|iface| iface.name().to_string())
+        .collect();
+    // The profile bound to this phy, the one with an empty base-iface and
+    // the unbound one are in; the profile bound to another phy is out.
+    assert!(names.contains(&"Test-WIFI".to_string()));
+    assert!(names.contains(&"Empty-Base-WIFI".to_string()));
+    assert!(names.contains(&"Unbound-WIFI".to_string()));
+    assert!(!names.contains(&"Other-WIFI".to_string()));
+    assert_eq!(names.len(), 3);
 }
 
 #[test]
-fn test_gen_wifi_plugin_state_skips_phy_without_config() {
+fn test_gen_wifi_cfg_for_new_phy_skips_manual_and_others() {
     let state: NetworkState = rmsd_yaml::from_str(
         r#"---
             interfaces:
@@ -293,13 +255,31 @@ fn test_gen_wifi_plugin_state_skips_phy_without_config() {
                 auto-connect: false
                 wifi:
                   ssid: Manual-WIFI
+              - name: eth0
+                type: ethernet
+                state: up
             "#,
     )
     .unwrap();
 
-    // A wifi-phy without any matching SSID profile is not a wifi config:
-    // the plugin must not be contacted for it.
-    assert!(gen_wifi_plugin_state_for_phy("wlan0", &state).is_empty());
+    // A manual profile is only activated by an explicit request, and a
+    // non-wifi interface is never handed over.
+    assert!(gen_wifi_cfg_for_new_phy("wlan0", &state).is_empty());
+}
+
+#[test]
+fn test_is_route_matching_iface() {
+    let state = gen_saved_state();
+    let wan0 = find_iface(&state, "wan0");
+    let vpn0_rt = state
+        .routes
+        .config
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|rt| rt.destination.as_deref() == Some("192.0.2.0/24"))
+        .unwrap();
+    assert!(!is_route_matching_iface(vpn0_rt, wan0));
 }
 
 fn gen_link_event(iface_name: &str, is_up: bool) -> InterfaceLinkEvent {
@@ -515,7 +495,7 @@ fn test_wifi_phy_down_event_does_not_reapply_wifi_cfg() {
 #[test]
 fn test_wifi_phy_down_event_does_not_return_saved_wifi_phy() {
     // A saved wifi-phy itself is not re-applied on link down: the IP
-    // purge is handled by the event worker before this helper.
+    // purge is handled by the event worker's dedicated purge entry.
     let saved_iface: Interface = rmsd_yaml::from_str(
         r#"---
             name: wlan0
@@ -718,4 +698,145 @@ fn test_gen_missing_virtual_dependents_matches_logical_parent_name() {
         gen_missing_virtual_dependents(&event, &saved_state, &cur_state);
     assert_eq!(dependents.len(), 1);
     assert_eq!(dependents[0].name(), "vlan-wan");
+}
+
+fn gen_renaming_wifi_phy_saved_state() -> NetworkState {
+    rmsd_yaml::from_str(
+        r#"---
+            version: 1
+            interfaces:
+              - name: wlan0
+                kernel-iface-name: wlan0
+                profile-name: wlan0
+                type: wifi-phy
+                identifier: mac-address
+                state: up
+                mac-address: "02:00:00:00:00:09"
+                alt-names:
+                  - name: wifi0
+            "#,
+    )
+    .unwrap()
+}
+
+fn gen_renaming_wifi_phy_cur_state() -> NetworkState {
+    rmsd_yaml::from_str(
+        r#"---
+            interfaces:
+              - name: wlp194s0
+                type: wifi-phy
+                state: down
+                mac-address: "02:00:00:00:00:09"
+                permanent-mac-address: "02:00:00:00:00:09"
+            "#,
+    )
+    .unwrap()
+}
+
+fn gen_renaming_wifi_phy_down_event() -> InterfaceLinkEvent {
+    InterfaceLinkEvent {
+        iface_name: "wlp194s0".to_string(),
+        iface_index: 2,
+        iface_type: InterfaceType::WifiPhy,
+        is_up: false,
+        is_delete: false,
+        time_stamp: SystemTime::now(),
+        ssid: None,
+        is_new_wifi_phy: true,
+    }
+}
+
+#[test]
+fn test_boot_rename_event_skips_stale_ip_purge_entry() {
+    // At boot the NIC is still named `wlp194s0` while the saved
+    // MAC-identified profile renames it to `wlan0`. The auto-connect entry
+    // for the link-down event already purges the IP stack, so the standalone
+    // purge entry must be skipped: keyed by `wlp194s0` it would survive the
+    // rename, making nispor try to create a non-exist wifi interface
+    // (EOPNOTSUPP) and handing the wifi plugin a stale interface name.
+    let saved_state = gen_renaming_wifi_phy_saved_state();
+    let cur_state = gen_renaming_wifi_phy_cur_state();
+    let cur_iface = cur_state.ifaces.kernel_ifaces.get("wlp194s0");
+    let event = gen_renaming_wifi_phy_down_event();
+    let saved_iface = find_iface(&saved_state, "wlan0");
+
+    let (new_iface, _) = handle_event_auto_connect(
+        &event,
+        saved_iface,
+        &saved_state,
+        &cur_state,
+    )
+    .expect("saved profile should match the renamed NIC by MAC");
+    assert_eq!(new_iface.kernel_iface_name(), "wlan0");
+    assert!(
+        auto_connect_targets_event_nic(&new_iface, &event, cur_iface),
+        "auto-connect entry should be detected as the event NIC"
+    );
+    assert!(
+        gen_wifi_phy_ip_purge(&event, cur_iface, true).is_none(),
+        "standalone purge entry must be skipped when auto-connect covers it"
+    );
+}
+
+#[test]
+fn test_wifi_phy_down_event_generates_ip_purge_when_not_covered() {
+    let cur_state = gen_renaming_wifi_phy_cur_state();
+    let cur_iface = cur_state.ifaces.kernel_ifaces.get("wlp194s0");
+    let event = gen_renaming_wifi_phy_down_event();
+
+    let purge = gen_wifi_phy_ip_purge(&event, cur_iface, false)
+        .expect("purge should be generated");
+    assert_eq!(purge.name(), "wlp194s0");
+    assert_eq!(purge.base_iface().state, InterfaceState::Up);
+    assert_eq!(purge.base_iface().ipv4, Some(InterfaceIpv4::new_disabled()));
+    assert_eq!(purge.base_iface().ipv6, Some(InterfaceIpv6::new_disabled()));
+
+    // Link-up event: nothing to purge.
+    let mut up_event = event.clone();
+    up_event.is_up = true;
+    assert!(gen_wifi_phy_ip_purge(&up_event, cur_iface, false).is_none());
+
+    // Interface removed: mark absent instead of up.
+    let removed = gen_wifi_phy_ip_purge(&event, None, false)
+        .expect("purge should be generated for a removed NIC");
+    assert_eq!(removed.base_iface().state, InterfaceState::Absent);
+}
+
+#[test]
+fn test_auto_connect_targets_event_nic_by_mac_or_name() {
+    let cur_state = gen_renaming_wifi_phy_cur_state();
+    let cur_iface = cur_state.ifaces.kernel_ifaces.get("wlp194s0");
+    let event = gen_renaming_wifi_phy_down_event();
+    let saved_state = gen_renaming_wifi_phy_saved_state();
+    let saved_iface = find_iface(&saved_state, "wlan0");
+
+    assert!(auto_connect_targets_event_nic(
+        saved_iface,
+        &event,
+        cur_iface
+    ));
+
+    // A different MAC is not the event NIC.
+    let other: Interface = rmsd_yaml::from_str(
+        r#"---
+            name: wlan1
+            type: wifi-phy
+            state: up
+            identifier: mac-address
+            mac-address: "02:00:00:00:00:0A"
+            "#,
+    )
+    .unwrap();
+    assert!(!auto_connect_targets_event_nic(&other, &event, cur_iface));
+
+    // Name match without MAC identifier.
+    let by_name: Interface = rmsd_yaml::from_str(
+        r#"---
+            name: wlp194s0
+            type: wifi-phy
+            state: up
+            "#,
+    )
+    .unwrap();
+    assert!(auto_connect_targets_event_nic(&by_name, &event, cur_iface));
 }

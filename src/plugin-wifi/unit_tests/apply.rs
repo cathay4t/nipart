@@ -484,6 +484,19 @@ fn unbound_wifi_cfg_falls_back_to_present_phys() {
 }
 
 #[test]
+fn empty_base_iface_is_unbound() {
+    let up_phys = vec!["wlan0".to_string(), "wlan1".to_string()];
+    let (iface, cfg) = cfg_iface("Test-WIFI", Some(""));
+
+    // An empty base-iface behaves like an undefined one.
+    assert_eq!(wifi_cfg_phy_names(&iface, &cfg, &up_phys, &[]), up_phys);
+    assert_eq!(
+        wifi_cfg_phy_names(&iface, &cfg, &[], &["wlan0".to_string()]),
+        vec!["wlan0".to_string()]
+    );
+}
+
+#[test]
 fn bound_wifi_cfg_targets_base_iface_only() {
     let up_phys = vec!["wlan0".to_string(), "wlan1".to_string()];
     let (iface, cfg) = cfg_iface("Test-WIFI", Some("wlan1"));
