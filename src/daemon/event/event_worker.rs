@@ -136,6 +136,10 @@ impl NipartEventWorker {
             // Kernel event is always for kernel interface
             let mut cur_iface =
                 cur_state.ifaces.kernel_ifaces.get(&event.iface_name);
+            // An auto-connect entry for this event's NIC already disables the
+            // IP stack on a link-down event, making the standalone purge
+            // below redundant.
+            let mut auto_connect_covers_ip_purge = false;
 
             // Skip stale link-down events: when the interface's current link
             // state is already up, a queued down event is a leftover of an
@@ -261,29 +265,6 @@ impl NipartEventWorker {
                 }
             }
 
-            // Purge IP if WIFI PHY interface is down or removed
-            if !event.is_up && event.iface_type == InterfaceType::WifiPhy {
-                let mut desired_iface = BaseInterface::new(
-                    event.iface_name.to_string(),
-                    event.iface_type.clone(),
-                );
-                desired_iface.state = if cur_iface.is_some() {
-                    InterfaceState::Up
-                } else {
-                    // WIFI PHY interface removed.
-                    InterfaceState::Absent
-                };
-                // Purge IP
-                desired_iface.ipv4 = Some(InterfaceIpv4::new_disabled());
-                desired_iface.ipv6 = Some(InterfaceIpv6::new_disabled());
-                log::trace!(
-                    "{}: link down on wifi-phy, purging IP stack: \
-                     {desired_iface}",
-                    event.iface_name
-                );
-                desired_state.ifaces.push(desired_iface.into());
-            }
-
             for saved_iface in saved_state.ifaces.iter() {
                 if event.iface_type == InterfaceType::WifiPhy
                     && let Some(new_iface) =
@@ -319,6 +300,11 @@ impl NipartEventWorker {
                     &saved_state,
                     &cur_state,
                 ) {
+                    if auto_connect_targets_event_nic(
+                        &new_iface, &event, cur_iface,
+                    ) {
+                        auto_connect_covers_ip_purge = true;
+                    }
                     desired_state.ifaces.push(new_iface);
                     let config_routes =
                         desired_state.routes.config.get_or_insert_default();
@@ -341,6 +327,19 @@ impl NipartEventWorker {
                         config_rules.push(rule);
                     }
                 }
+            }
+
+            if let Some(purge_iface) = gen_wifi_phy_ip_purge(
+                &event,
+                cur_iface,
+                auto_connect_covers_ip_purge,
+            ) {
+                log::trace!(
+                    "{}: link down on wifi-phy, purging IP stack: \
+                     {purge_iface}",
+                    event.iface_name
+                );
+                desired_state.ifaces.push(purge_iface);
             }
 
             // The event may be the first time the kernel interface exists:
@@ -891,12 +890,84 @@ fn handle_event_auto_connect(
     }
 }
 
+/// Whether the auto-connect desired state `iface` targets the NIC named by
+/// `event`: matched by kernel name or, for MAC-identified configs, by MAC
+/// address. Mirrors the matching in
+/// [`Interface::process_auto_connect()`].
+fn auto_connect_targets_event_nic(
+    iface: &Interface,
+    event: &InterfaceLinkEvent,
+    cur_iface: Option<&Interface>,
+) -> bool {
+    if iface.kernel_iface_name() == event.iface_name {
+        return true;
+    }
+    let Some(cur_iface) = cur_iface else {
+        return false;
+    };
+    iface.base_iface().identifier == Some(InterfaceIdentifier::MacAddress)
+        && iface
+            .base_iface()
+            .mac_address
+            .as_deref()
+            .is_some_and(|saved_mac| {
+                let saved_mac = saved_mac.to_ascii_uppercase();
+                let cur_base = cur_iface.base_iface();
+                cur_base
+                    .permanent_mac_address
+                    .as_deref()
+                    .is_some_and(|m| m.to_ascii_uppercase() == saved_mac)
+                    || cur_base
+                        .mac_address
+                        .as_deref()
+                        .is_some_and(|m| m.to_ascii_uppercase() == saved_mac)
+            })
+}
+
+/// Generate the desired state which purges the IP stack of the wifi-phy a
+/// link-down event refers to.
+///
+/// Returns `None` when the event is not a wifi-phy link-down, or when an
+/// auto-connect entry for the same NIC already purges the IP stack
+/// (`gen_desired_iface_down()` disables both IP stacks). The latter matters
+/// when a saved config renames the NIC at boot: pushing this standalone
+/// purge under the current kernel name would leave a second merged entry
+/// whose name no longer exists after the rename, failing the nispor batch
+/// with `EOPNOTSUPP` and handing the wifi plugin a non-existent interface.
+fn gen_wifi_phy_ip_purge(
+    event: &InterfaceLinkEvent,
+    cur_iface: Option<&Interface>,
+    auto_connect_covers_ip_purge: bool,
+) -> Option<Interface> {
+    if event.is_up
+        || event.iface_type != InterfaceType::WifiPhy
+        || auto_connect_covers_ip_purge
+    {
+        return None;
+    }
+    let mut desired_iface = BaseInterface::new(
+        event.iface_name.to_string(),
+        event.iface_type.clone(),
+    );
+    desired_iface.state = if cur_iface.is_some() {
+        InterfaceState::Up
+    } else {
+        // WIFI PHY interface removed.
+        InterfaceState::Absent
+    };
+    // Purge IP
+    desired_iface.ipv4 = Some(InterfaceIpv4::new_disabled());
+    desired_iface.ipv6 = Some(InterfaceIpv6::new_disabled());
+    Some(desired_iface.into())
+}
+
 fn handle_wifi_phy_event(
     event: &InterfaceLinkEvent,
     saved_iface: &Interface,
 ) -> Option<Interface> {
     if !event.is_up && saved_iface.iface_type() == &InterfaceType::WifiPhy {
-        // Already processed above to purge IP on this wifi-phy interface.
+        // The IP purge of a wifi-phy link-down is handled by the event
+        // worker's dedicated purge entry, not by this helper.
         None
     } else if event.is_up
         && event.ssid.is_some()
