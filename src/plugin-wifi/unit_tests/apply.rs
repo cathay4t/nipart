@@ -616,14 +616,23 @@ fn bound_wifi_cfg_targets_base_iface_only() {
     let up_phys = vec!["wlan0".to_string(), "wlan1".to_string()];
     let (iface, cfg) = cfg_iface("Test-WIFI", Some("wlan1"));
 
+    // The bound phy is brought up by this apply.
     assert_eq!(
         wifi_cfg_phy_names(&iface, &cfg, &up_phys, &[]),
         vec!["wlan1".to_string()]
     );
+    // The bound phy is already present in the kernel.
     assert_eq!(
-        wifi_cfg_phy_names(&iface, &cfg, &[], &["wlan0".to_string()]),
+        wifi_cfg_phy_names(&iface, &cfg, &[], &["wlan1".to_string()]),
         vec!["wlan1".to_string()]
     );
+    // The bound phy is absent: the profile is deferred until it appears,
+    // never handed to shuli as a non-existent interface.
+    assert!(
+        wifi_cfg_phy_names(&iface, &cfg, &[], &["wlan0".to_string()])
+            .is_empty()
+    );
+    assert!(wifi_cfg_phy_names(&iface, &cfg, &[], &[]).is_empty());
 }
 
 #[test]

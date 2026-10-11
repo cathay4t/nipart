@@ -486,11 +486,23 @@ impl WifiClientState {
                 &present_wifi_phys,
             );
             if phy_names.is_empty() {
-                log::warn!(
-                    "WifiCfg interface {} has no base_iface specified, no \
-                     wifi-phy available to bind to",
-                    iface.name()
-                );
+                if let Some(base_iface) = wifi_cfg
+                    .base_iface
+                    .as_deref()
+                    .filter(|base_iface| !base_iface.is_empty())
+                {
+                    log::debug!(
+                        "WifiCfg interface {} is bound to WIFI interface \
+                         {base_iface} which is not present, deferring",
+                        iface.name()
+                    );
+                } else {
+                    log::warn!(
+                        "WifiCfg interface {} has no base_iface specified, no \
+                         wifi-phy available to bind to",
+                        iface.name()
+                    );
+                }
                 continue;
             }
             for phy_name in phy_names {
@@ -831,7 +843,18 @@ fn wifi_cfg_phy_names(
         .as_ref()
         .filter(|base_iface| !base_iface.is_empty())
     {
-        vec![base_iface.clone()]
+        // An explicit base-iface must exist in the kernel or be brought up
+        // by this apply.  A profile bound to an absent phy is deferred
+        // (the event worker hands it to the plugin once that phy appears):
+        // creating a shuli client for a non-existent interface would fail
+        // the whole client (and disconnect every other phy).
+        if present_wifi_phys.iter().any(|phy| phy == base_iface)
+            || up_wifi_phys.contains(base_iface)
+        {
+            vec![base_iface.clone()]
+        } else {
+            Vec::new()
+        }
     } else if !up_wifi_phys.is_empty() {
         up_wifi_phys.to_vec()
     } else {
