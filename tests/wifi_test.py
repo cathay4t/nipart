@@ -633,10 +633,20 @@ class TestWifi:
                       dhcp: true"""))
         assert retry_till_true_or_timeout(5, ping_wifi_peer)
 
-    def test_wifi_scan_dump_without_subcommand(self, wifi_env):  # noqa: F811
+    def test_wifi_scan_dump_without_subcommand(
+        self, clean_up, wifi_env  # noqa: F811
+    ):
         # `npt wifi` without argument dumps the scan results the kernel
         # already has (like `iw dev <iface> scan dump`) in the same
         # output format as `npt wifi scan`.
+        #
+        # The previous test's cleanup brought the WIFI interface down;
+        # an active scan requires it to be up.
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                  - name: {WIFI_TEST_NIC}
+                    type: wifi-phy
+                    state: up"""))
         exec_cmd([npt_path(), "wifi", "scan"])
         rc, out, err = exec_cmd([npt_path(), "wifi"], check=False)
         assert rc == 0, f"npt wifi failed:\n{out}\n{err}"
