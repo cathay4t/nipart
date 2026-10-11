@@ -626,8 +626,10 @@ event for the same interface replaces or removes the queued entry.
   fresh process after a daemon restart, so WIFI is always started from
   scratch; there is no special adoption of the kernel association. The
   initial batch treats the restart as a normal boot: it hands the saved
-  profiles to the plugin and shuli scans/connects. A future quick-boot
-  file (`wifi_quick_boot.yml`, see [plan.md](plan.md)) may shorten this.
+  profiles to the plugin and shuli scans/connects. The WIFI quick-start
+  hints ([wifi_quick_start.md](wifi_quick_start.md)) shorten this by
+  restricting the first scan to the channels the saved SSID has been
+  seen on.
 * **Reconciliation storm**: a flapping interface produces at most one
   batch per interval; the 10 s `DOWN_WAIT_SEC` debounce still applies to
   live events.

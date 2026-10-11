@@ -29,31 +29,23 @@ instead of starting from DISCOVER.
 
 ## WIFI Quick Boot
 
-Persist per wifi-phy the last successful connection to
-`/var/lib/nipart/wifi_quick_boot.yml`:
-
-* SSID, BSSID, frequency, security type and last-seen time;
-* the scan-free hints shuli already supports
-  (`NetworkConfig::hints` / `NetworkConfigHints`): the BSS the client was
-  working toward, so `WifiClient` can try a direct connect
-  (`FastReconnect::SameBss`) or a hinted quick scan before falling back
-  to a full scan.
-
-On daemon start, when the monitor hands the saved wifi profiles to the
-wifi plugin, the plugin attaches the persisted hints for the matching
-phy. If the AP is gone, moved to another BSSID/channel or has a different
-security, shuli falls back to the normal scan automatically; stale hints
-must never fail a boot.
-
-Passwords are **not** stored in this file; the saved secrets remain in
-`/etc/nipart/applied.secrets.yml`.
+Implemented as the frequency-hint quick start; see
+[wifi_quick_start.md](wifi_quick_start.md) for the design and the code
+layout. The earlier sketch below - persisting complete
+`NetworkConfigHints` (BSSID/security/RSNE) to a single
+`/var/lib/nipart/wifi_quick_boot.yml` for scan-free authentication - was
+superseded: nipart now stores BSSID + frequency per SSID under
+`/var/lib/nipart/wifi/` and attaches frequency-only hints, which keeps
+shuli's scan-free path disabled and bounds stale-hint latency to one
+quick scan.
 
 ## DHCP Lease Quick Boot
 
 Persist the last active lease per interface (address and prefix length,
 gateway, DNS servers, server identifier, lease time/expiry, client ID or
 DUID). The exact file name is open; `/var/lib/nipart/dhcp_quick_boot.yml`
-mirrors the WIFI file.
+mirrors the implemented WIFI quick-start layout
+([wifi_quick_start.md](wifi_quick_start.md)).
 
 On daemon start:
 
@@ -68,6 +60,10 @@ dropped and a full DISCOVER issued when the server NAKs, the lease
 expired, or the interface's saved config changed.
 
 ## File Format and Lifecycle
+
+These bullets apply to the future DHCP quick-boot file; the WIFI hints
+are implemented with a different per-SSID layout, see
+[wifi_quick_start.md](wifi_quick_start.md).
 
 * Versioned YAML, root-only (`0600`), following the `applied.yml`
   conventions.
@@ -89,8 +85,11 @@ expired, or the interface's saved config changed.
 ## Open Items
 
 * Persist PMKSA / 802.11r state to skip the full SAE exchange? Sensitive,
-  needs a threat model and key protection.
-* Roaming hints for multiple BSSIDs of the same ESS.
+  needs a threat model and key protection. The WIFI quick start
+  deliberately does not do this.
+* Roaming hints for multiple BSSIDs of the same ESS - implemented for
+  WIFI by accumulating every connected BSS in one per-SSID hint file.
 * Interaction with `wait-online` and the daemon online latch.
 * Whether WIFI and DHCP information share one quick-boot file or stay in
-  separate ones.
+  separate ones - decided: separate per-SSID WIFI files and a separate
+  DHCP file.

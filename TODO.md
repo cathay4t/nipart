@@ -68,6 +68,9 @@
   portal": legacy portals need probing anyway (later: probe after every
   DHCP lease/link-up).
 - Not covered yet: DHCPv6 option 103 and IPv6 RA option 37.
+- Honor `WifiConfig.bssid` (BSSID pinning): pass it to the wifi plugin
+  once shuli supports a per-network BSSID pin, and never fail over to
+  another AP of the same SSID for a pinned profile.
 
 ## Test environment: `TestWifiPhyLater` hostapd startup flake
 

@@ -13,9 +13,12 @@ use nipart::{
     NipartWifiControl, WifiConfig,
 };
 use shuli::{
-    NetworkConfig as ShuliNetworkConfig, WifiClient,
+    KnownBss as ShuliKnownBss, NetworkConfig as ShuliNetworkConfig,
+    NetworkConfigHints as ShuliNetworkConfigHints, WifiClient,
     WifiConfig as ShuliWifiConfig, WifiState,
 };
+
+use crate::hints;
 
 /// Per-interface metadata kept by the plugin while the single shuli
 /// `WifiClient` owns the actual connection state machines.
@@ -302,16 +305,26 @@ impl WifiClientState {
                     .to_string();
                 let bssid = client
                     .current_bssid(iface_name)
-                    .filter(|mac| *mac != [0; 6])
-                    .map(|mac| mac_to_string(&mac));
+                    .filter(|mac| *mac != [0; 6]);
+                // Record the BSS in the per-SSID quick-start hints so
+                // the next boot can restrict its first scan to the
+                // known channels. Best effort.
+                let hints = client.export_hints(iface_name);
+                save_quick_start_hints(&ssid, hints.as_ref());
                 log::info!(
                     "WIFI connected on {iface_name}: SSID {ssid}, BSSID {}",
-                    bssid.as_deref().unwrap_or("00:00:00:00:00:00")
+                    bssid
+                        .map(|mac| mac_to_string(&mac))
+                        .as_deref()
+                        .unwrap_or("00:00:00:00:00:00")
                 );
                 self.clear_connect_error(iface_name);
                 self.set_live_connected(
                     iface_name,
-                    WifiLiveState { ssid, bssid },
+                    WifiLiveState {
+                        ssid,
+                        bssid: bssid.map(|mac| mac_to_string(&mac)),
+                    },
                 );
             }
             WifiState::Failed => {
@@ -445,10 +458,12 @@ impl WifiClientState {
                     // wifi-cfg removal: drop the SSID from every phy
                     // that currently has it configured.
                     ssids_to_delete.insert(wifi_cfg.ssid.as_str());
+                    hints::remove(&wifi_cfg.ssid);
                 } else {
                     // An absent wifi-cfg strips its wifi section; the
                     // profile name is the SSID it was created for.
                     ssids_to_delete.insert(iface.name());
+                    hints::remove(iface.name());
                 }
                 continue;
             } else if !iface.is_up() {
@@ -482,6 +497,20 @@ impl WifiClientState {
                 desired.entry(phy_name).or_default().push(wifi_cfg);
             }
         }
+
+        // Quick-start hints per SSID (one load per SSID even when it is
+        // configured on several phys). The hints narrow shuli's first
+        // scan and let it prefer the BSSes the client already knows;
+        // shuli falls back to a full scan when they miss.
+        let mut hint_map: HashMap<String, hints::LoadedHints> = HashMap::new();
+        for wifi_cfgs in desired.values() {
+            for wifi_cfg in wifi_cfgs {
+                hint_map
+                    .entry(wifi_cfg.ssid.clone())
+                    .or_insert_with(|| hints::load_hints(&wifi_cfg.ssid));
+            }
+        }
+        hint_map.retain(|_, loaded| !loaded.is_empty());
 
         let mut recreate = false;
 
@@ -531,9 +560,10 @@ impl WifiClientState {
                     merge_preferred_networks(
                         &iface_state.desired_networks,
                         wifi_cfgs,
+                        &hint_map,
                     )?
                 }
-                Some(wifi_cfgs) => build_shuli_networks(wifi_cfgs)?,
+                Some(wifi_cfgs) => build_shuli_networks(wifi_cfgs, &hint_map)?,
                 None => {
                     let mut networks = iface_state.desired_networks.clone();
                     networks.retain(|network| {
@@ -556,6 +586,12 @@ impl WifiClientState {
             };
             if network_list_changed || (force && !networks.is_empty()) {
                 pending_networks.insert(iface_name.clone(), networks);
+            } else if !force {
+                // Only the loaded hints differ (a new BSS was recorded
+                // while connected): adopt them in the stored list used
+                // on the next client start, without resetting the live
+                // client.
+                refresh_hints(&mut iface_state.desired_networks, &networks);
             }
         }
 
@@ -566,9 +602,9 @@ impl WifiClientState {
                 continue;
             }
             let networks = if force && wifi_cfgs.len() == 1 {
-                merge_preferred_networks(&[], wifi_cfgs)?
+                merge_preferred_networks(&[], wifi_cfgs, &hint_map)?
             } else {
-                build_shuli_networks(wifi_cfgs)?
+                build_shuli_networks(wifi_cfgs, &hint_map)?
             };
             let if_index =
                 wifi_phys_if_index.get(iface_name).copied().unwrap_or(0);
@@ -732,6 +768,19 @@ impl WifiClientState {
     }
 }
 
+/// Record a successful shuli connection in the per-SSID quick-start
+/// hints. Best effort: a failure is logged, never propagated.
+fn save_quick_start_hints(ssid: &str, hints: Option<&ShuliNetworkConfigHints>) {
+    let Some((bssid, freq_mhz)) =
+        hints.and_then(|hints| hints.bssid.zip(hints.frequency_mhz))
+    else {
+        return;
+    };
+    if let Err(e) = hints::record_bss(ssid, &bssid, freq_mhz) {
+        log::warn!("Failed to save WIFI quick-start hints for {ssid}: {e}");
+    }
+}
+
 fn has_wifi_ssid_up_request(ifaces: &[Interface]) -> bool {
     ifaces.iter().any(|iface| {
         if !iface.is_up() {
@@ -800,8 +849,13 @@ fn mac_to_string(mac: &[u8; 6]) -> String {
 /// Convert nipart wifi configs into one shuli network list, keeping the
 /// order of the desired interfaces and de-duplicating SSIDs. Conflicting
 /// credentials for the same SSID on the same phy are an error.
+///
+/// `hint_map` carries the per-SSID quick-start hints (frequencies and
+/// known BSSes) loaded from the hint files; SSIDs without hints stay
+/// hint-free.
 fn build_shuli_networks(
     wifi_cfgs: &[&WifiConfig],
+    hint_map: &HashMap<String, hints::LoadedHints>,
 ) -> Result<Vec<ShuliNetworkConfig>, NipartError> {
     let mut ret: Vec<ShuliNetworkConfig> = Vec::new();
     for wifi_cfg in wifi_cfgs {
@@ -819,7 +873,7 @@ fn build_shuli_networks(
             log::debug!("Ignoring duplicate WIFI SSID {}", wifi_cfg.ssid);
             continue;
         }
-        ret.push(build_shuli_network(wifi_cfg));
+        ret.push(build_shuli_network(wifi_cfg, hint_map.get(&wifi_cfg.ssid)));
     }
     Ok(ret)
 }
@@ -829,6 +883,10 @@ fn build_shuli_networks(
 /// `prefered` is a per-connection hint, not a saved property: nipart may
 /// mark the requested SSID of a forced `npt up` as preferred, and a later
 /// re-apply of the same saved profiles must not treat that as a change.
+///
+/// The frequency `hints` are a boot-time optimization loaded from the
+/// hint files, not a saved property either: a new BSS recorded while
+/// connected must not restart the live client.
 ///
 /// The order of the entries is ignored as well: callers deliver the saved
 /// profiles through hash-map-backed state whose iteration order is not
@@ -847,6 +905,7 @@ fn same_saved_networks_ignoring_prefered(
             .cloned()
             .map(|mut network| {
                 network.prefered = false;
+                network.hints = ShuliNetworkConfigHints::new();
                 network
             })
             .collect::<Vec<_>>()
@@ -895,13 +954,54 @@ fn should_reconnect_to_networks(
         .is_some_and(|ssid| networks.iter().any(|network| network.ssid == ssid))
 }
 
-fn build_shuli_network(wifi_cfg: &WifiConfig) -> ShuliNetworkConfig {
+fn build_shuli_network(
+    wifi_cfg: &WifiConfig,
+    loaded_hints: Option<&hints::LoadedHints>,
+) -> ShuliNetworkConfig {
     let mut network = ShuliNetworkConfig::new(&wifi_cfg.ssid);
     network.set_hidden(wifi_cfg.hidden);
     if let Some(password) = wifi_cfg.password.as_deref() {
         network.set_password(password);
     }
+    if let Some(loaded) = loaded_hints.filter(|hints| !hints.is_empty()) {
+        // Frequency + known-BSS hints: they restrict the first scan to
+        // the known channels and make shuli prefer the BSSes the client
+        // already connected to. No complete BSS hint (security/RSNE) is
+        // attached, so shuli's scan-free direct-auth path stays disabled
+        // (see docs/english/design/wifi_quick_start.md).
+        network.set_hints(
+            ShuliNetworkConfigHints::new()
+                .with_frequencies_mhz(loaded.frequencies_mhz.clone())
+                .with_known_bss(
+                    loaded
+                        .known_bss
+                        .iter()
+                        .map(|(bssid, freq_mhz)| {
+                            ShuliKnownBss::new(*bssid, *freq_mhz)
+                        })
+                        .collect(),
+                ),
+        );
+    }
     network
+}
+
+/// Copy freshly loaded hints into the stored network list without
+/// treating the list as changed.
+///
+/// The live client is left alone; the refreshed hints are used on the
+/// next client start (restart, reconnect after suspend, ...).
+fn refresh_hints(
+    current: &mut [ShuliNetworkConfig],
+    desired: &[ShuliNetworkConfig],
+) {
+    for network in current {
+        if let Some(fresh) =
+            desired.iter().find(|fresh| fresh.ssid == network.ssid)
+        {
+            network.hints = fresh.hints.clone();
+        }
+    }
 }
 
 /// Merge an explicit single-SSID `npt up` request into the existing shuli
@@ -911,6 +1011,7 @@ fn build_shuli_network(wifi_cfg: &WifiConfig) -> ShuliNetworkConfig {
 fn merge_preferred_networks(
     existing: &[ShuliNetworkConfig],
     wifi_cfgs: &[&WifiConfig],
+    hint_map: &HashMap<String, hints::LoadedHints>,
 ) -> Result<Vec<ShuliNetworkConfig>, NipartError> {
     let mut requested: Vec<ShuliNetworkConfig> = Vec::new();
     for wifi_cfg in wifi_cfgs {
@@ -929,7 +1030,8 @@ fn merge_preferred_networks(
             }
             continue;
         }
-        let mut network = build_shuli_network(wifi_cfg);
+        let mut network =
+            build_shuli_network(wifi_cfg, hint_map.get(&wifi_cfg.ssid));
         network.set_prefered(true);
         requested.push(network);
     }

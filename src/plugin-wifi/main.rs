@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod apply;
+mod hints;
 mod plugin;
 mod query;
 mod scan;

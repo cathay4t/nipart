@@ -22,4 +22,5 @@
 
 ## Design
 * [Interface Monitor](design/monitor.md)
+* [WIFI Quick Start](design/wifi_quick_start.md)
 * [Quick Boot Plan](design/plan.md)
