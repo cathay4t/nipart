@@ -38,6 +38,9 @@ function before_exit {
     $SUDO rm -rf /etc/nipart 2>/dev/null || true
     $SUDO mv -f /etc/nipart.bak \
         /etc/nipart 2>/dev/null || true
+    $SUDO rm -rf /var/lib/nipart/wifi 2>/dev/null || true
+    $SUDO mv -f /var/lib/nipart/wifi.bak \
+        /var/lib/nipart/wifi 2>/dev/null || true
 }
 
 function collect_logs {
@@ -62,6 +65,9 @@ build
 
 $SUDO mv -f /etc/nipart/ \
     /etc/nipart.bak 2>/dev/null || true
+
+$SUDO mv -f /var/lib/nipart/wifi \
+    /var/lib/nipart/wifi.bak 2>/dev/null || true
 
 $SUDO bash -c "ulimit -c unlimited"
 

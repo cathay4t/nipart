@@ -22,3 +22,4 @@
 
 ## 设计
 * [接口监视器](design/monitor.md)
+* [WIFI 快速启动](design/wifi_quick_start.md)

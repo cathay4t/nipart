@@ -238,7 +238,7 @@ fn build_shuli_networks_keeps_order_and_dedupes() {
         wifi_cfg("A", None),
     ];
     let refs: Vec<&WifiConfig> = cfgs.iter().collect();
-    let networks = build_shuli_networks(&refs).unwrap();
+    let networks = build_shuli_networks(&refs, &HashMap::new()).unwrap();
     assert_eq!(networks.len(), 2);
     assert_eq!(networks[0].ssid, "A");
     assert_eq!(networks[0].password, None);
@@ -250,7 +250,57 @@ fn build_shuli_networks_keeps_order_and_dedupes() {
 fn build_shuli_networks_rejects_conflicting_password() {
     let cfgs = [wifi_cfg("A", Some("one")), wifi_cfg("A", Some("two"))];
     let refs: Vec<&WifiConfig> = cfgs.iter().collect();
-    assert!(build_shuli_networks(&refs).is_err());
+    assert!(build_shuli_networks(&refs, &HashMap::new()).is_err());
+}
+
+#[test]
+fn build_shuli_networks_attaches_hints_to_matching_ssid() {
+    let cfgs = [wifi_cfg("A", None), wifi_cfg("B", None)];
+    let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+    let mut hint_map = HashMap::new();
+    hint_map.insert(
+        "A".to_string(),
+        hints::LoadedHints {
+            frequencies_mhz: vec![2412, 5180],
+            known_bss: vec![
+                ([0x02, 0x00, 0x00, 0x00, 0x00, 0x01], 2412),
+                ([0x02, 0x00, 0x00, 0x00, 0x00, 0x02], 5180),
+            ],
+        },
+    );
+
+    let networks = build_shuli_networks(&refs, &hint_map).unwrap();
+
+    assert_eq!(networks[0].hints.frequencies_mhz, vec![2412, 5180]);
+    assert_eq!(
+        networks[0].hints.known_bss,
+        vec![
+            ShuliKnownBss::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x01], 2412),
+            ShuliKnownBss::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x02], 5180),
+        ]
+    );
+    assert_eq!(
+        networks[0].hints.bssid, None,
+        "no complete BSS hint: shuli's scan-free path must not be enabled"
+    );
+    assert!(
+        networks[1].hints.frequencies_mhz.is_empty()
+            && networks[1].hints.known_bss.is_empty(),
+        "a hinted SSID must not leak hints to another SSID"
+    );
+}
+
+#[test]
+fn empty_hints_are_not_attached() {
+    let cfgs = [wifi_cfg("A", None)];
+    let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+    let mut hint_map = HashMap::new();
+    hint_map.insert("A".to_string(), hints::LoadedHints::default());
+
+    let networks = build_shuli_networks(&refs, &hint_map).unwrap();
+
+    assert!(networks[0].hints.frequencies_mhz.is_empty());
+    assert!(networks[0].hints.known_bss.is_empty());
 }
 
 #[test]
@@ -270,6 +320,39 @@ fn same_saved_networks_ignoring_prefered_only() {
         &preferred,
         &extra_network
     ));
+}
+
+#[test]
+fn same_saved_networks_ignores_hint_changes() {
+    // A BSS recorded while connected changes the hints of a saved
+    // profile; an idempotent re-apply must still compare equal so the
+    // live client is not restarted.
+    let plain = [network("A", None, false)];
+    let mut hinted = network("A", None, false);
+    hinted.set_hints(
+        ShuliNetworkConfigHints::new().with_frequencies_mhz(vec![2412]),
+    );
+
+    assert!(same_saved_networks_ignoring_prefered(
+        std::slice::from_ref(&hinted),
+        &plain
+    ));
+    assert!(same_saved_networks_ignoring_prefered(&plain, &[hinted]));
+}
+
+#[test]
+fn refresh_hints_updates_only_the_hints() {
+    let mut current = vec![network("A", Some("pw"), true)];
+    let mut desired = network("A", None, false);
+    desired.set_hints(
+        ShuliNetworkConfigHints::new().with_frequencies_mhz(vec![5180]),
+    );
+
+    refresh_hints(&mut current, &[desired]);
+
+    assert_eq!(current[0].hints.frequencies_mhz, vec![5180]);
+    assert_eq!(current[0].password.as_deref(), Some("pw"));
+    assert!(current[0].prefered, "the preferred mark must be preserved");
 }
 
 #[test]
@@ -384,7 +467,8 @@ fn merge_preferred_networks_keeps_others_and_prefers_requested() {
     let cfgs = [wifi_cfg("B", Some("b-new"))];
     let refs: Vec<&WifiConfig> = cfgs.iter().collect();
 
-    let merged = merge_preferred_networks(&existing, &refs).unwrap();
+    let merged =
+        merge_preferred_networks(&existing, &refs, &HashMap::new()).unwrap();
 
     assert_eq!(merged.len(), 2);
     assert_eq!(merged[0].ssid, "A");
@@ -400,7 +484,8 @@ fn merge_preferred_networks_appends_new_ssid() {
     let cfgs = [wifi_cfg("B", None)];
     let refs: Vec<&WifiConfig> = cfgs.iter().collect();
 
-    let merged = merge_preferred_networks(&existing, &refs).unwrap();
+    let merged =
+        merge_preferred_networks(&existing, &refs, &HashMap::new()).unwrap();
 
     assert_eq!(merged.len(), 2);
     assert_eq!(merged[0].ssid, "A");
@@ -414,7 +499,7 @@ fn merge_preferred_networks_dedupes_requested_ssids() {
     let cfgs = [wifi_cfg("A", Some("secret")), wifi_cfg("A", Some("secret"))];
     let refs: Vec<&WifiConfig> = cfgs.iter().collect();
 
-    let merged = merge_preferred_networks(&[], &refs).unwrap();
+    let merged = merge_preferred_networks(&[], &refs, &HashMap::new()).unwrap();
 
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].ssid, "A");
@@ -426,7 +511,7 @@ fn merge_preferred_networks_rejects_conflicting_password() {
     let cfgs = [wifi_cfg("A", Some("one")), wifi_cfg("A", Some("two"))];
     let refs: Vec<&WifiConfig> = cfgs.iter().collect();
 
-    assert!(merge_preferred_networks(&[], &refs).is_err());
+    assert!(merge_preferred_networks(&[], &refs, &HashMap::new()).is_err());
 }
 
 fn phy_iface(name: &str, state: InterfaceState) -> Interface {

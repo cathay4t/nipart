@@ -558,8 +558,8 @@ SSID，事件 worker 的 nispor 重试与插件回退照常生效；对账本身
 * **守护进程在已连接的 wifi 关联上重启**：守护进程重启后 wifi 插件是
   全新进程，因此 WIFI 总是从头开始；不存在对内核关联的特殊接管。初始
   批次把重启当作普通启动：把已保存配置交给插件，由 shuli 扫描/连接。
-  未来的快速启动文件（`wifi_quick_boot.yml`，见 [plan.md](plan.md)）
-  可能缩短这一过程。
+  WIFI 快速启动提示（[wifi_quick_start.md](wifi_quick_start.md)）通过把
+  首次扫描限制在该已保存 SSID 曾出现过的信道上来缩短这一过程。
 * **对账风暴**：抖动的接口每个间隔最多产生一个批次；10 秒的
   `DOWN_WAIT_SEC` 去抖仍适用于实时事件。
 * **事务锁永不释放**：在第一批次运行期间发出的 `npt apply`、`npt up`、
