@@ -777,7 +777,11 @@ fn wifi_cfg_phy_names(
 ) -> Vec<String> {
     if iface.iface_type() == &InterfaceType::WifiPhy {
         vec![iface.kernel_iface_name().to_string()]
-    } else if let Some(base_iface) = wifi_cfg.base_iface.as_ref() {
+    } else if let Some(base_iface) = wifi_cfg
+        .base_iface
+        .as_ref()
+        .filter(|base_iface| !base_iface.is_empty())
+    {
         vec![base_iface.clone()]
     } else if !up_wifi_phys.is_empty() {
         up_wifi_phys.to_vec()

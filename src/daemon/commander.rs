@@ -500,7 +500,10 @@ fn gen_non_nic_state(
 ) -> NetworkState {
     let mut ret = NetworkState::default();
     for iface in saved_state.ifaces.iter() {
-        if iface.is_virtual() {
+        // `wifi-cfg` profiles are userspace-only and need a wifi-phy to bind
+        // to: the event worker hands them to the wifi plugin when a phy
+        // appears, so boot must not apply them here.
+        if iface.is_virtual() && iface.iface_type() != &InterfaceType::WifiCfg {
             ret.ifaces.push(iface.clone());
         }
     }
@@ -541,8 +544,10 @@ fn gen_non_nic_state(
 
 /// Names of the saved virtual interfaces which can exist after this apply: a
 /// virtual interface already present in the kernel, or whose parent/ports all
-/// belong to this set.  Userspace interfaces (e.g. OVS bridge, wifi-cfg) are
-/// created by their plugin and count as ready.
+/// belong to this set.  Userspace interfaces (e.g. OVS bridge) are created by
+/// their plugin and count as ready.  A `wifi-cfg` profile is not ready: it is
+/// only handed to the wifi plugin when a wifi-phy appears, so routes/rules
+/// naming it are deferred to the event path.
 fn gen_creatable_virtual_names(
     saved_state: &NetworkState,
     cur_state: &NetworkState,
@@ -554,11 +559,11 @@ fn gen_creatable_virtual_names(
     // ready once its whole dependency chain is.
     loop {
         let mut changed = false;
-        for iface in saved_state
-            .ifaces
-            .iter()
-            .filter(|i| i.is_virtual() && !i.is_absent())
-        {
+        for iface in saved_state.ifaces.iter().filter(|i| {
+            i.is_virtual()
+                && !i.is_absent()
+                && i.iface_type() != &InterfaceType::WifiCfg
+        }) {
             let names = virtual_iface_identity_names(iface);
             if names.iter().any(|name| ready.contains(name)) {
                 ret.extend(names);

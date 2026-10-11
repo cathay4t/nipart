@@ -216,6 +216,49 @@ fn test_gen_non_nic_state_keeps_virtual_and_global_only() {
 }
 
 #[test]
+fn test_gen_non_nic_state_defers_wifi_cfg_and_dependents() {
+    let state: NetworkState = rmsd_yaml::from_str(
+        r#"---
+            routes:
+              config:
+                - destination: 203.0.113.0/24
+                  next-hop-interface: Test-WIFI
+                  next-hop-address: 192.0.2.1
+                  metric: 103
+            route-rules:
+              config:
+                - ip-from: 203.0.113.0/24
+                  route-table: 500
+                  iif: Test-WIFI
+            interfaces:
+              - name: eth0
+                type: ethernet
+                state: up
+              - name: Test-WIFI
+                type: wifi-cfg
+                state: up
+                wifi:
+                  ssid: Test-WIFI
+            "#,
+    )
+    .unwrap();
+
+    // A `wifi-cfg` profile needs a wifi-phy: the event worker hands it to the
+    // plugin once a phy appears, so boot must defer the profile, its routes
+    // and its route rules to the event path.
+    let non_nic = gen_non_nic_state(&state, &NetworkState::default());
+    assert_eq!(non_nic.ifaces.iter().count(), 0);
+    assert!(non_nic.routes.config.is_none());
+    assert!(
+        non_nic
+            .route_rules
+            .config
+            .as_ref()
+            .is_none_or(|rules| rules.is_empty())
+    );
+}
+
+#[test]
 fn test_remove_manual_activation() {
     // Interfaces with `auto-connect: false`, their dependents, and
     // routes pointing to them are removed from the boot state.

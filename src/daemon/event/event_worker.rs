@@ -123,12 +123,14 @@ impl NipartEventWorker {
             NipartNoDaemon::query_network_state(NipartQueryOption::running())
                 .await?;
         let mut desired_state = NetworkState::default();
-        let mut wifi_plugin_state = NetworkState::default();
         let mut rearm_monitors = false;
         // Virtual interfaces already added to `desired_state` because a
         // physical port/parent of them appeared in this batch.  Several
         // events can name ports of the same missing controller.
         let mut added_virtual_dependents: HashSet<String> = HashSet::new();
+        // Saved `wifi-cfg` profiles already added to `desired_state` for a
+        // newly appeared wifi-phy.  Several events can name the same phy.
+        let mut added_wifi_cfgs: HashSet<String> = HashSet::new();
 
         for mut event in events {
             // Kernel event is always for kernel interface
@@ -166,30 +168,26 @@ impl NipartEventWorker {
                 continue;
             }
 
-            // A new wifi-phy appeared after the boot grace period: the wifi
-            // plugin is a fresh process (or never saw this phy), so give it the
-            // saved WIFI config matching this phy.  Its apply worker will start
-            // a new shuli client covering the phy.
+            // A new wifi-phy appeared (hotplug or the daemon's initial link
+            // dump): add the saved `wifi-cfg` profiles targeting it to this
+            // batch so the normal apply path hands them to the wifi plugin.
+            // The apply runs the kernel part first (including a rename
+            // requested by the saved `wifi-phy` config), hence the plugin
+            // receives the post-apply interface name.
             if event.is_new_wifi_phy
                 && event.iface_type == InterfaceType::WifiPhy
             {
-                let wifi_state = gen_wifi_plugin_state_for_phy(
-                    &event.iface_name,
-                    &saved_state,
-                );
-                if wifi_state.is_empty() {
-                    log::debug!(
-                        "No saved WIFI config for new wifi-phy {}",
-                        event.iface_name
-                    );
-                } else {
-                    log::info!(
-                        "Handing saved WIFI config to plugin for new wifi-phy \
-                         {}: {wifi_state}",
-                        event.iface_name
-                    );
-                    for iface in wifi_state.ifaces.iter() {
-                        wifi_plugin_state.ifaces.push(iface.clone());
+                for wifi_cfg in
+                    gen_wifi_cfg_for_new_phy(&event.iface_name, &saved_state)
+                {
+                    let name = wifi_cfg.name().to_string();
+                    if added_wifi_cfgs.insert(name.clone()) {
+                        log::info!(
+                            "Handing saved WIFI config {name} to plugin for \
+                             new wifi-phy {}",
+                            event.iface_name
+                        );
+                        desired_state.ifaces.push(wifi_cfg);
                     }
                 }
             }
@@ -395,34 +393,6 @@ impl NipartEventWorker {
                 .await?;
         }
 
-        if !wifi_plugin_state.is_empty()
-            && let Err(e) = commander
-                .plugin_manager
-                .apply_network_state(
-                    &wifi_plugin_state,
-                    &NipartApplyOption::new().memory_only(),
-                )
-                .await
-        {
-            // A retriable failure is re-driven by reconciliation: forget
-            // the phys so they are announced as new again and the saved
-            // WIFI profiles are handed to the plugin again.
-            if e.kind().retriable() {
-                let phy_names: Vec<String> = wifi_plugin_state
-                    .ifaces
-                    .iter()
-                    .map(|iface| iface.kernel_iface_name().to_string())
-                    .filter(|name| !name.is_empty())
-                    .collect();
-                log::info!(
-                    "WIFI plugin apply failed, requesting link events to \
-                     retry {phy_names:?}: {e}"
-                );
-                commander.monitor_manager.forget_emitted(&phy_names).await?;
-            }
-            return Err(e);
-        }
-
         if !desired_state.is_empty() {
             log::trace!("Applying desired state {desired_state}");
             let opt = if boot {
@@ -490,66 +460,41 @@ impl NipartEventWorker {
     }
 }
 
-/// Extract the saved WIFI interfaces matching `phy_name` so the plugin can
-/// rebuild the network list for a newly appeared wifi-phy.
+/// Saved `wifi-cfg` profiles which a newly appeared wifi-phy should carry.
 ///
-/// Only the `wifi-phy` entries identifying `phy_name` and the `wifi-cfg`
-/// profiles bound to it (explicit `base-iface` or unbound) are included;
-/// configs with `auto-connect: false` are left for an explicit request.
-/// An empty result means the wifi plugin must not be contacted for this
-/// phy at all.
-fn gen_wifi_plugin_state_for_phy(
+/// A profile targets the event's phy when its `base-iface` is undefined or
+/// empty, or names the phy; a profile bound to another interface is left
+/// alone.  Configs with `auto-connect: false` are only activated by an
+/// explicit request.
+fn gen_wifi_cfg_for_new_phy(
     phy_name: &str,
     saved_state: &NetworkState,
-) -> NetworkState {
-    let mut phy_ifaces: Vec<Interface> = Vec::new();
-    let mut cfg_ifaces: Vec<Interface> = Vec::new();
-    let mut phy_has_ssid = false;
-    for iface in saved_state.ifaces.iter() {
-        let base = iface.base_iface();
-        if base.auto_connect.as_ref() == Some(&InterfaceAutoConnect::Manual) {
-            continue;
-        }
-        match iface {
-            Interface::WifiPhy(wifi_iface) => {
-                if wifi_iface.base.kernel_iface_name == phy_name
-                    || wifi_iface.base.name == phy_name
-                    || wifi_iface.base.profile_name.as_deref() == Some(phy_name)
-                {
-                    phy_has_ssid |= wifi_iface.ssid().is_some();
-                    // The event's kernel name is the current truth: refresh
-                    // a stale saved kernel name (e.g. the pre-udev name)
-                    // so the plugin binds to the device which actually
-                    // carries this phy now.
-                    let mut phy_iface = iface.clone();
-                    if let Interface::WifiPhy(phy) = &mut phy_iface {
-                        phy.base.kernel_iface_name = phy_name.to_string();
-                    }
-                    phy_ifaces.push(phy_iface);
-                }
+) -> Vec<Interface> {
+    saved_state
+        .ifaces
+        .iter()
+        .filter(|iface| match iface {
+            Interface::WifiCfg(_) => {
+                iface.base_iface().auto_connect.as_ref()
+                    != Some(&InterfaceAutoConnect::Manual)
+                    && wifi_cfg_base_iface(iface).is_none_or(|base_iface| {
+                        base_iface.is_empty() || base_iface == phy_name
+                    })
             }
-            Interface::WifiCfg(wifi_iface) => {
-                let base_iface = wifi_iface
-                    .wifi
-                    .as_ref()
-                    .and_then(|wifi| wifi.base_iface.as_deref());
-                if base_iface.is_none_or(|base_iface| base_iface == phy_name) {
-                    cfg_ifaces.push(iface.clone());
-                }
-            }
-            _ => {}
-        }
+            _ => false,
+        })
+        .cloned()
+        .collect()
+}
+
+fn wifi_cfg_base_iface(iface: &Interface) -> Option<&str> {
+    match iface {
+        Interface::WifiCfg(wifi_iface) => wifi_iface
+            .wifi
+            .as_ref()
+            .and_then(|wifi| wifi.base_iface.as_deref()),
+        _ => None,
     }
-    let mut ret = NetworkState::default();
-    // A wifi-phy alone (no saved SSID on the phy, no wifi-cfg profile) is
-    // not a wifi config: do not contact the plugin for it.
-    if cfg_ifaces.is_empty() && !phy_has_ssid {
-        return ret;
-    }
-    for iface in phy_ifaces.into_iter().chain(cfg_ifaces) {
-        ret.ifaces.push(iface);
-    }
-    ret
 }
 
 /// Saved virtual interfaces which depend on the event's kernel interface but

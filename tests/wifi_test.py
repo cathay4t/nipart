@@ -1232,6 +1232,84 @@ class TestWifiPhyLater:
                         type: wifi-cfg
                         state: absent"""))
 
+    def test_wifi_cfg_empty_base_iface_connects_when_phy_appears(
+        self, restart_daemon  # noqa: F811
+    ):
+        try:
+            exec_cmd("modprobe -r mac80211_hwsim".split(), check=False)
+            exec_cmd(f"ip netns del {TEST_NET_NS}".split(), check=False)
+
+            # An empty `base-iface` behaves like an undefined one: the saved
+            # profile targets whichever wifi-phy appears.
+            nipart.apply(
+                load_yaml(f"""---
+                    interfaces:
+                      - name: {TEST_WIFI_SSID_OPEN}
+                        type: wifi-cfg
+                        state: up
+                        wifi:
+                          ssid: {TEST_WIFI_SSID_OPEN}
+                          base-iface: ''"""),
+                verify_change=False,
+            )
+
+            create_sim_wifi_nics()
+            exec_cmd("killall wpa_supplicant".split(), check=False)
+            start_hostapd_open(TEST_NET_NS)
+
+            assert retry_till_true_or_timeout(
+                60, lambda: connected_ssid() == TEST_WIFI_SSID_OPEN
+            ), (
+                "wifi-cfg with empty base-iface did not connect after "
+                f"wifi-phy appeared later: {connected_ssid()}"
+            )
+        finally:
+            destroy_sim_wifi_nics()
+            nipart.apply(load_yaml(f"""---
+                    interfaces:
+                      - name: {TEST_WIFI_SSID_OPEN}
+                        type: wifi-cfg
+                        state: absent"""))
+
+    def test_wifi_cfg_for_other_phy_not_loaded_when_phy_appears(
+        self, restart_daemon  # noqa: F811
+    ):
+        try:
+            exec_cmd("modprobe -r mac80211_hwsim".split(), check=False)
+            exec_cmd(f"ip netns del {TEST_NET_NS}".split(), check=False)
+
+            # The saved profile is bound to a phy which is not the one
+            # appearing: the new wifi-phy must not carry it.
+            nipart.apply(
+                load_yaml(f"""---
+                    interfaces:
+                      - name: {TEST_WIFI_SSID_OPEN}
+                        type: wifi-cfg
+                        state: up
+                        wifi:
+                          ssid: {TEST_WIFI_SSID_OPEN}
+                          base-iface: wifi-other-phy9"""),
+                verify_change=False,
+            )
+
+            create_sim_wifi_nics()
+            exec_cmd("killall wpa_supplicant".split(), check=False)
+            start_hostapd_open(TEST_NET_NS)
+
+            # Long enough for a wrongly applied profile to connect.
+            time.sleep(30)
+            assert connected_ssid() != TEST_WIFI_SSID_OPEN, (
+                "wifi-cfg bound to another phy was applied to the new "
+                f"wifi-phy: {connected_ssid()}"
+            )
+        finally:
+            destroy_sim_wifi_nics()
+            nipart.apply(load_yaml(f"""---
+                    interfaces:
+                      - name: {TEST_WIFI_SSID_OPEN}
+                        type: wifi-cfg
+                        state: absent"""))
+
 
 @pytest.mark.skipif(
     not has_kernel_module("mac80211_hwsim"),
