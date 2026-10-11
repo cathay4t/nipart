@@ -613,13 +613,25 @@ impl WifiClientState {
             if self.ifaces.contains_key(iface_name) {
                 continue;
             }
+            // The phy may be absent even though the desired state names it
+            // (e.g. a stale link event during a driver/namespace
+            // transition, or a phy not created yet).  Starting a shuli
+            // client for it would fail with `interface-not-found` and drop
+            // the client of every other phy; the event worker hands the
+            // saved profiles over once the phy really appears.
+            let Some(if_index) = wifi_phys_if_index.get(iface_name).copied()
+            else {
+                log::debug!(
+                    "WIFI interface {iface_name} is not present, deferring \
+                     its profiles until it appears"
+                );
+                continue;
+            };
             let networks = if force && wifi_cfgs.len() == 1 {
                 merge_preferred_networks(&[], wifi_cfgs, &hint_map)?
             } else {
                 build_shuli_networks(wifi_cfgs, &hint_map)?
             };
-            let if_index =
-                wifi_phys_if_index.get(iface_name).copied().unwrap_or(0);
             self.ifaces.insert(
                 iface_name.clone(),
                 WifiIfaceState {
