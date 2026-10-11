@@ -176,6 +176,64 @@ def test_saved_config_without_nic_not_blocking_boot_and_activated_on_hotplug():
         start_daemon()
 
 
+def test_pending_udev_live_event_retried_until_udev_done():
+    # A live link event of a NIC whose udev initialization is still pending
+    # must be queued; the monitor worker must then emit it once the udev
+    # database entry exists, even though the kernel emits no further link
+    # event (no rename happened).
+    exec_cmd(["ip", "link", "del", TEST_VETH], check=False)
+    stop_daemon()
+
+    try:
+        exec_cmd(
+            f"ip link add {TEST_VETH} address {TEST_MAC}"
+            f" type veth peer name {TEST_VETH_PEER}".split()
+        )
+        exec_cmd(f"ip link set {TEST_VETH_PEER} up".split())
+        ifindex = exec_cmd(["cat", f"/sys/class/net/{TEST_VETH}/ifindex"])[
+            1
+        ].strip()
+        udev_db_path = f"/run/udev/data/n{ifindex}"
+        # Wait for udev to finish with the new NIC, then simulate "udev not
+        # finished yet": drop the database entry.  Once removed it is not
+        # recreated (link state changes do not make udev rewrite it), so a
+        # deferred event has no further netlink event to rely on.
+        exec_cmd("udevadm settle".split())
+        assert retry_till_true_or_timeout(
+            10, os.path.exists, udev_db_path
+        ), f"udev did not create {udev_db_path}"
+        exec_cmd(["rm", "-f", udev_db_path])
+        assert not os.path.exists(udev_db_path)
+
+        os.makedirs(os.path.dirname(SAVED_STATE_FILE), exist_ok=True)
+        with open(SAVED_STATE_FILE, "w") as state_f:
+            state_f.write(SAVED_STATE)
+
+        start_daemon()
+        # The boot dump defers the pending-udev NIC; the live down->up
+        # events must be deferred as well instead of applying the saved
+        # config to the not-yet-udev-initialized interface.
+        exec_cmd(f"ip link set {TEST_VETH} down".split())
+        exec_cmd(f"ip link set {TEST_VETH} up".split())
+        time.sleep(2)
+        assert not _iface_has_ip_and_mtu(
+            TEST_VETH
+        ), "saved config was applied to a NIC before udev finished"
+
+        # udev finished; no further link event is emitted for this NIC.
+        exec_cmd(["touch", f"/run/udev/data/n{ifindex}"])
+
+        assert retry_till_true_or_timeout(
+            DEFAULT_TIMEOUT, _iface_has_ip_and_mtu, TEST_VETH
+        ), "deferred link event was not emitted after udev finished"
+    finally:
+        exec_cmd(["ip", "link", "del", TEST_VETH], check=False)
+        if os.path.exists(SAVED_STATE_FILE):
+            os.remove(SAVED_STATE_FILE)
+        stop_daemon()
+        start_daemon()
+
+
 def test_saved_name_based_profile_without_nic_shown_as_saved():
     exec_cmd(["ip", "link", "del", TEST_SAVED_ONLY_NIC], check=False)
     stop_daemon()

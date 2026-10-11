@@ -190,6 +190,39 @@ fn test_wifi_cfg_routes_included_on_wifi_phy_up() {
 }
 
 #[test]
+fn test_gen_wifi_plugin_state_refreshes_stale_kernel_name() {
+    let state: NetworkState = rmsd_yaml::from_str(
+        r#"---
+            interfaces:
+              - name: wifi-pro0
+                kernel-iface-name: wlan0
+                profile-name: wifi-pro0
+                type: wifi-phy
+                identifier: mac-address
+                state: up
+                mac-address: 02:00:00:00:00:03
+              - name: Test-WIFI
+                type: wifi-cfg
+                state: up
+                wifi:
+                  ssid: Test-WIFI
+            "#,
+    )
+    .unwrap();
+
+    // The phy was renamed to its saved profile name: the plugin state handed
+    // over for that event must carry the current kernel name so the plugin
+    // binds to the live device.
+    let wifi_state = gen_wifi_plugin_state_for_phy("wifi-pro0", &state);
+    let phy = wifi_state
+        .ifaces
+        .iter()
+        .find(|iface| iface.iface_type() == &InterfaceType::WifiPhy)
+        .unwrap();
+    assert_eq!(phy.kernel_iface_name(), "wifi-pro0");
+}
+
+#[test]
 fn test_is_route_matching_iface() {
     let state = gen_saved_state();
     let wan0 = find_iface(&state, "wan0");

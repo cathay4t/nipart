@@ -517,7 +517,15 @@ fn gen_wifi_plugin_state_for_phy(
                     || wifi_iface.base.profile_name.as_deref() == Some(phy_name)
                 {
                     phy_has_ssid |= wifi_iface.ssid().is_some();
-                    phy_ifaces.push(iface.clone());
+                    // The event's kernel name is the current truth: refresh
+                    // a stale saved kernel name (e.g. the pre-udev name)
+                    // so the plugin binds to the device which actually
+                    // carries this phy now.
+                    let mut phy_iface = iface.clone();
+                    if let Interface::WifiPhy(phy) = &mut phy_iface {
+                        phy.base.kernel_iface_name = phy_name.to_string();
+                    }
+                    phy_ifaces.push(phy_iface);
                 }
             }
             Interface::WifiCfg(wifi_iface) => {

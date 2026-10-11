@@ -34,10 +34,14 @@ fn gen_event(iface_name: &str) -> InterfaceLinkEvent {
 
 fn gen_worker() -> NipartMonitorWorker {
     let (_tx, rx) = unbounded();
-    tokio::runtime::Runtime::new()
+    let mut worker = tokio::runtime::Runtime::new()
         .expect("Failed to create tokio runtime")
         .block_on(NipartMonitorWorker::new(rx))
-        .expect("Failed to create monitor worker")
+        .expect("Failed to create monitor worker");
+    // Most tests use an arbitrary interface index: do not depend on the
+    // host's `/run/udev` state.
+    worker.udev_initialized_override = Some(true);
+    worker
 }
 
 fn gen_last_state(is_up: bool) -> LastLinkEvent {
@@ -439,6 +443,68 @@ fn test_try_notify_dedups_duplicate_up_events() {
     rt.block_on(worker.try_notify(gen_event("enp1s0"))).unwrap();
     assert!(worker.emited["enp1s0"].is_up);
     assert!(!worker.delay_queue.contains_key("enp1s0"));
+}
+
+#[test]
+fn test_udev_pending_event_queued_until_initialized() {
+    let mut worker = gen_worker();
+    let (tx, mut rx) = unbounded();
+    worker.msg_to_commander = Some(tx);
+    worker.wifi_monitor_enabled = true;
+    // udev has not initialized this NIC yet.
+    worker.udev_initialized_override = Some(false);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    let event = InterfaceLinkEvent::new(
+        "wlan0".to_string(),
+        0xFFFF_FFFF,
+        InterfaceType::WifiPhy,
+        true,
+        None,
+    );
+    rt.block_on(worker.try_notify(event.clone())).unwrap();
+    assert!(rx.try_recv().is_err(), "event must not be emitted yet");
+    assert_eq!(worker.udev_pending_events.len(), 1);
+    assert!(worker.udev_pending_events["wlan0"].is_up);
+
+    // A still-pending event is kept by the retry pass.
+    rt.block_on(worker.process_udev_pending_events()).unwrap();
+    assert_eq!(worker.udev_pending_events.len(), 1);
+    assert!(rx.try_recv().is_err());
+
+    // Once udev finished, the queued event is emitted by the retry pass.
+    worker.udev_initialized_override = Some(true);
+    rt.block_on(worker.process_udev_pending_events()).unwrap();
+    assert!(worker.udev_pending_events.is_empty());
+    let NipartManagerCmd::LinkEvent(emitted) = rx.try_recv().unwrap() else {
+        panic!("Expected a link event");
+    };
+    assert_eq!(emitted.iface_name, "wlan0");
+    assert!(emitted.is_up);
+
+    // A delete event supersedes a queued event of the same interface and is
+    // emitted right away.
+    let pending = InterfaceLinkEvent::new(
+        "wlan0".to_string(),
+        0xFFFF_FFFF,
+        InterfaceType::WifiPhy,
+        true,
+        None,
+    );
+    worker
+        .udev_pending_events
+        .insert("wlan0".to_string(), pending);
+    let mut delete = InterfaceLinkEvent::new(
+        "wlan0".to_string(),
+        0xFFFF_FFFF,
+        InterfaceType::WifiPhy,
+        false,
+        None,
+    );
+    delete.is_delete = true;
+    rt.block_on(worker.try_notify(delete)).unwrap();
+    assert!(worker.udev_pending_events.is_empty());
+    assert!(rx.try_recv().is_ok());
 }
 
 #[test]

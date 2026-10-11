@@ -297,6 +297,17 @@ pub(crate) struct NipartMonitorWorker {
     /// may be registered before, but no netlink session is opened (and no
     /// event emitted) until then.
     started: bool,
+    /// Link events deferred because the NIC has no udev database entry yet
+    /// (systemd-udevd has not finished with it, e.g. a hotplugged NIC).
+    /// The busy tick retries them until udev initialized the NIC; the kernel
+    /// does not necessarily emit a further link event after udev finished,
+    /// so the event must be kept.  Keyed by kernel interface name: a newer
+    /// event for the same interface replaces the queued one.
+    udev_pending_events: HashMap<String, InterfaceLinkEvent>,
+    /// Test-only override of the udev-initialization check so unit tests do
+    /// not depend on the host's `/run/udev` state.
+    #[cfg(test)]
+    udev_initialized_override: Option<bool>,
     /// Set while a dump is being collected into one batch instead of
     /// emitting each event individually.
     collect_batch: Option<CollectBatch>,
@@ -327,6 +338,9 @@ impl TaskWorker for NipartMonitorWorker {
             wifi_phys_emited: HashSet::new(),
             delay_queue: HashMap::new(),
             started: false,
+            udev_pending_events: HashMap::new(),
+            #[cfg(test)]
+            udev_initialized_override: None,
             collect_batch: None,
             next_reconcile: Instant::now(),
         })
@@ -458,7 +472,11 @@ impl TaskWorker for NipartMonitorWorker {
         // First tick happen immediately
         ticker.tick().await;
         loop {
-            let mut reset = if self.delay_queue.is_empty() {
+            // The busy tick also drains the udev-pending queue: a deferred
+            // event must be retried even when the delay queue is empty.
+            let mut reset = if self.delay_queue.is_empty()
+                && self.udev_pending_events.is_empty()
+            {
                 Duration::from_secs(DELAY_TICK_SEC_IF_FREE)
             } else {
                 Duration::from_secs(DELAY_TICK_SEC_IF_BUSY)
@@ -504,6 +522,10 @@ impl TaskWorker for NipartMonitorWorker {
                             }
                     }
                     _ = ticker.tick() => {
+                        if let Err(e) = self.process_udev_pending_events().await
+                        {
+                            log::error!("{e}");
+                        }
                         if let Err(e) = self.process_delay_queue().await {
                             log::error!("{e}");
                         }
@@ -588,28 +610,12 @@ impl NipartMonitorWorker {
     ///
     /// Interfaces which did not change since [`Self::pause`] are dropped;
     /// changed (or previously unknown) interfaces go through the normal
-    /// notification path.
+    /// notification path (which also defers interfaces udev has not
+    /// initialized yet).
     async fn handle_resume_event(
         &mut self,
         event: InterfaceLinkEvent,
     ) -> Result<(), NipartError> {
-        // The initial boot dump may run before udev finished renaming the
-        // NIC.  Do not announce it yet (and do not record it as emitted):
-        // the udev rename/newlink event or the periodic reconciliation
-        // emits it once the udev database entry exists, so the saved config
-        // cannot race the udev rename.
-        let is_boot =
-            self.collect_batch.as_ref().is_some_and(|batch| batch.boot);
-        if is_boot
-            && !event.is_delete
-            && !crate::udev::udev_net_device_is_initialized(event.iface_index)
-        {
-            log::debug!(
-                "{}: udev not initialized yet, deferring boot event",
-                event.iface_name
-            );
-            return Ok(());
-        }
         if !self.emit_on_resume(&event) {
             log::trace!(
                 "{}: link state is unchanged since monitor pause, no event \
@@ -650,6 +656,44 @@ impl NipartMonitorWorker {
             let event = last_event.to_delete_event(&iface_name);
             self.try_notify(event).await?;
             self.iface_mac.remove(&iface_name);
+        }
+        Ok(())
+    }
+
+    /// Whether systemd-udevd finished initializing the NIC at `iface_index`.
+    fn udev_is_initialized(&self, iface_index: u32) -> bool {
+        #[cfg(test)]
+        if let Some(overridden) = self.udev_initialized_override {
+            return overridden;
+        }
+        crate::udev::udev_net_device_is_initialized(iface_index)
+    }
+
+    /// Retry the link events deferred because udev had not initialized their
+    /// NIC yet.
+    ///
+    /// Called from the busy tick.  Events whose NIC is still not initialized
+    /// stay queued; the others go through the normal notification path.
+    async fn process_udev_pending_events(&mut self) -> Result<(), NipartError> {
+        if self.udev_pending_events.is_empty() {
+            return Ok(());
+        }
+        let pending: Vec<InterfaceLinkEvent> = self
+            .udev_pending_events
+            .drain()
+            .map(|(_, event)| event)
+            .collect();
+        for event in pending {
+            if !self.udev_is_initialized(event.iface_index) {
+                self.udev_pending_events
+                    .insert(event.iface_name.clone(), event);
+                continue;
+            }
+            log::debug!(
+                "{}: udev initialized, emitting deferred event {event}",
+                event.iface_name
+            );
+            self.try_notify(event).await?;
         }
         Ok(())
     }
@@ -833,13 +877,10 @@ impl NipartMonitorWorker {
                 if !self.event_is_interested(&event) {
                     continue;
                 }
-                // Skip until udev initialized the NIC so the recovered event
-                // cannot race a udev rename either.
-                if !crate::udev::udev_net_device_is_initialized(
-                    iface.base_iface().iface_index.unwrap_or(0),
-                ) {
-                    continue;
-                }
+                // `try_notify()` defers the event until udev initialized
+                // the NIC (so the recovered event cannot race a udev
+                // rename either) and queues it for a retry on the busy
+                // tick.
                 if let Some(previous) = self.emited.get(name.as_str())
                     && previous.is_same_state(&event)
                 {
@@ -1022,6 +1063,31 @@ impl NipartMonitorWorker {
         }
         if !self.event_is_interested(&event) {
             log::trace!("Event {event} is not interested");
+            return Ok(());
+        }
+
+        // A delete event supersedes any event still queued for the
+        // interface: the NIC no longer exists.
+        if event.is_delete {
+            self.udev_pending_events.remove(&event.iface_name);
+        }
+
+        // The kernel may announce a NIC (and systemd-udevd may later rename
+        // it, e.g. to its predictable name) before udev finished initializing
+        // it.  Acting on the pre-udev name would race the rename and pin the
+        // saved config to a name that is about to disappear.  Queue the
+        // event and retry it on the busy tick until the udev database entry
+        // exists: the kernel does not necessarily emit a further link event
+        // once udev finished (only a rename/alt-name change does, and even
+        // that event can arrive before the database entry is written).
+        // Delete events are always emitted.
+        if !event.is_delete && !self.udev_is_initialized(event.iface_index) {
+            log::debug!(
+                "{}: udev not initialized yet, deferring event",
+                event.iface_name
+            );
+            self.udev_pending_events
+                .insert(event.iface_name.clone(), event);
             return Ok(());
         }
 
