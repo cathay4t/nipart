@@ -1008,6 +1008,13 @@ fn refresh_hints(
 /// network list instead of replacing it: the requested SSID becomes
 /// `prefered`, every other configured network is kept and demoted to
 /// non-preferred (the latest request wins), and new SSIDs are appended.
+///
+/// The kept networks are fallbacks only, so their quick-start hints are
+/// dropped: shuli builds the first scan's frequency restriction from the
+/// hints of every configured network, and another profile's last-known
+/// channel must not confine the search for the requested SSID (e.g. a
+/// hidden 5 GHz network would never be probed while the only hint is a
+/// 2.4 GHz one from a different profile).
 fn merge_preferred_networks(
     existing: &[ShuliNetworkConfig],
     wifi_cfgs: &[&WifiConfig],
@@ -1043,6 +1050,7 @@ fn merge_preferred_networks(
             None => {
                 let mut network = network.clone();
                 network.prefered = false;
+                network.hints = ShuliNetworkConfigHints::new();
                 ret.push(network);
             }
         }

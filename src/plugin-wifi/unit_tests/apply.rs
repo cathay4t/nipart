@@ -495,6 +495,36 @@ fn merge_preferred_networks_appends_new_ssid() {
 }
 
 #[test]
+fn merge_preferred_networks_drops_hints_of_unrelated_ssids() {
+    let mut hinted = network("A", None, false);
+    hinted.set_hints(
+        ShuliNetworkConfigHints::new()
+            .with_frequencies_mhz(vec![2412])
+            .with_known_bss(vec![ShuliKnownBss::new(
+                [0x02, 0x00, 0x00, 0x00, 0x01, 1],
+                2412,
+            )]),
+    );
+    let existing = [hinted];
+    let cfgs = [wifi_cfg("B", None)];
+    let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+
+    let merged =
+        merge_preferred_networks(&existing, &refs, &HashMap::new()).unwrap();
+
+    assert_eq!(merged.len(), 2);
+    assert_eq!(merged[0].ssid, "A");
+    assert!(!merged[0].prefered);
+    assert!(
+        merged[0].hints.frequencies_mhz.is_empty()
+            && merged[0].hints.known_bss.is_empty(),
+        "another profile's hints must not restrict the requested scan"
+    );
+    assert_eq!(merged[1].ssid, "B");
+    assert!(merged[1].prefered);
+}
+
+#[test]
 fn merge_preferred_networks_dedupes_requested_ssids() {
     let cfgs = [wifi_cfg("A", Some("secret")), wifi_cfg("A", Some("secret"))];
     let refs: Vec<&WifiConfig> = cfgs.iter().collect();
