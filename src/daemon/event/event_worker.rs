@@ -934,6 +934,13 @@ fn auto_connect_targets_event_nic(
 /// purge under the current kernel name would leave a second merged entry
 /// whose name no longer exists after the rename, failing the nispor batch
 /// with `EOPNOTSUPP` and handing the wifi plugin a non-existent interface.
+///
+/// `None` is also returned when the current kernel interface exists but is
+/// not a wifi-phy: the event was classified from sysfs while nispor still
+/// sees the old non-WIFI interface (e.g. a wiphy moving back to the root
+/// netns while the nl80211 interface dump lags).  Merging a wifi-phy
+/// desired state against another interface type is a bug, and a stale
+/// event has no IP stack to purge.
 fn gen_wifi_phy_ip_purge(
     event: &InterfaceLinkEvent,
     cur_iface: Option<&Interface>,
@@ -943,6 +950,17 @@ fn gen_wifi_phy_ip_purge(
         || event.iface_type != InterfaceType::WifiPhy
         || auto_connect_covers_ip_purge
     {
+        return None;
+    }
+    if let Some(cur_iface) = cur_iface
+        && !matches!(cur_iface, Interface::WifiPhy(_))
+    {
+        log::debug!(
+            "{}: wifi-phy link event but current interface is {}, ignoring \
+             the stale event",
+            event.iface_name,
+            cur_iface.iface_type(),
+        );
         return None;
     }
     let mut desired_iface = BaseInterface::new(
