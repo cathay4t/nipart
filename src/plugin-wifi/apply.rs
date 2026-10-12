@@ -486,11 +486,23 @@ impl WifiClientState {
                 &present_wifi_phys,
             );
             if phy_names.is_empty() {
-                log::warn!(
-                    "WifiCfg interface {} has no base_iface specified, no \
-                     wifi-phy available to bind to",
-                    iface.name()
-                );
+                if let Some(base_iface) = wifi_cfg
+                    .base_iface
+                    .as_deref()
+                    .filter(|base_iface| !base_iface.is_empty())
+                {
+                    log::debug!(
+                        "WifiCfg interface {} is bound to WIFI interface \
+                         {base_iface} which is not present, deferring",
+                        iface.name()
+                    );
+                } else {
+                    log::warn!(
+                        "WifiCfg interface {} has no base_iface specified, no \
+                         wifi-phy available to bind to",
+                        iface.name()
+                    );
+                }
                 continue;
             }
             for phy_name in phy_names {
@@ -601,13 +613,25 @@ impl WifiClientState {
             if self.ifaces.contains_key(iface_name) {
                 continue;
             }
+            // The phy may be absent even though the desired state names it
+            // (e.g. a stale link event during a driver/namespace
+            // transition, or a phy not created yet).  Starting a shuli
+            // client for it would fail with `interface-not-found` and drop
+            // the client of every other phy; the event worker hands the
+            // saved profiles over once the phy really appears.
+            let Some(if_index) = wifi_phys_if_index.get(iface_name).copied()
+            else {
+                log::debug!(
+                    "WIFI interface {iface_name} is not present, deferring \
+                     its profiles until it appears"
+                );
+                continue;
+            };
             let networks = if force && wifi_cfgs.len() == 1 {
                 merge_preferred_networks(&[], wifi_cfgs, &hint_map)?
             } else {
                 build_shuli_networks(wifi_cfgs, &hint_map)?
             };
-            let if_index =
-                wifi_phys_if_index.get(iface_name).copied().unwrap_or(0);
             self.ifaces.insert(
                 iface_name.clone(),
                 WifiIfaceState {
@@ -831,7 +855,18 @@ fn wifi_cfg_phy_names(
         .as_ref()
         .filter(|base_iface| !base_iface.is_empty())
     {
-        vec![base_iface.clone()]
+        // An explicit base-iface must exist in the kernel or be brought up
+        // by this apply.  A profile bound to an absent phy is deferred
+        // (the event worker hands it to the plugin once that phy appears):
+        // creating a shuli client for a non-existent interface would fail
+        // the whole client (and disconnect every other phy).
+        if present_wifi_phys.iter().any(|phy| phy == base_iface)
+            || up_wifi_phys.contains(base_iface)
+        {
+            vec![base_iface.clone()]
+        } else {
+            Vec::new()
+        }
     } else if !up_wifi_phys.is_empty() {
         up_wifi_phys.to_vec()
     } else {

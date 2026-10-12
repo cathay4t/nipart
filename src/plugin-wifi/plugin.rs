@@ -121,9 +121,21 @@ async fn apply_worker(
                 match result {
                     Ok(result) => {
                         if let Err(e) = result {
-                            log::error!(
-                                "WIFI plugin failed to drive client: {e}"
-                            );
+                            // A transient client failure (e.g. the device
+                            // is busy while the driver is being
+                            // re-created) leaves the client alive and
+                            // shuli keeps retrying it: log it as a
+                            // warning, only a non-retriable error is a
+                            // real failure to report.
+                            if e.kind().retriable() {
+                                log::warn!(
+                                    "WIFI plugin client error, retrying: {e}"
+                                );
+                            } else {
+                                log::error!(
+                                    "WIFI plugin failed to drive client: {e}"
+                                );
+                            }
                         }
                     }
                     Err(_) => {
