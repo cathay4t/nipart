@@ -409,7 +409,7 @@ fn mac_to_string(mac: &[u8; 6]) -> String {
 }
 
 /// Parse the `aa:bb:cc:dd:ee:ff` form written by [`mac_to_string`].
-fn mac_from_string(mac: &str) -> Option<[u8; 6]> {
+pub(crate) fn mac_from_string(mac: &str) -> Option<[u8; 6]> {
     let mut bytes = [0u8; 6];
     let mut parts = mac.split(':');
     for byte in &mut bytes {

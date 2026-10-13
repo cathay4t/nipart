@@ -254,6 +254,51 @@ fn build_shuli_networks_rejects_conflicting_password() {
 }
 
 #[test]
+fn build_shuli_networks_maps_bssid_pin() {
+    let mut cfg = wifi_cfg("A", None);
+    cfg.bssid = Some("02:00:00:00:00:01".to_string());
+    // An identical duplicate entry is still de-duplicated.
+    let cfgs = [cfg.clone(), cfg];
+    let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+
+    let networks = build_shuli_networks(&refs, &HashMap::new()).unwrap();
+
+    assert_eq!(networks.len(), 1);
+    assert_eq!(
+        networks[0].bssid,
+        Some([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]),
+        "wifi-cfg.bssid must pin the shuli network to that AP"
+    );
+}
+
+#[test]
+fn build_shuli_networks_rejects_invalid_bssid() {
+    let mut cfg = wifi_cfg("A", None);
+    cfg.bssid = Some("not-a-mac".to_string());
+    let refs = [&cfg];
+
+    let err = build_shuli_networks(&refs, &HashMap::new())
+        .expect_err("an invalid BSSID must fail the apply");
+    assert_eq!(err.kind(), ErrorKind::InvalidArgument);
+    assert!(
+        err.msg().contains("Invalid BSSID"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn build_shuli_networks_rejects_conflicting_bssid() {
+    let mut one = wifi_cfg("A", Some("secret"));
+    one.bssid = Some("02:00:00:00:00:01".to_string());
+    let mut two = wifi_cfg("A", Some("secret"));
+    two.bssid = Some("02:00:00:00:00:02".to_string());
+    let cfgs = [one, two];
+    let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+
+    assert!(build_shuli_networks(&refs, &HashMap::new()).is_err());
+}
+
+#[test]
 fn build_shuli_networks_attaches_hints_to_matching_ssid() {
     let cfgs = [wifi_cfg("A", None), wifi_cfg("B", None)];
     let refs: Vec<&WifiConfig> = cfgs.iter().collect();
@@ -338,6 +383,28 @@ fn same_saved_networks_ignores_hint_changes() {
         &plain
     ));
     assert!(same_saved_networks_ignoring_prefered(&plain, &[hinted]));
+}
+
+#[test]
+fn same_saved_networks_detects_bssid_pin_change() {
+    let plain = [network("A", None, false)];
+    let mut pinned = network("A", None, false);
+    pinned.set_bssid(Some([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]));
+
+    assert!(
+        !same_saved_networks_ignoring_prefered(
+            &plain,
+            std::slice::from_ref(&pinned)
+        ),
+        "adding a BSSID pin is a configuration change"
+    );
+    assert!(
+        !same_saved_networks_ignoring_prefered(
+            std::slice::from_ref(&pinned),
+            &plain
+        ),
+        "removing a BSSID pin is a configuration change"
+    );
 }
 
 #[test]
@@ -539,6 +606,30 @@ fn merge_preferred_networks_dedupes_requested_ssids() {
 #[test]
 fn merge_preferred_networks_rejects_conflicting_password() {
     let cfgs = [wifi_cfg("A", Some("one")), wifi_cfg("A", Some("two"))];
+    let refs: Vec<&WifiConfig> = cfgs.iter().collect();
+
+    assert!(merge_preferred_networks(&[], &refs, &HashMap::new()).is_err());
+}
+
+#[test]
+fn merge_preferred_networks_keeps_the_bssid_pin() {
+    let mut cfg = wifi_cfg("B", None);
+    cfg.bssid = Some("02:00:00:00:00:01".to_string());
+    let refs = [&cfg];
+
+    let merged = merge_preferred_networks(&[], &refs, &HashMap::new()).unwrap();
+
+    assert!(merged[0].prefered);
+    assert_eq!(merged[0].bssid, Some([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]));
+}
+
+#[test]
+fn merge_preferred_networks_rejects_conflicting_bssid() {
+    let mut one = wifi_cfg("A", Some("secret"));
+    one.bssid = Some("02:00:00:00:00:01".to_string());
+    let mut two = wifi_cfg("A", Some("secret"));
+    two.bssid = Some("02:00:00:00:00:02".to_string());
+    let cfgs = [one, two];
     let refs: Vec<&WifiConfig> = cfgs.iter().collect();
 
     assert!(merge_preferred_networks(&[], &refs, &HashMap::new()).is_err());

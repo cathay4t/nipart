@@ -70,8 +70,6 @@ managed-roaming BSS - runs a one-shot scan for a better BSS.
 
 * Scan-free direct authentication (see
   [Why Not Scan-Free Hints](#why-not-scan-free-hints)).
-* BSSID pinning (`wifi-cfg.bssid`), see
-  [Future Work](#future-work).
 
 ## Design Overview
 
@@ -219,6 +217,13 @@ security, RSNE) stay unset, which keeps shuli's scan-free direct-auth
 path disabled; the hints drive the quick scan and the hint-matched
 selection instead.
 
+`wifi-cfg.bssid` is separate from those hints: when set, the plugin
+passes it to `NetworkConfig::set_bssid()` as a hard pin, so shuli only
+selects that AP and never fails over to another BSS of the same SSID
+(scan selection, retry and roaming all honor it). An invalid MAC fails
+the apply with `InvalidArgument` instead of silently connecting to any
+BSS.
+
 ### Why Not Scan-Free Hints
 
 shuli enables its scan-free direct-auth path only when a configured
@@ -331,8 +336,10 @@ Unit tests only, deliberately:
   files, removal idempotence, file permissions and the absence of any
   secret/interface field in the serialized YAML.
 * `src/plugin-wifi/unit_tests/apply.rs` covers hint attachment to the
-  matching SSID (frequencies and known BSSIDs) and the
-  change-detection/refresh behavior.
+  matching SSID (frequencies and known BSSIDs), the
+  change-detection/refresh behavior, and the `wifi-cfg.bssid` pin:
+  mapping to `NetworkConfig::set_bssid()`, invalid-MAC rejection and
+  conflicting-pin detection.
 * The `shuli` crate covers `KnownBss` hint round-trips and the
   known-BSS-only rule, the hint-matched selection
   (`best_hinted_candidate_filtered`: known BSS over a stronger unknown,
@@ -349,10 +356,6 @@ is covered by shuli's tests.
 
 ## Future Work
 
-* **BSSID pinning** (`wifi-cfg.bssid`): the plugin currently drops it;
-  shuli has no per-network BSSID pin. Once shuli supports one, a pinned
-  profile must not fail over to other APs of the same SSID. Tracked in
-  the TODO files of both projects.
 * **Scan-free hints**: if direct auth is wanted later, use a short
   (starting at 1 s) hint-auth timeout so a stale BSS falls back quickly.
   A dev experiment (mac80211_hwsim, WPA2-PSK and WPA3-SAE) connected in

@@ -398,6 +398,14 @@ def iface_connected_ssid(iface_name):
     return match.group(1) if match else None
 
 
+def connected_bssid(iface_name=WIFI_TEST_NIC):
+    rc, out, _ = exec_cmd(f"iw dev {iface_name} link".split(), check=False)
+    if rc != 0:
+        return None
+    match = re.search(r"Connected to ([0-9a-fA-F:]+)", out)
+    return match.group(1).upper() if match else None
+
+
 def _ipv4_addrs():
     rc, out, _ = exec_cmd(
         ["ip", "-4", "-o", "addr", "show", "dev", WIFI_TEST_NIC],
@@ -1633,6 +1641,31 @@ class TestWifiMultiSsid:
         assert connected_ssid() == connected, (
             f"expected wifi to reconnect to {connected} before `npt up` "
             "returned"
+        )
+
+    def test_wifi_cfg_bssid_pin(self, multi_ap_env):
+        # Pin the open profile to AP2's BSSID: nipart must hand the pin
+        # to shuli and connect to exactly that AP.
+        pinned_bssid = HWSIM2_PERM_MAC.upper()
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_WIFI_SSID_2}
+                type: wifi-cfg
+                state: up
+                wifi:
+                  ssid: {TEST_WIFI_SSID_2}
+                  bssid: {pinned_bssid}
+                  base-iface: {WIFI_TEST_NIC}
+                ipv4:
+                  enabled: true
+                  dhcp: false
+                  address:
+                    - ip: {STA_IP}
+                      prefix-length: 24"""))
+        assert wait_for_ssid(TEST_WIFI_SSID_2)
+        assert connected_bssid() == pinned_bssid, (
+            f"expected to connect to the pinned BSSID {pinned_bssid}, "
+            f"got {connected_bssid()}"
         )
 
 
