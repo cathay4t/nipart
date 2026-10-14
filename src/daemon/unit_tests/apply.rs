@@ -8,7 +8,7 @@ use nipart::{
 use super::{
     WifiConnectGroup, WifiConnectRequest, pretend_config_is_saved,
     saved_wifi_restore_state, wifi_connect_groups, wifi_connect_requests,
-    wifi_group_is_connected, wifi_phy_names,
+    wifi_group_connected_elsewhere, wifi_group_is_connected, wifi_phy_names,
 };
 
 const IFACE_YAML: &str = r#"---
@@ -332,6 +332,86 @@ fn test_wifi_group_is_connected_matches_live_iface_and_base() {
             ssids: vec!["Other".to_string()],
         }
     ));
+}
+
+/// A phy connected to a non-requested SSID cannot satisfy the pending
+/// group: shuli stays on a healthy non-critical link, so the daemon must
+/// not keep waiting for the full timeout.
+#[test]
+fn test_wifi_group_connected_elsewhere_reports_other_ssid() {
+    let live: NetworkState = rmsd_yaml::from_str(
+        r#"---
+        interfaces:
+        - name: wlan0
+          kernel-iface-name: wlan0
+          type: wifi-phy
+          state: up
+          wifi:
+            ssid: Other-WIFI
+        "#,
+    )
+    .unwrap();
+
+    let group = WifiConnectGroup {
+        phy_name: Some("wlan0".to_string()),
+        base_iface: None,
+        ssids: vec!["Test-WIFI".to_string()],
+    };
+    assert_eq!(
+        wifi_group_connected_elsewhere(&live, &group),
+        Some(("wlan0".to_string(), "Other-WIFI".to_string()))
+    );
+    // The connected SSID itself satisfies the group.
+    assert_eq!(
+        wifi_group_connected_elsewhere(
+            &live,
+            &WifiConnectGroup {
+                ssids: vec!["Other-WIFI".to_string()],
+                ..group.clone()
+            }
+        ),
+        None
+    );
+    // A group targeting a different phy is unaffected by wlan0's
+    // connection.
+    assert_eq!(
+        wifi_group_connected_elsewhere(
+            &live,
+            &WifiConnectGroup {
+                phy_name: Some("wlan1".to_string()),
+                ..group.clone()
+            }
+        ),
+        None
+    );
+}
+
+/// A disconnected phy is not "connected elsewhere": its group is still
+/// progressable and must keep the wait running.
+#[test]
+fn test_wifi_group_connected_elsewhere_ignores_disconnected_phy() {
+    let live: NetworkState = rmsd_yaml::from_str(
+        r#"---
+        interfaces:
+        - name: wlan0
+          kernel-iface-name: wlan0
+          type: wifi-phy
+          state: up
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        wifi_group_connected_elsewhere(
+            &live,
+            &WifiConnectGroup {
+                phy_name: Some("wlan0".to_string()),
+                base_iface: None,
+                ssids: vec!["Test-WIFI".to_string()],
+            }
+        ),
+        None
+    );
 }
 
 /// Several SSIDs on one phy are a best-network selection: one connected

@@ -24,6 +24,14 @@ const RETRY_INTERVAL_MS: u64 = 500;
 // already diagnosed (wrong password, unsupported security) end the wait
 // immediately.
 const WIFI_CONNECT_WAIT_TIMEOUT_SECS: u64 = 60;
+// A pending WIFI connect request whose target phy settled on a different
+// SSID cannot be satisfied by waiting: shuli only leaves a connected
+// network for another configured SSID when the current link is critical
+// (below `switch_ssid_lower_than_dbm`). Give the plugin this long to
+// process the apply and drop a stale connection, then fail the attempt so
+// the top-level retry forces a fresh connection instead of burning the
+// whole timeout.
+const WIFI_CONNECT_SETTLED_OTHER_GRACE_SECS: u64 = 3;
 // Top-level apply retry: the inner verification retry only absorbs
 // post-apply propagation delays, so a transient failure of the apply itself
 // (a plugin or DHCP worker still starting, a NIC/link not ready yet) would
@@ -222,6 +230,40 @@ fn connected_wifi_phys(state: &NetworkState) -> HashSet<(String, String)> {
         }
     }
     ret
+}
+
+/// The non-requested SSID a pending connect `group` is connected to.
+///
+/// Returns `(phy kernel name, connected SSID)` when a phy the group
+/// targets is associated with a network outside `group.ssids`. Such a
+/// group is stuck: shuli does not leave a connected, non-critical link
+/// for another configured SSID, so waiting for the requested SSID cannot
+/// succeed and a fresh connection attempt is required.
+fn wifi_group_connected_elsewhere(
+    state: &NetworkState,
+    group: &WifiConnectGroup,
+) -> Option<(String, String)> {
+    state.ifaces.iter().find_map(|iface| {
+        let Interface::WifiPhy(phy) = iface else {
+            return None;
+        };
+        let connected = phy.ssid()?;
+        if group.ssids.iter().any(|ssid| ssid == connected) {
+            return None;
+        }
+        let matched = match (&group.phy_name, group.base_iface.as_deref()) {
+            (Some(phy_name), _) => phy.kernel_iface_name() == phy_name,
+            (None, Some(base)) => {
+                base == phy.kernel_iface_name()
+                    || base == phy.name()
+                    || phy.base_iface().profile_name.as_deref() == Some(base)
+            }
+            (None, None) => true,
+        };
+        matched.then(|| {
+            (phy.kernel_iface_name().to_string(), connected.to_string())
+        })
+    })
 }
 
 /// Kernel names of every wifi-phy in `state`.
@@ -739,6 +781,13 @@ impl NipartCommander {
         );
         let deadline = std::time::Instant::now()
             + std::time::Duration::from_secs(WIFI_CONNECT_WAIT_TIMEOUT_SECS);
+        // First time a pending group was seen settled on another SSID, with
+        // that phy/SSID pair, to apply the settle grace period.
+        let mut settled_other_since: Option<(
+            std::time::Instant,
+            String,
+            String,
+        )> = None;
         loop {
             // The client which requested the connection gave up (e.g.
             // the user interrupted `npt wifi connect`): abort now so the
@@ -777,6 +826,53 @@ impl NipartCommander {
                 self.forget_changed_wifi_phys(&initial_connected, &live_state)
                     .await?;
                 return Ok(());
+            }
+            // A pending group whose phy settled on another SSID cannot be
+            // satisfied by waiting: shuli only leaves a connected network
+            // for a different configured SSID on a critical link, so the
+            // requested SSID is only reachable through a fresh connection
+            // attempt. Fail (retriable) after a short settle grace period
+            // so the top-level apply retry runs that attempt instead of
+            // waiting for the whole timeout.
+            let settled_other = pending.iter().find_map(|group| {
+                wifi_group_connected_elsewhere(&live_state, group)
+                    .map(|other| (group, other))
+            });
+            match settled_other {
+                Some((group, (phy_name, connected_ssid))) => {
+                    let first_seen = match &settled_other_since {
+                        Some((since, phy, ssid))
+                            if *phy == phy_name && *ssid == connected_ssid =>
+                        {
+                            *since
+                        }
+                        _ => {
+                            let now = std::time::Instant::now();
+                            settled_other_since = Some((
+                                now,
+                                phy_name.clone(),
+                                connected_ssid.clone(),
+                            ));
+                            now
+                        }
+                    };
+                    if first_seen.elapsed()
+                        >= std::time::Duration::from_secs(
+                            WIFI_CONNECT_SETTLED_OTHER_GRACE_SECS,
+                        )
+                    {
+                        return Err(NipartError::new(
+                            ErrorKind::VerificationError,
+                            format!(
+                                "WIFI phy {phy_name} connected to SSID \
+                                 '{connected_ssid}' while waiting for the \
+                                 requested SSID '{}'",
+                                group.ssids.join("' or '")
+                            ),
+                        ));
+                    }
+                }
+                None => settled_other_since = None,
             }
             for group in &pending {
                 let candidates: Vec<&String> = match group.phy_name.as_ref() {

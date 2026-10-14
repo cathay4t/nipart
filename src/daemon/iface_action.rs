@@ -18,8 +18,8 @@ impl NipartCommander {
     /// The full saved config is applied with `memory-only` so the persisted
     /// state is untouched. `force` sends the full saved config even when the
     /// kernel already matches it, while `restart_auto_ip` restarts DHCP.
-    /// An explicit WIFI up rescans so shuli can pick a better BSSID even
-    /// when the requested SSID is already connected.
+    /// An explicit WIFI up switches the link to the requested SSID when it
+    /// is not connected yet; a phy already on that SSID keeps its link.
     pub(crate) async fn up_interface(
         &mut self,
         name: &str,

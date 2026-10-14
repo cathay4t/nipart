@@ -970,12 +970,15 @@ fn same_saved_networks_ignoring_prefered(
 /// Whether a forced apply must restart shuli's scan selection by clearing
 /// and re-adding the network list.
 ///
-/// A forced single-SSID request (e.g. `npt up <SSID>`) always restarts
-/// scan selection so shuli re-scans and can pick a better BSSID, even when
-/// the current SSID is already the requested one.  Full-list and unrelated
-/// forced applies keep an existing connection when the phy is already on
-/// one of the desired networks: `update_networks()` refreshes the list
-/// without dropping it.
+/// A forced single-SSID request (e.g. `npt up <SSID>`) restarts scan
+/// selection when the phy is not already connected to the requested SSID,
+/// so shuli switches to it.  A phy already connected to the requested SSID
+/// keeps its link: an explicit up of a connected profile must not drop it
+/// for a rescan (the rescan could pick another saved network and leave the
+/// requested SSID unconnected).  Full-list and unrelated forced applies
+/// keep an existing connection when the phy is already on one of the
+/// desired networks: `update_networks()` refreshes the list without
+/// dropping it.
 fn should_reconnect_to_networks(
     live_ssid: Option<&str>,
     networks: &[ShuliNetworkConfig],
@@ -985,10 +988,8 @@ fn should_reconnect_to_networks(
     if !force || networks.is_empty() {
         return false;
     }
-    if preferred_ssid.is_some() {
-        // Deliberately ignore `live_ssid` here: an explicit up of one SSID
-        // must rescan even when it is already the connected SSID.
-        return true;
+    if let Some(preferred_ssid) = preferred_ssid {
+        return live_ssid != Some(preferred_ssid);
     }
     !live_ssid
         .is_some_and(|ssid| networks.iter().any(|network| network.ssid == ssid))
