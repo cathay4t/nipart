@@ -883,7 +883,8 @@ fn mac_to_string(mac: &[u8; 6]) -> String {
 
 /// Convert nipart wifi configs into one shuli network list, keeping the
 /// order of the desired interfaces and de-duplicating SSIDs. Conflicting
-/// credentials for the same SSID on the same phy are an error.
+/// credentials or BSSID pins for the same SSID on the same phy are an
+/// error.
 ///
 /// `hint_map` carries the per-SSID quick-start hints (frequencies and
 /// known BSSes) loaded from the hint files; SSIDs without hints stay
@@ -894,21 +895,25 @@ fn build_shuli_networks(
 ) -> Result<Vec<ShuliNetworkConfig>, NipartError> {
     let mut ret: Vec<ShuliNetworkConfig> = Vec::new();
     for wifi_cfg in wifi_cfgs {
-        if let Some(existing) = ret.iter().find(|n| n.ssid == wifi_cfg.ssid) {
-            if existing.password.as_deref() != wifi_cfg.password.as_deref() {
+        let network =
+            build_shuli_network(wifi_cfg, hint_map.get(&wifi_cfg.ssid))?;
+        if let Some(existing) = ret.iter().find(|n| n.ssid == network.ssid) {
+            if existing.password != network.password
+                || existing.bssid != network.bssid
+            {
                 return Err(NipartError::new(
                     ErrorKind::InvalidArgument,
                     format!(
                         "Conflicting WIFI config for SSID {} on the same \
                          interface",
-                        wifi_cfg.ssid
+                        network.ssid
                     ),
                 ));
             }
-            log::debug!("Ignoring duplicate WIFI SSID {}", wifi_cfg.ssid);
+            log::debug!("Ignoring duplicate WIFI SSID {}", network.ssid);
             continue;
         }
-        ret.push(build_shuli_network(wifi_cfg, hint_map.get(&wifi_cfg.ssid)));
+        ret.push(network);
     }
     Ok(ret)
 }
@@ -992,11 +997,26 @@ fn should_reconnect_to_networks(
 fn build_shuli_network(
     wifi_cfg: &WifiConfig,
     loaded_hints: Option<&hints::LoadedHints>,
-) -> ShuliNetworkConfig {
+) -> Result<ShuliNetworkConfig, NipartError> {
     let mut network = ShuliNetworkConfig::new(&wifi_cfg.ssid);
     network.set_hidden(wifi_cfg.hidden);
     if let Some(password) = wifi_cfg.password.as_deref() {
         network.set_password(password);
+    }
+    if let Some(bssid) = wifi_cfg.bssid.as_deref() {
+        // `wifi-cfg.bssid` pins the profile to one AP: shuli never
+        // fails over to another BSS of the same SSID.
+        let mac = hints::mac_from_string(bssid).ok_or_else(|| {
+            NipartError::new(
+                ErrorKind::InvalidArgument,
+                format!(
+                    "Invalid BSSID {bssid} for WIFI SSID {}: expected \
+                     aa:bb:cc:dd:ee:ff",
+                    wifi_cfg.ssid
+                ),
+            )
+        })?;
+        network.set_bssid(Some(mac));
     }
     if let Some(loaded) = loaded_hints.filter(|hints| !hints.is_empty()) {
         // Frequency + known-BSS hints: they restrict the first scan to
@@ -1018,7 +1038,7 @@ fn build_shuli_network(
                 ),
         );
     }
-    network
+    Ok(network)
 }
 
 /// Copy freshly loaded hints into the stored network list without
@@ -1057,23 +1077,25 @@ fn merge_preferred_networks(
 ) -> Result<Vec<ShuliNetworkConfig>, NipartError> {
     let mut requested: Vec<ShuliNetworkConfig> = Vec::new();
     for wifi_cfg in wifi_cfgs {
+        let mut network =
+            build_shuli_network(wifi_cfg, hint_map.get(&wifi_cfg.ssid))?;
         if let Some(existing) =
-            requested.iter().find(|n| n.ssid == wifi_cfg.ssid)
+            requested.iter().find(|n| n.ssid == network.ssid)
         {
-            if existing.password.as_deref() != wifi_cfg.password.as_deref() {
+            if existing.password != network.password
+                || existing.bssid != network.bssid
+            {
                 return Err(NipartError::new(
                     ErrorKind::InvalidArgument,
                     format!(
                         "Conflicting WIFI config for SSID {} on the same \
                          interface",
-                        wifi_cfg.ssid
+                        network.ssid
                     ),
                 ));
             }
             continue;
         }
-        let mut network =
-            build_shuli_network(wifi_cfg, hint_map.get(&wifi_cfg.ssid));
         network.set_prefered(true);
         requested.push(network);
     }

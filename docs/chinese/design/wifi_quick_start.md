@@ -61,7 +61,6 @@ WIFI 冷启动在 shuli 选定 AP 之前需要一次全信道扫描。扫描是�
 ## 非目标
 
 * 无扫描直接认证（见[为何不使用无扫描提示](#为何不使用无扫描提示)）。
-* BSSID 固定（`wifi-cfg.bssid`），见[后续工作](#后续工作)。
 
 ## 设计概览
 
@@ -198,6 +197,11 @@ nipart 把保存的频率与 BSSID 作为
 未设置，因此 shuli 的无扫描直接认证路径保持关闭；提示用于驱动快速扫描与
 已提示 BSS 选择。
 
+`wifi-cfg.bssid` 与上述提示不同：设置后，插件将其传给
+`NetworkConfig::set_bssid()` 作为硬性固定，shuli 只会选择该 AP，绝不
+回退到同一 SSID 的其他 BSS（扫描选择、重试与漫游都遵守该约束）。非法
+的 MAC 会使应用以 `InvalidArgument` 失败，而不是静默连接到任意 BSS。
+
 ### 为何不使用无扫描提示
 
 只有当某个已配置网络的提示是完整的（`NetworkConfigHints::bss_info()`
@@ -293,7 +297,8 @@ DHCP 交换和首批流量竞争；信号触发或后台漫游扫描会取代尚
   文件、删除的幂等性、文件权限，以及序列化 YAML 中不含任何密钥或
   interface 字段。
 * `src/plugin-wifi/unit_tests/apply.rs` 覆盖提示（频率与已知 BSS）只
-  附加到匹配的 SSID，以及变化检测/刷新行为。
+  附加到匹配的 SSID、变化检测/刷新行为，以及 `wifi-cfg.bssid` 固定：
+  映射到 `NetworkConfig::set_bssid()`、非法 MAC 拒绝与固定冲突检测。
 * `shuli` crate 覆盖 `KnownBss` 提示往返与"仅已知 BSS 不禁用无扫描路径"
   的规则、已提示 BSS 选择（`best_hinted_candidate_filtered`：已知 BSS
   优先于更强的未知 BSS、最强已知 BSS、`prefered` 层级、无可见已知
@@ -307,9 +312,6 @@ DHCP 交换和首批流量竞争；信号触发或后台漫游扫描会取代尚
 
 ## 后续工作
 
-* **BSSID 固定**（`wifi-cfg.bssid`）：插件目前会丢弃它；shuli 尚无
-  按网络固定 BSSID 的能力。shuli 支持后，被固定的配置不得回退到同一
-  SSID 的其他 AP。已记录在两个项目的 TODO 中。
 * **无扫描提示**：若日后需要直接认证，应使用较短的提示认证超时
   （从 1 秒起步），让过期的 BSS 快速回退。一次开发环境实验
   （mac80211_hwsim、WPA2-PSK 与 WPA3-SAE）在 1 秒认证事件超时下约
