@@ -25,15 +25,7 @@ impl NipartCommander {
         name: &str,
     ) -> Result<NetworkState, NipartError> {
         let saved_state = self.conf_manager.query_state().await?;
-        let saved_iface =
-            find_saved_iface(&saved_state, name).ok_or_else(|| {
-                NipartError::new(
-                    ErrorKind::InvalidArgument,
-                    format!(
-                        "No interface or profile '{name}' found in saved state"
-                    ),
-                )
-            })?;
+        let saved_iface = saved_iface_or_error(&saved_state, name)?;
         log::info!(
             "Bringing interface {}/{} up",
             saved_iface.name(),
@@ -59,6 +51,23 @@ impl NipartCommander {
             None,
         )
         .await
+    }
+
+    /// Reject an unknown `npt up` target before the caller waits on the
+    /// transaction lock.
+    ///
+    /// The lookup only reads the saved state, which an on-going apply does
+    /// not own, so a missing profile can be reported immediately instead of
+    /// hanging behind a long-running transaction (e.g. a WIFI connection
+    /// wait). `up_interface()` re-checks under the lock, where the saved
+    /// state may have changed.
+    pub(crate) async fn check_up_interface(
+        &mut self,
+        name: &str,
+    ) -> Result<(), NipartError> {
+        let saved_state = self.conf_manager.query_state().await?;
+        saved_iface_or_error(&saved_state, name)?;
+        Ok(())
     }
 
     /// Wait until an explicit up/down one-time state is reflected in the
@@ -223,6 +232,18 @@ fn find_saved_iface<'a>(
         .ifaces
         .iter()
         .find(|iface| iface_matches_name(iface, name))
+}
+
+fn saved_iface_or_error<'a>(
+    saved_state: &'a NetworkState,
+    name: &str,
+) -> Result<&'a Interface, NipartError> {
+    find_saved_iface(saved_state, name).ok_or_else(|| {
+        NipartError::new(
+            ErrorKind::InvalidArgument,
+            format!("No interface or profile '{name}' found in saved state"),
+        )
+    })
 }
 
 fn iface_matches_name(iface: &Interface, name: &str) -> bool {

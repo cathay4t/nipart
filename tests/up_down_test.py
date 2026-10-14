@@ -1,14 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+import subprocess
 import time
 
 import nipart
+import pytest
 
 from .conftest import CLI_PATH
+from .conftest import DAEMON_LOG
+from .conftest import start_daemon
+from .conftest import stop_daemon
 from .testlib.cmdlib import exec_cmd
+from .testlib.env import has_kernel_module
 from .testlib.retry import retry_till_true_or_timeout
 from .testlib.statelib import load_yaml
 from .testlib.statelib import show_only
+from .wifi_test import TEST_WIFI_SSID_HIDDEN
+from .wifi_test import wifi_hidden_env  # noqa: F401
 
 TEST_DUMMY = "dummy-up-down0"
 RUNNING_DUMMY = "dummy-running0"
@@ -165,6 +174,72 @@ def test_npt_up_missing_profile_fails():
     rc, out, err = exec_cmd([CLI_PATH, "up", "no-such-profile"], check=False)
     assert rc != 0, "npt up should fail for a missing profile"
     assert "No interface or profile" in err, err
+
+
+def _daemon_log_since(pos, mark, timeout=20):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with open(DAEMON_LOG, encoding="utf-8", errors="replace") as fd:
+                fd.seek(pos)
+                if mark in fd.read():
+                    return True
+        except FileNotFoundError:
+            pass
+        time.sleep(0.2)
+    return False
+
+
+@pytest.mark.skipif(
+    not has_kernel_module("mac80211_hwsim"),
+    reason="Does not have 'mac80211_hwsim' module",
+)
+def test_npt_up_missing_profile_fails_while_daemon_busy(  # noqa: F811
+    wifi_hidden_env,  # noqa: F811
+):
+    """A missing profile must fail even while a daemon transaction is
+    waiting: the on-going apply keeps the transaction lock, but looking
+    up the target does not need it, so the command must not hang.
+    """
+    connect_proc = None
+    try:
+        # A `npt wifi connect` to a hidden SSID without `--hidden` is
+        # never found by shuli, so the daemon keeps the transaction busy
+        # for the whole WIFI connection wait.
+        log_pos = os.path.getsize(DAEMON_LOG)
+        connect_proc = subprocess.Popen(
+            [
+                CLI_PATH,
+                "wifi",
+                "connect",
+                TEST_WIFI_SSID_HIDDEN,
+                "--no-pass",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        assert _daemon_log_since(
+            log_pos, "Waiting for WIFI connection"
+        ), "daemon never started the WIFI connection wait"
+
+        proc = subprocess.run(
+            [CLI_PATH, "up", "no-such-profile"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+        )
+        err = proc.stderr.decode("utf-8")
+        assert proc.returncode != 0, "npt up should fail for a missing profile"
+        assert "No interface or profile" in err, err
+    finally:
+        if connect_proc is not None:
+            connect_proc.kill()
+            connect_proc.wait()
+        # The abandoned connect keeps the old daemon busy for up to two
+        # WIFI connect timeouts; restart it so the rest of the session
+        # is not blocked.
+        stop_daemon()
+        start_daemon()
 
 
 def test_npt_default_shows_configured_ifaces():
