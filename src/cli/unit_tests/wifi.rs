@@ -260,3 +260,34 @@ fn test_security_string() {
         "WPA2 WPA3"
     );
 }
+
+#[test]
+fn test_wifi_connect_state_str_no_pass_not_hidden() {
+    let state: nipart::NetworkState =
+        rmsd_yaml::from_str(&wifi_connect_state_str("Test-WIFI", None, false))
+            .unwrap();
+    let iface = state.ifaces.iter().next().unwrap();
+    let nipart::Interface::WifiCfg(wifi_cfg) = iface else {
+        panic!("expecting wifi-cfg, got {iface:?}")
+    };
+    let wifi = wifi_cfg.wifi.as_ref().unwrap();
+    assert_eq!(wifi.ssid, "Test-WIFI");
+    assert!(!wifi.hidden);
+    assert!(wifi.password.is_none());
+}
+
+#[test]
+fn test_wifi_connect_state_str_password_hidden() {
+    let state: nipart::NetworkState = rmsd_yaml::from_str(
+        &wifi_connect_state_str("Test-WIFI", Some("12345678"), true),
+    )
+    .unwrap();
+    let iface = state.ifaces.iter().next().unwrap();
+    let nipart::Interface::WifiCfg(wifi_cfg) = iface else {
+        panic!("expecting wifi-cfg, got {iface:?}")
+    };
+    let wifi = wifi_cfg.wifi.as_ref().unwrap();
+    assert_eq!(wifi.ssid, "Test-WIFI");
+    assert!(wifi.hidden);
+    assert_eq!(wifi.password.as_deref(), Some("12345678"));
+}

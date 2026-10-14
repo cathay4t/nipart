@@ -815,10 +815,13 @@ class TestWifiCfg:
         ), "Route by wifi-cfg profile name was not applied"
 
 
-def _wifi_connect(ssid, password):
+def _wifi_connect(ssid, password, hidden=False):
     """Run `npt wifi connect <ssid>` feeding `password` on STDIN."""
+    cmd = [CLI_PATH, "wifi", "connect", ssid]
+    if hidden:
+        cmd.append("--hidden")
     proc = subprocess.run(
-        [CLI_PATH, "wifi", "connect", ssid],
+        cmd,
         input=f"{password}\n".encode(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -890,6 +893,44 @@ class TestWifiConnectCommand:
             connected_ssid() == TEST_WIFI_SSID
         ), "npt wifi connect returned before the WIFI link was connected"
         assert retry_till_true_or_timeout(10, ping_wifi_peer)
+
+
+@pytest.mark.skipif(
+    not has_kernel_module("mac80211_hwsim"),
+    reason="Does not have 'mac80211_hwsim' module",
+)
+class TestWifiConnectHiddenCommand:
+    @pytest.fixture(autouse=True)
+    def clean_up_connect_profile(self):
+        # Start from a clean profile: earlier test classes may have left
+        # a saved profile for the same SSID.
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_WIFI_SSID_HIDDEN}
+                type: wifi-cfg
+                state: absent"""))
+        yield
+        nipart.apply(load_yaml(f"""---
+            interfaces:
+              - name: {TEST_WIFI_SSID_HIDDEN}
+                type: wifi-cfg
+                state: absent"""))
+
+    def test_connect_hidden_ssid(
+        self, clean_up, wifi_hidden_env  # noqa: F811
+    ):
+        assert connected_ssid() != TEST_WIFI_SSID_HIDDEN
+        rc, out, err = _wifi_connect(
+            TEST_WIFI_SSID_HIDDEN, TEST_WIFI_PSK, hidden=True
+        )
+        assert rc == 0, f"npt wifi connect --hidden failed:\n{out}\n{err}"
+        assert connected_ssid() == TEST_WIFI_SSID_HIDDEN, (
+            "npt wifi connect --hidden returned before the WIFI link was "
+            "connected"
+        )
+        assert (
+            _saved_wifi_cfg(TEST_WIFI_SSID_HIDDEN) is not None
+        ), "the connected hidden SSID profile was not persisted"
 
 
 @pytest.mark.skipif(
