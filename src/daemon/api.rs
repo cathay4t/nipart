@@ -83,6 +83,15 @@ pub(crate) async fn process_api_connection(
                 conn.send(result).await?;
             }
             NipartClientCmd::UpInterface(name) => {
+                // Reject an unknown target before the transaction lock:
+                // waiting behind an on-going (potentially long WIFI) apply
+                // would turn the missing-profile error into an apparent
+                // hang of the `npt up` command.
+                if let Err(e) = commander.check_up_interface(&name).await {
+                    conn.send::<Result<NetworkState, NipartError>>(Err(e))
+                        .await?;
+                    continue;
+                }
                 log_info(
                     Some(&mut conn),
                     format!(
