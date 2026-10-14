@@ -894,6 +894,55 @@ class TestWifiConnectCommand:
         ), "npt wifi connect returned before the WIFI link was connected"
         assert retry_till_true_or_timeout(10, ping_wifi_peer)
 
+    def test_killed_client_rolls_back_pending_connect(
+        self, clean_up, wifi_env  # noqa: F811
+    ):
+        # Save and connect a profile first so the rollback has something
+        # to restore.
+        nipart.apply(load_yaml(f"""---
+                interfaces:
+                  - name: {TEST_WIFI_SSID}
+                    type: wifi-cfg
+                    state: up
+                    wifi:
+                      ssid: {TEST_WIFI_SSID}
+                      password: {TEST_WIFI_PSK}
+                      base-iface: {WIFI_TEST_NIC}
+                """))
+        assert retry_till_true_or_timeout(
+            60, lambda: connected_ssid() == TEST_WIFI_SSID
+        )
+
+        proc = subprocess.Popen(
+            [CLI_PATH, "wifi", "connect", "No-Such-SSID-XY", "--no-pass"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            # Applying the unavailable SSID makes the plugin drop the
+            # current connection and scan for the new one.
+            assert retry_till_true_or_timeout(
+                30, lambda: connected_ssid() != TEST_WIFI_SSID
+            ), "plugin never replaced the current SSID with the request"
+            # Simulate the user giving up on the connect command.
+            proc.kill()
+            proc.wait()
+            # The daemon must abort the orphaned apply and roll back so
+            # the saved profile reconnects without a daemon restart.
+            assert wait_for_ssid(TEST_WIFI_SSID, timeout=45), (
+                "the saved WIFI profile did not reconnect after the "
+                "connect client was killed"
+            )
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            # Before the fix the abandoned apply keeps running for up to
+            # two WIFI connect timeouts; restart the daemon to unblock
+            # the rest of the session.
+            stop_daemon()
+            start_daemon()
+
 
 @pytest.mark.skipif(
     not has_kernel_module("mac80211_hwsim"),

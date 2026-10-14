@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::time::Duration;
+use std::{os::fd::AsRawFd, time::Duration};
 
 use serde::{Serialize, Serializer, de::DeserializeOwned, ser::SerializeMap};
 use tokio::{
@@ -40,6 +40,27 @@ impl NipartIpcConnection {
 
     pub fn set_timeout(&mut self, timeout_ms: u32) {
         self.timeout_ms = timeout_ms;
+    }
+
+    /// Whether the remote peer closed the connection.
+    ///
+    /// One byte is peeked without being consumed, so a message the peer
+    /// already sent is not lost. Used by the daemon to abort a long
+    /// transaction (e.g. a WIFI connection wait) when the requesting
+    /// client is gone instead of finishing it for nobody.
+    pub fn is_closed(&self) -> bool {
+        let mut buf = [0u8; 1];
+        match nix::sys::socket::recv(
+            self.socket.as_raw_fd(),
+            &mut buf,
+            nix::sys::socket::MsgFlags::MSG_PEEK
+                | nix::sys::socket::MsgFlags::MSG_DONTWAIT,
+        ) {
+            Ok(0) => true,
+            Ok(_) => false,
+            Err(nix::errno::Errno::EAGAIN) => false,
+            Err(_) => true,
+        }
     }
 
     pub async fn new_with_path(
@@ -386,5 +407,40 @@ where
             Ok(v) => Self::Data(v),
             Err(e) => Self::Error(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_is_closed_detects_peer_close() {
+        let (local, remote) = UnixStream::pair().unwrap();
+        let conn =
+            NipartIpcConnection::new_with_stream(local, "test-1", "test-2");
+        assert!(!conn.is_closed());
+        drop(remote);
+        // The EOF delivery to the local socket is asynchronous.
+        for _ in 0..100 {
+            if conn.is_closed() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("is_closed() did not detect the closed peer");
+    }
+
+    #[tokio::test]
+    async fn test_is_closed_peek_does_not_consume() {
+        let (local, mut remote) = UnixStream::pair().unwrap();
+        let conn =
+            NipartIpcConnection::new_with_stream(local, "test-1", "test-2");
+        remote.write_all(b"x").await.unwrap();
+        conn.socket.readable().await.unwrap();
+        assert!(!conn.is_closed());
+        let mut buf = [0u8; 1];
+        assert_eq!(conn.socket.try_read(&mut buf).unwrap(), 1);
+        assert_eq!(buf, [b'x']);
     }
 }

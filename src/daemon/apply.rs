@@ -558,7 +558,12 @@ impl NipartCommander {
             {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    if !e.kind().retriable() {
+                    // An `IpcClosed` means the client which requested the
+                    // apply is gone and its rollback already restored the
+                    // previous state: retrying the full apply would only
+                    // keep the transaction lock for nobody.
+                    if !e.kind().retriable() || e.kind() == ErrorKind::IpcClosed
+                    {
                         log_warn(
                             conn.as_deref_mut(),
                             format!(
@@ -633,9 +638,10 @@ impl NipartCommander {
         // as a background retry loop while the apply reports success. A
         // failure here triggers the normal rollback.
         if !merged_state.option.no_verify {
-            self.wait_wifi_connect_requests(&wifi_connect_requests(
-                merged_state,
-            ))
+            self.wait_wifi_connect_requests(
+                conn.as_deref_mut(),
+                &wifi_connect_requests(merged_state),
+            )
             .await?;
         }
 
@@ -703,6 +709,7 @@ impl NipartCommander {
     /// the real reason instead of a timeout.
     async fn wait_wifi_connect_requests(
         &mut self,
+        conn: Option<&mut NipartIpcConnection>,
         requests: &[WifiConnectRequest],
     ) -> Result<(), NipartError> {
         if requests.is_empty() {
@@ -733,6 +740,25 @@ impl NipartCommander {
         let deadline = std::time::Instant::now()
             + std::time::Duration::from_secs(WIFI_CONNECT_WAIT_TIMEOUT_SECS);
         loop {
+            // The client which requested the connection gave up (e.g.
+            // the user interrupted `npt wifi connect`): abort now so the
+            // rollback restores the previous WIFI state and the
+            // transaction lock is released, instead of hunting an
+            // unreachable SSID for the whole timeout.
+            if conn.as_ref().is_some_and(|conn| conn.is_closed()) {
+                return Err(NipartError::new(
+                    ErrorKind::IpcClosed,
+                    format!(
+                        "Client disconnected while waiting for WIFI \
+                         connection to {}",
+                        requests
+                            .iter()
+                            .map(|request| format!("SSID '{}'", request.ssid))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                ));
+            }
             let kernel_state = NipartNoDaemon::query_network_state(
                 NipartQueryOption::running(),
             )
