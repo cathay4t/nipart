@@ -1758,6 +1758,75 @@ class TestWifiMultiSsid:
             f"got {connected_bssid()}"
         )
 
+    def test_npt_up_connected_profile_keeps_link(self, multi_ap_env):
+        # `npt up` of the SSID already connected must be a no-op: the link
+        # has to stay up for the whole command instead of being torn down
+        # for a rescan which could land on another saved network.
+        both = load_yaml(
+            wifi_cfg_state_yaml(
+                (TEST_WIFI_SSID, TEST_WIFI_PSK, "up"),
+                (TEST_WIFI_SSID_2, None, "up"),
+            )
+        )
+        nipart.apply(both)
+        assert wait_for_ssid(TEST_WIFI_SSID) or wait_for_ssid(TEST_WIFI_SSID_2)
+        connected = connected_ssid()
+        assert connected in (TEST_WIFI_SSID, TEST_WIFI_SSID_2)
+
+        proc = subprocess.Popen(
+            [CLI_PATH, "up", connected],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        lost = False
+        while proc.poll() is None:
+            if connected_ssid() != connected:
+                lost = True
+                break
+            time.sleep(0.05)
+        out, err = proc.communicate(timeout=120)
+        assert proc.returncode == 0, f"npt up failed:\n{out}\n{err}"
+        assert (
+            not lost
+        ), f"`npt up {connected}` dropped the existing connection"
+        assert connected_ssid() == connected
+
+    def test_npt_up_unavailable_ssid_fails_fast(self, multi_ap_env):
+        # An explicit up of an unavailable SSID while another saved profile
+        # is reachable: shuli falls back to the reachable network, and the
+        # daemon must report the failed request quickly instead of waiting
+        # the full WIFI connect timeout on both attempts. The apply
+        # rollback then restores the reachable profile.
+        missing_ssid = "No-Such-SSID-XY"
+        both = load_yaml(
+            wifi_cfg_state_yaml(
+                (TEST_WIFI_SSID, TEST_WIFI_PSK, "up"),
+                (missing_ssid, None, "up"),
+            )
+        )
+        try:
+            nipart.apply(both)
+            assert wait_for_ssid(TEST_WIFI_SSID)
+            start = time.time()
+            rc, out, err = exec_cmd(
+                [CLI_PATH, "up", missing_ssid], check=False
+            )
+            elapsed = time.time() - start
+            assert (
+                rc != 0
+            ), f"npt up of an unavailable SSID succeeded:\n{out}\n{err}"
+            assert elapsed < 30, (
+                f"`npt up {missing_ssid}` took {elapsed:.1f}s: the daemon "
+                "did not fail the unreachable SSID wait quickly"
+            )
+            assert retry_till_true_or_timeout(
+                30, lambda: connected_ssid() == TEST_WIFI_SSID
+            ), "the reachable saved profile was not restored"
+        finally:
+            nipart.apply(
+                load_yaml(wifi_cfg_state_yaml((missing_ssid, None, "absent")))
+            )
+
 
 @pytest.mark.skipif(
     not has_kernel_module("mac80211_hwsim"),

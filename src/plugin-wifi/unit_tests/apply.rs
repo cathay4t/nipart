@@ -442,9 +442,9 @@ fn same_saved_networks_ignores_entry_order() {
 }
 
 #[test]
-fn forced_single_ssid_rescans_when_already_on_desired_ssid() {
+fn forced_single_ssid_keeps_connection_when_already_on_desired_ssid() {
     let networks = [network("Home-SSID", None, true)];
-    assert!(should_reconnect_to_networks(
+    assert!(!should_reconnect_to_networks(
         Some("Home-SSID"),
         &networks,
         true,
