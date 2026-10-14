@@ -79,6 +79,15 @@ impl CommandWifi {
                                 "Do not ask for password(SSID does not \
                                  require password to connect)",
                             ),
+                    )
+                    .arg(
+                        clap::Arg::new("HIDDEN")
+                            .long("hidden")
+                            .action(clap::ArgAction::SetTrue)
+                            .help(
+                                "SSID is hidden(not broadcast by the AP, \
+                                 requires directed probe)",
+                            ),
                     ),
             )
             .subcommand(
@@ -106,37 +115,16 @@ impl CommandWifi {
         } else if let Some(matches) = matches.subcommand_matches("connect") {
             // It is safe to unwrap because of clap `required: true`
             let ssid = matches.get_one::<String>("SSID").unwrap();
-            let state_str = if matches.get_flag("NO_PASS") {
-                format!(
-                    r#"---
-                    interfaces:
-                    - name: {ssid}
-                      type: wifi-cfg
-                      state: up
-                      ipv4:
-                        enabled: true
-                        dhcp: true
-                      wifi:
-                        ssid: {ssid}
-                    "#
-                )
+            let password = if matches.get_flag("NO_PASS") {
+                None
             } else {
-                let pass = getpass()?;
-                format!(
-                    r#"---
-                    interfaces:
-                    - name: {ssid}
-                      type: wifi-cfg
-                      state: up
-                      ipv4:
-                        enabled: true
-                        dhcp: true
-                      wifi:
-                        ssid: {ssid}
-                        password: {pass}
-                    "#
-                )
+                Some(getpass()?)
             };
+            let state_str = wifi_connect_state_str(
+                ssid,
+                password.as_deref(),
+                matches.get_flag("HIDDEN"),
+            );
 
             let desired_state: nipart::NetworkState =
                 rmsd_yaml::from_str(&state_str)?;
@@ -164,6 +152,28 @@ impl CommandWifi {
         }
         Ok(())
     }
+}
+
+/// Build the desired state of `npt wifi connect`.
+///
+/// `password` is `None` for `--no-pass`; `hidden` sets `wifi.hidden` so the
+/// wifi plugin asks shuli to probe the SSID with a directed probe request.
+fn wifi_connect_state_str(
+    ssid: &str,
+    password: Option<&str>,
+    hidden: bool,
+) -> String {
+    let mut wifi_cfg = format!("    ssid: {ssid}\n");
+    if let Some(password) = password {
+        wifi_cfg.push_str(&format!("    password: {password}\n"));
+    }
+    if hidden {
+        wifi_cfg.push_str("    hidden: true\n");
+    }
+    format!(
+        "---\ninterfaces:\n- name: {ssid}\n  type: wifi-cfg\n  state: up\n  \
+         ipv4:\n    enabled: true\n    dhcp: true\n  wifi:\n{wifi_cfg}"
+    )
 }
 
 /// Query the daemon for WIFI scan results (active scan or kernel dump)
