@@ -1,22 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::{
-    BaseInterface, ErrorKind, NipartError, VlanConfig, VlanInterface,
-    VlanProtocol, VlanQosMapping, VlanRegistrationProtocol,
+    ErrorKind, NipartError, VlanConfig, VlanInterface, VlanProtocol,
+    VlanQosMapping, VlanRegistrationProtocol,
 };
-
-impl From<nispor::VlanProtocol> for VlanProtocol {
-    fn from(v: nispor::VlanProtocol) -> Self {
-        match v {
-            nispor::VlanProtocol::Ieee8021Q => VlanProtocol::Ieee8021Q,
-            nispor::VlanProtocol::Ieee8021AD => VlanProtocol::Ieee8021Ad,
-            p => {
-                log::debug!("Got unknown VLAN protocol {p:?}");
-                VlanProtocol::Unknown
-            }
-        }
-    }
-}
 
 impl From<VlanProtocol> for nispor::VlanProtocol {
     fn from(v: VlanProtocol) -> Self {
@@ -84,30 +71,6 @@ impl From<&VlanConfig> for nispor::VlanConf {
     }
 }
 
-impl From<&nispor::VlanInfo> for VlanConfig {
-    fn from(np_vlan_conf: &nispor::VlanInfo) -> Self {
-        VlanConfig {
-            id: Some(np_vlan_conf.vlan_id),
-            base_iface: Some(np_vlan_conf.base_iface.clone()),
-            protocol: Some(np_vlan_conf.protocol.into()),
-            reorder_headers: Some(np_vlan_conf.is_reorder_hdr),
-            loose_binding: Some(np_vlan_conf.is_loose_binding),
-            bridge_binding: Some(np_vlan_conf.is_bridge_binding),
-            // They are mutually exclusive, vlan cannot be gvrp and mvrp
-            // at the same time
-            registration_protocol: if np_vlan_conf.is_gvrp {
-                Some(VlanRegistrationProtocol::Gvrp)
-            } else if np_vlan_conf.is_mvrp {
-                Some(VlanRegistrationProtocol::Mvrp)
-            } else {
-                Some(VlanRegistrationProtocol::None)
-            },
-            ingress_qos_map: get_qos_map(&np_vlan_conf.ingress_qos_map),
-            egress_qos_map: get_qos_map(&np_vlan_conf.egress_qos_map),
-        }
-    }
-}
-
 pub(crate) fn apply_vlan_conf(
     mut np_iface: nispor::IfaceConf,
     iface: &VlanInterface,
@@ -126,41 +89,4 @@ pub(crate) fn apply_vlan_conf(
         }
     }
     Ok(vec![np_iface])
-}
-
-impl VlanInterface {
-    pub(crate) fn new_from_nispor(
-        base_iface: BaseInterface,
-        np_iface: &nispor::Iface,
-    ) -> Self {
-        if let Some(np_vlan_conf) = np_iface.vlan.as_ref() {
-            Self {
-                base: base_iface,
-                vlan: Some(np_vlan_conf.into()),
-            }
-        } else {
-            Self {
-                base: base_iface,
-                ..Default::default()
-            }
-        }
-    }
-}
-
-fn get_qos_map(
-    np_maps: &[nispor::VlanQosMapping],
-) -> Option<Vec<crate::VlanQosMapping>> {
-    if np_maps.is_empty() {
-        None
-    } else {
-        let mut ret = Vec::new();
-        for np_map in np_maps {
-            ret.push(crate::VlanQosMapping {
-                from: np_map.from,
-                to: np_map.to,
-            });
-        }
-        ret.sort_unstable();
-        Some(ret)
-    }
 }
