@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{
-    BaseInterface, EthernetConfig, EthernetDuplex, EthernetInterface,
-    NipartError, NipartInterface, VethConfig,
-};
+use crate::{EthernetInterface, NipartError, NipartInterface};
 
 pub(crate) fn apply_ethernet_conf(
     mut np_iface: nispor::IfaceConf,
@@ -28,47 +25,4 @@ pub(crate) fn apply_ethernet_conf(
     } else {
         Ok(vec![np_iface])
     }
-}
-
-impl EthernetInterface {
-    pub(crate) fn new_from_nispor(
-        base: BaseInterface,
-        np_iface: &nispor::Iface,
-    ) -> Self {
-        Self {
-            base,
-            veth: get_veth_conf(np_iface),
-            ethernet: get_eth_conf(np_iface),
-        }
-    }
-}
-
-fn get_veth_conf(np_iface: &nispor::Iface) -> Option<VethConfig> {
-    np_iface
-        .veth
-        .as_ref()
-        .map(|v| v.peer.as_str())
-        .map(|peer| VethConfig {
-            peer: peer.to_string(),
-        })
-}
-
-fn get_eth_conf(np_iface: &nispor::Iface) -> Option<EthernetConfig> {
-    np_iface
-        .ethtool
-        .as_ref()
-        .and_then(|ethtool_info| ethtool_info.link_mode.as_ref())
-        .map(|link_mode_info| EthernetConfig {
-            speed: link_mode_info.speed,
-            auto_neg: Some(link_mode_info.auto_negotiate),
-            duplex: match link_mode_info.duplex {
-                Some(nispor::EthtoolLinkModeDuplex::Full) => {
-                    Some(EthernetDuplex::Full)
-                }
-                Some(nispor::EthtoolLinkModeDuplex::Half) => {
-                    Some(EthernetDuplex::Half)
-                }
-                _ => None,
-            },
-        })
 }
