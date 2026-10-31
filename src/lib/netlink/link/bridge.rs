@@ -227,3 +227,14 @@ pub(crate) fn bridge_vlan_config(
     }
 }
 
+pub(crate) fn get_user_hz() -> u32 {
+    if let Ok(Some(user_hz)) =
+        nix::unistd::sysconf(nix::unistd::SysconfVar::CLK_TCK)
+        && user_hz > 0
+    {
+        user_hz as u32
+    } else {
+        DEFAULT_USER_HZ
+    }
+}
+
