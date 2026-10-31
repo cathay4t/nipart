@@ -392,3 +392,7 @@ fn merge_vlan_range(
     vlans
 }
 
+fn is_access_port(entries: &[BridgeVlanEntry]) -> bool {
+    entries.len() == 1 && entries[0].is_pvid && entries[0].is_egress_untagged
+}
+
