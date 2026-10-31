@@ -111,3 +111,17 @@ fn test_parse_loopback_and_unsupported_link() {
     assert_eq!(tun.base_iface().state, InterfaceState::Ignore);
 }
 
+#[test]
+fn test_parse_ignores_reserved_and_vti_links() {
+    let ovs_system =
+        link_message(5, "ovs-system", LinkLayerType::Ether, LinkFlags::Up);
+    let mut vti = link_message(6, "vti0", LinkLayerType::Ether, LinkFlags::Up);
+    vti.attributes.push(link_info_attribute(
+        InfoKind::Vti,
+        Some(InfoData::Other(Vec::new())),
+    ));
+    let interfaces =
+        LinkState::from_messages(&[ovs_system, vti]).into_interfaces();
+    assert!(interfaces.is_empty());
+}
+
