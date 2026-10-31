@@ -254,3 +254,22 @@ fn devide_by_user_hz(value: u32) -> u32 {
     (value + 1) / get_user_hz()
 }
 
+fn get_stp_options(bridge: &InfoBridgeState) -> LinuxBridgeStpOptions {
+    LinuxBridgeStpOptions {
+        enabled: Some(matches!(
+            bridge.stp_state,
+            Some(NlBridgeStpState::KernelStp) | Some(NlBridgeStpState::UserStp)
+        )),
+        forward_delay: bridge.forward_delay.map(devide_by_user_hz).map(|v| {
+            u8::try_from(v).unwrap_or(LinuxBridgeStpOptions::FORWARD_DELAY_MAX)
+        }),
+        max_age: bridge.max_age.map(devide_by_user_hz).map(|v| {
+            u8::try_from(v).unwrap_or(LinuxBridgeStpOptions::MAX_AGE_MAX)
+        }),
+        hello_time: bridge.hello_time.map(devide_by_user_hz).map(|v| {
+            u8::try_from(v).unwrap_or(LinuxBridgeStpOptions::HELLO_TIME_MAX)
+        }),
+        priority: bridge.priority,
+    }
+}
+
