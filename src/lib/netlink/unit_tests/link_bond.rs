@@ -187,3 +187,12 @@ fn test_parse_bond_ports_and_primary() {
     assert_eq!(ports[1].queue_id, Some(2));
 }
 
+#[test]
+fn test_parse_bond_default_mode() {
+    let bond = parse_bond(&[bond_message(10, Vec::new())]);
+    let config = bond.bond.expect("Bond config missing");
+    assert_eq!(config.mode, Some(BondMode::RoundRobin));
+    assert_eq!(config.ports, Some(Vec::new()));
+    let options: BondOptions = config.options.expect("Bond options missing");
+    assert_eq!(options, BondOptions::default());
+}
