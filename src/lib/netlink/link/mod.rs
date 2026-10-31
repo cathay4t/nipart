@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 
 use futures_util::TryStreamExt;
-use rtnetlink::packet_route::link::{LinkAttribute, LinkMessage};
+use rtnetlink::packet_route::{
+    AddressFamily,
+    link::{LinkAttribute, LinkExtentMask, LinkMessage},
+};
 
 use crate::{NipartError, netlink::map_rtnetlink_error};
 
@@ -61,6 +64,25 @@ pub(crate) fn index_map_from_messages<'a>(
         }
     }
     map
+}
+
+pub(crate) async fn get_link_messages() -> Result<Vec<LinkMessage>, NipartError>
+{
+    let (connection, handle, _) = rtnetlink::new_connection().map_err(|e| {
+        super::map_io_error("Failed to create rtnetlink connection", e)
+    })?;
+    tokio::spawn(connection);
+    let mut messages = handle.link().get().execute();
+    let mut links = Vec::new();
+    while let Some(message) = messages
+        .try_next()
+        .await
+        .map_err(|e| map_rtnetlink_error("Failed to dump kernel links", e))?
+    {
+        links.push(message);
+    }
+
+    Ok(links)
 }
 
 #[allow(dead_code)]
