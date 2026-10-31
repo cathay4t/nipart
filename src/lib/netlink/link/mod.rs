@@ -82,6 +82,39 @@ pub(crate) async fn get_link_messages() -> Result<Vec<LinkMessage>, NipartError>
         links.push(message);
     }
 
+    // Bridge VLAN information is only returned by a separate dump with the
+    // bridge extent mask. Attach those attributes to the matching link
+    // messages so a single message map can be parsed.
+    let mut bridge_vlan_messages = handle
+        .link()
+        .get()
+        .set_filter_mask(
+            AddressFamily::Bridge,
+            vec![LinkExtentMask::BrvlanCompressed],
+        )
+        .execute();
+    let mut bridge_vlans: HashMap<u32, Vec<LinkAttribute>> = HashMap::new();
+    while let Some(message) = bridge_vlan_messages
+        .try_next()
+        .await
+        .map_err(|e| map_rtnetlink_error("Failed to dump bridge VLANs", e))?
+    {
+        let attributes: Vec<LinkAttribute> = message
+            .attributes
+            .into_iter()
+            .filter(|attribute| {
+                matches!(attribute, LinkAttribute::AfSpecBridge(_))
+            })
+            .collect();
+        if !attributes.is_empty() {
+            bridge_vlans.insert(message.header.index, attributes);
+        }
+    }
+    for message in links.iter_mut() {
+        if let Some(attributes) = bridge_vlans.remove(&message.header.index) {
+            message.attributes.extend(attributes);
+        }
+    }
     Ok(links)
 }
 
