@@ -350,3 +350,45 @@ fn kernel_vlan_from_nl80211(info: &BridgeVlanInfo) -> KernelBridgeVlanEntry {
     }
 }
 
+fn merge_vlan_range(
+    kernel_vlans: &[KernelBridgeVlanEntry],
+) -> Vec<BridgeVlanEntry> {
+    let mut vlans = Vec::new();
+    let mut vlan_start = None;
+    for kernel_vlan in kernel_vlans {
+        match (kernel_vlan.is_range_start, kernel_vlan.is_range_end) {
+            (true, false) => {
+                vlan_start = Some(kernel_vlan.vid);
+                continue;
+            }
+            (false, true) => {
+                if let Some(start) = vlan_start {
+                    vlans.push(BridgeVlanEntry {
+                        vid: None,
+                        vid_range: Some((start, kernel_vlan.vid)),
+                        is_pvid: kernel_vlan.is_pvid,
+                        is_egress_untagged: kernel_vlan.is_egress_untagged,
+                    });
+                } else {
+                    log::warn!(
+                        "Invalid kernel bridge VLAN information: missing \
+                         start VLAN for {}",
+                        kernel_vlan.vid
+                    );
+                }
+                vlan_start = None;
+            }
+            (false, false) | (true, true) => {
+                vlans.push(BridgeVlanEntry {
+                    vid: Some(kernel_vlan.vid),
+                    vid_range: None,
+                    is_pvid: kernel_vlan.is_pvid,
+                    is_egress_untagged: kernel_vlan.is_egress_untagged,
+                });
+                vlan_start = None;
+            }
+        }
+    }
+    vlans
+}
+
