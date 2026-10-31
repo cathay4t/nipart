@@ -17,7 +17,6 @@ mod route_rule;
 mod vlan;
 mod vxlan;
 mod watcher;
-mod wifi;
 mod wireguard;
 
 use std::collections::HashSet;
