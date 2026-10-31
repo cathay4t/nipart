@@ -281,3 +281,23 @@ fn vlan_protocol_from_nl80211(protocol: NlVlanProtocol) -> VlanProtocol {
     }
 }
 
+fn multicast_router_from_nl80211(
+    value: NlBridgeMulticastRouterType,
+) -> LinuxBridgeMulticastRouterType {
+    match value {
+        NlBridgeMulticastRouterType::Disabled => {
+            LinuxBridgeMulticastRouterType::Disabled
+        }
+        NlBridgeMulticastRouterType::TempQuery => {
+            LinuxBridgeMulticastRouterType::Auto
+        }
+        NlBridgeMulticastRouterType::Permanent => {
+            LinuxBridgeMulticastRouterType::Enabled
+        }
+        _ => {
+            log::debug!("Unsupported linux bridge multicast router {value:?}");
+            LinuxBridgeMulticastRouterType::Unknown
+        }
+    }
+}
+
