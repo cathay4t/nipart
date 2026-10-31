@@ -44,3 +44,8 @@ fn test_parse_ethtool_unknown_speed_and_duplex() {
     assert_eq!(config.duplex, None);
 }
 
+#[test]
+fn test_parse_ethtool_without_header() {
+    let nlas = vec![EthtoolAttr::LinkMode(EthtoolLinkModeAttr::Autoneg(true))];
+    assert!(parse_link_mode_message(&nlas).is_none());
+}
