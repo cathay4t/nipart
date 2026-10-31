@@ -26,3 +26,21 @@ fn test_parse_ethtool_link_mode() {
     assert_eq!(config.duplex, Some(EthernetDuplex::Full));
 }
 
+#[test]
+fn test_parse_ethtool_unknown_speed_and_duplex() {
+    let nlas = vec![
+        EthtoolAttr::LinkMode(EthtoolLinkModeAttr::Header(vec![
+            EthtoolHeader::DevName("eth1".to_string()),
+        ])),
+        EthtoolAttr::LinkMode(EthtoolLinkModeAttr::Speed(u32::MAX)),
+        EthtoolAttr::LinkMode(EthtoolLinkModeAttr::Duplex(
+            EthtoolLinkModeDuplex::Unknown,
+        )),
+    ];
+    let (_, config) =
+        parse_link_mode_message(&nlas).expect("Link mode missing");
+    assert_eq!(config.speed, None);
+    assert_eq!(config.auto_neg, None);
+    assert_eq!(config.duplex, None);
+}
+
