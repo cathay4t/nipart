@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{
-    base_iface::np_iface_to_base_iface, route::get_routes,
-    route_rule::get_route_rules,
-};
+use super::{route::get_routes, route_rule::get_route_rules};
 use crate::{
-    BondInterface, DummyInterface, ErrorKind, EthernetInterface, Interface,
-    InterfaceType, LinuxBridgeInterface, LoopbackInterface, NetworkState,
-    NipartError, NipartInterface, NipartNoDaemon, NipartQueryOption,
-    OvsInterface, UnknownInterface, VlanInterface, VrfInterface,
-    VxlanInterface, WifiPhyInterface, WireguardInterface,
-    netlink::addr::{
-        get_address_messages, ipv4_map_from_messages, ipv6_map_from_messages,
+    ErrorKind, Interfaces, NetworkState, NipartError, NipartInterface,
+    NipartNoDaemon, NipartQueryOption,
+    netlink::{
+        addr::{
+            get_address_messages, ipv4_map_from_messages,
+            ipv6_map_from_messages,
+        },
+        link::{LinkState, get_link_messages},
     },
 };
 
@@ -31,12 +29,9 @@ impl NipartNoDaemon {
         // TODO: check other property in NipartQueryOption
 
         let mut net_state = NetworkState::default();
-        let mut filter = nispor::NetStateFilter::default();
-        // Do not query routes in order to prevent BGP routes consuming too much
-        // CPU time, we let `get_routes()` do the query by itself.
-        filter.route = None;
-        let np_state =
-            nispor::NetState::retrieve_with_filter_async(&filter).await?;
+        let link_messages = get_link_messages().await?;
+        let mut link_state = LinkState::from_messages(&link_messages);
+
         let address_messages = match get_address_messages().await {
             Ok(messages) => messages,
             Err(e) => {
@@ -50,102 +45,16 @@ impl NipartNoDaemon {
         let mut ipv4_map = ipv4_map_from_messages(&address_messages);
         let mut ipv6_map = ipv6_map_from_messages(&address_messages);
 
-        for np_iface in np_state.ifaces.values() {
-            // The `ovs-system` is reserved for OVS kernel datapath
-            if np_iface.name == "ovs-system" {
-                continue;
-            }
-            // The `ovs-netdev` is reserved for OVS netdev datapath
-            if np_iface.name == "ovs-netdev" {
-                continue;
-            }
-            // The vti interface is reserved for Ipsec
-            if np_iface.iface_type == nispor::IfaceType::Other("Vti".into()) {
-                continue;
-            }
-
-            let mut base_iface = np_iface_to_base_iface(np_iface);
-            let iface_index = base_iface.iface_index.unwrap_or(np_iface.index);
+        let mut ifaces = Interfaces::new(link_state.into_interfaces());
+        for iface in ifaces.iter_mut() {
+            let base_iface = iface.base_iface_mut();
+            let iface_index = base_iface.iface_index.unwrap_or_default();
             base_iface.ipv4 =
                 Some(ipv4_map.remove(&iface_index).unwrap_or_default());
             base_iface.ipv6 =
                 Some(ipv6_map.remove(&iface_index).unwrap_or_default());
-            let iface = match &base_iface.iface_type {
-                InterfaceType::Ethernet | InterfaceType::Veth => {
-                    Interface::Ethernet(Box::new(
-                        EthernetInterface::new_from_nispor(
-                            base_iface, np_iface,
-                        ),
-                    ))
-                }
-                InterfaceType::Loopback => Interface::Loopback(Box::new(
-                    LoopbackInterface::new(base_iface),
-                )),
-                InterfaceType::WifiPhy => Interface::WifiPhy(Box::new(
-                    WifiPhyInterface::new_from_nispor(base_iface, np_iface),
-                )),
-                InterfaceType::Dummy => {
-                    Interface::Dummy(Box::new(DummyInterface {
-                        base: base_iface,
-                    }))
-                }
-                InterfaceType::Vlan => Interface::Vlan(Box::new(
-                    VlanInterface::new_from_nispor(base_iface, np_iface),
-                )),
-                InterfaceType::Vrf => Interface::Vrf(Box::new(
-                    VrfInterface::new_from_nispor(base_iface, np_iface),
-                )),
-                InterfaceType::Vxlan => Interface::Vxlan(Box::new(
-                    VxlanInterface::new_from_nispor(base_iface, np_iface),
-                )),
-                InterfaceType::Bond => {
-                    let mut bond_iface =
-                        BondInterface::new_from_nispor(base_iface, np_iface);
-                    let mut port_np_ifaces = Vec::new();
-                    for port_name in bond_iface.ports().unwrap_or_default() {
-                        if let Some(p) = np_state.ifaces.get(port_name) {
-                            port_np_ifaces.push(p);
-                        }
-                    }
-                    bond_iface.append_bond_port_config(port_np_ifaces);
-
-                    Interface::Bond(Box::new(bond_iface))
-                }
-                InterfaceType::OvsInterface => Interface::OvsInterface(
-                    Box::new(OvsInterface::new(base_iface)),
-                ),
-                InterfaceType::LinuxBridge => {
-                    let mut br_iface = LinuxBridgeInterface::new_from_nispor(
-                        base_iface, np_iface,
-                    );
-                    let mut port_np_ifaces = Vec::new();
-                    for port_name in br_iface.ports().unwrap_or_default() {
-                        if let Some(p) = np_state.ifaces.get(port_name) {
-                            port_np_ifaces.push(p);
-                        }
-                    }
-                    br_iface.append_br_port_config(np_iface, port_np_ifaces);
-                    Interface::LinuxBridge(Box::new(br_iface))
-                }
-                InterfaceType::Wireguard => {
-                    let wg_iface = WireguardInterface::new_from_nispor(
-                        base_iface, np_iface,
-                    );
-                    Interface::Wireguard(Box::new(wg_iface))
-                }
-                _ => {
-                    log::trace!(
-                        "Got unsupported interface {} type {:?}",
-                        np_iface.name,
-                        np_iface.iface_type
-                    );
-                    Interface::Unknown({
-                        Box::new(UnknownInterface::new(base_iface))
-                    })
-                }
-            };
-            net_state.ifaces.push(iface);
         }
+        net_state.ifaces = ifaces;
 
         net_state.routes = get_routes(&net_state.ifaces).await;
         net_state.route_rules = get_route_rules().await?;
