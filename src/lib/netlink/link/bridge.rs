@@ -396,3 +396,8 @@ fn is_access_port(entries: &[BridgeVlanEntry]) -> bool {
     entries.len() == 1 && entries[0].is_pvid && entries[0].is_egress_untagged
 }
 
+fn vlan_tag_range(entry: &BridgeVlanEntry) -> (u16, u16) {
+    entry
+        .vid_range
+        .unwrap_or((entry.vid.unwrap_or(1), entry.vid.unwrap_or(1)))
+}
