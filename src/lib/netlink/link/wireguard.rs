@@ -84,3 +84,13 @@ pub(crate) async fn get_wireguard_configs(
     ret
 }
 
+fn last_handshake_to_human_str(last_handshake: Duration) -> Option<String> {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()?;
+    if last_handshake > now {
+        None
+    } else {
+        Some(format!("{} seconds ago", (now - last_handshake).as_secs()))
+    }
+}
