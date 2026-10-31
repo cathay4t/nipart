@@ -17,6 +17,7 @@ log = { workspace = true }
 mozim = { workspace = true, features = ["netlink"] }
 nispor = { workspace = true }
 nix = { workspace = true }
+nl-wireguard = { workspace = true }
 rand = { workspace = true }
 rtnetlink = { workspace = true }
 serde = { workspace = true }
