@@ -24,3 +24,28 @@ pub(crate) fn config_from_parsed(
     }
 }
 
+fn peer_config_from_parsed(
+    peer: nl_wireguard::WireguardPeerParsed,
+) -> WireguardPeerConfig {
+    WireguardPeerConfig {
+        endpoint: peer.endpoint,
+        public_key: peer.public_key,
+        preshared_key: peer.preshared_key,
+        last_handshake: peer
+            .last_handshake
+            .and_then(last_handshake_to_human_str),
+        rx_bytes: peer.rx_bytes,
+        tx_bytes: peer.tx_bytes,
+        persistent_keepalive: peer.persistent_keepalive,
+        allowed_ips: peer.allowed_ips.map(|ips| {
+            ips.into_iter()
+                .map(|ip| WireguardIpAddress {
+                    ip: ip.ip_addr,
+                    prefix_length: ip.prefix_length,
+                })
+                .collect()
+        }),
+        protocol_version: peer.protocol_version,
+    }
+}
+
