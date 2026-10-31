@@ -19,3 +19,11 @@ use crate::{
 
 const DEFAULT_USER_HZ: u32 = 100;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct BridgeVlanEntry {
+    pub(crate) vid: Option<u16>,
+    pub(crate) vid_range: Option<(u16, u16)>,
+    pub(crate) is_pvid: bool,
+    pub(crate) is_egress_untagged: bool,
+}
+
