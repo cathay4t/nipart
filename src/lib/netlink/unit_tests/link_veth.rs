@@ -53,3 +53,14 @@ fn test_parse_veth_peer() {
     );
 }
 
+#[test]
+fn test_parse_veth_peer_in_other_netns() {
+    let mut message = veth(5, "veth0", 6);
+    message.attributes.push(LinkAttribute::LinkNetNsId(1));
+    let interfaces = LinkState::from_messages(&[message]).into_interfaces();
+    let veth0 = ethernet_by_name(interfaces, "veth0");
+    assert_eq!(
+        veth0.veth.as_ref().map(|veth| veth.peer.as_str()),
+        Some("6")
+    );
+}
