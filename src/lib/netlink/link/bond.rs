@@ -241,3 +241,17 @@ fn bond_primary_reselect_from_nl80211(
     }
 }
 
+fn bond_fail_over_mac_from_nl80211(
+    value: NlBondFailOverMac,
+) -> Option<BondFailOverMac> {
+    match value {
+        NlBondFailOverMac::None => Some(BondFailOverMac::None),
+        NlBondFailOverMac::Active => Some(BondFailOverMac::Active),
+        NlBondFailOverMac::Follow => Some(BondFailOverMac::Follow),
+        _ => {
+            log::warn!("Unsupported bond fail_over_mac option {value:?}");
+            None
+        }
+    }
+}
+
