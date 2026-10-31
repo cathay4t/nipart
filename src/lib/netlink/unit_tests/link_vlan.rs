@@ -73,3 +73,23 @@ fn test_parse_vlan() {
     );
 }
 
+#[test]
+fn test_parse_vlan_defaults() {
+    let mut message =
+        link_message(4, "vlan100", LinkLayerType::Ether, LinkFlags::Up);
+    message.attributes.push(link_info_attribute(
+        InfoKind::Vlan,
+        Some(InfoData::Vlan(vec![InfoVlan::Id(100)])),
+    ));
+    let vlan = parse_vlan_interface(&[message]);
+    let config = vlan.vlan.expect("VLAN config missing");
+    assert_eq!(config.base_iface.as_deref(), Some(""));
+    assert_eq!(config.protocol, Some(VlanProtocol::Ieee8021Q));
+    assert_eq!(
+        config.registration_protocol,
+        Some(VlanRegistrationProtocol::None)
+    );
+    assert_eq!(config.reorder_headers, Some(false));
+    assert_eq!(config.ingress_qos_map, None);
+    assert_eq!(config.egress_qos_map, None);
+}
