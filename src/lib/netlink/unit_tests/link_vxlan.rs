@@ -50,3 +50,26 @@ fn parse_vxlan() -> VxlanInterface {
     }
 }
 
+#[test]
+fn test_parse_vxlan() {
+    let vxlan = parse_vxlan();
+    let config = vxlan.vxlan.expect("VXLAN config missing");
+    assert_eq!(config.id, Some(42));
+    assert_eq!(config.base_iface.as_deref(), Some("eth0"));
+    assert_eq!(config.remote.as_deref(), Some("192.0.2.1"));
+    assert_eq!(config.local.as_deref(), Some("192.0.2.2"));
+    assert_eq!(config.ttl, Some(64));
+    assert_eq!(config.tos, Some(10));
+    assert_eq!(config.learning, Some(false));
+    assert_eq!(config.ageing, Some(300));
+    assert_eq!(config.max_address, Some(1000));
+    assert_eq!(config.src_port_min, Some(5000));
+    assert_eq!(config.src_port_max, Some(6000));
+    assert_eq!(config.proxy, Some(true));
+    assert_eq!(config.rsc, Some(true));
+    assert_eq!(config.destination_port, Some(4789));
+    assert_eq!(config.udp_check_sum, Some(true));
+    assert_eq!(config.gpe, Some(true));
+    assert_eq!(config.gbp, Some(false));
+    assert_eq!(config.collect_metadata, Some(false));
+}
