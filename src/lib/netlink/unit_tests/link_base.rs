@@ -93,3 +93,21 @@ fn test_parse_link_state_defaults() {
     assert_eq!(base.permanent_mac_address, None);
 }
 
+#[test]
+fn test_parse_loopback_and_unsupported_link() {
+    let loopback =
+        link_message(1, "lo", LinkLayerType::Loopback, LinkFlags::Loopback);
+    let mut tun = link_message(4, "tun0", LinkLayerType::Ether, LinkFlags::Up);
+    tun.attributes.push(link_info_attribute(
+        InfoKind::Tun,
+        Some(InfoData::Other(Vec::new())),
+    ));
+    let interfaces =
+        LinkState::from_messages(&[loopback, tun]).into_interfaces();
+    let loopback = interface_by_name(interfaces.clone(), "lo");
+    assert_eq!(loopback.iface_type(), &InterfaceType::Loopback);
+    assert_eq!(loopback.base_iface().state, InterfaceState::Unknown);
+    let tun = interface_by_name(interfaces, "tun0");
+    assert_eq!(tun.base_iface().state, InterfaceState::Ignore);
+}
+
