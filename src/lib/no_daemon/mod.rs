@@ -15,7 +15,6 @@ mod resolv_conf;
 mod route;
 mod route_rule;
 mod vlan;
-mod vrf;
 mod vxlan;
 mod watcher;
 mod wifi;
