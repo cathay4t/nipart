@@ -80,3 +80,201 @@ pub(crate) fn parsed_link_info(attributes: &[LinkAttribute]) -> ParsedLinkInfo {
     ret
 }
 
+pub(crate) fn parse_link(
+    message: &LinkMessage,
+    index_map: &LinkIndexMap,
+) -> Option<LinkIface> {
+    let name = link_name(message)?;
+    let link_info = parsed_link_info(&message.attributes);
+    let iface_type = link_iface_type(message, link_info.kind.as_ref());
+    let mut af_spec_bridge = Vec::new();
+    let mut ret = LinkIface::default();
+    ret.base.name = name.clone();
+    ret.base.kernel_iface_name = name.clone();
+    ret.base.iface_index = Some(message.header.index);
+    ret.base.iface_type = iface_type.clone();
+    ret.base.mac_address = Some(String::new());
+    ret.controller_type = link_info.port_kind.clone();
+
+    for attribute in &message.attributes {
+        match attribute {
+            LinkAttribute::IfName(name) => ret.base.name = name.to_string(),
+            LinkAttribute::Mtu(mtu) => ret.base.mtu = Some(*mtu as u64),
+            LinkAttribute::MinMtu(mtu) => {
+                if *mtu != 0 {
+                    ret.base.min_mtu = Some(*mtu as u64);
+                }
+            }
+            LinkAttribute::MaxMtu(mtu) => {
+                if *mtu != 0 {
+                    ret.base.max_mtu = Some(*mtu as u64);
+                }
+            }
+            LinkAttribute::Address(mac) => {
+                ret.base.mac_address =
+                    Some(format_mac_address(mac).unwrap_or_default());
+            }
+            LinkAttribute::PermAddress(mac) => {
+                if let Some(mac) = format_mac_address(mac) {
+                    ret.base.permanent_mac_address = Some(mac);
+                }
+            }
+            LinkAttribute::OperState(state) => {
+                ret.base.link_state = Some(link_state_from_nl80211(*state));
+                ret.base.state =
+                    state_from_nl80211(*state, message.header.flags);
+            }
+            LinkAttribute::Controller(index) => {
+                ret.base.controller = Some(
+                    index_map
+                        .name(*index)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| index.to_string()),
+                );
+            }
+            LinkAttribute::PropList(props) => {
+                let mut alt_names: Vec<crate::AltNameEntry> = props
+                    .iter()
+                    .filter_map(|prop| {
+                        if let Prop::AltIfName(name) = prop {
+                            Some(crate::AltNameEntry {
+                                name: name.to_string(),
+                                state: None,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                alt_names.sort_unstable();
+                if !alt_names.is_empty() {
+                    ret.base.alt_names = Some(alt_names);
+                }
+            }
+            LinkAttribute::ParentDevName(dev_name) => {
+                if message.attributes.iter().any(|attribute| {
+                    matches!(
+                        attribute,
+                        LinkAttribute::ParentDevBusName(bus_name)
+                            if bus_name == "pci"
+                    )
+                }) {
+                    ret.base.pci_address = sysfs::format_pci_address(dev_name);
+                }
+            }
+            LinkAttribute::Link(index) => match iface_type {
+                InterfaceType::Veth => ret.veth_peer_index = Some(*index),
+                InterfaceType::Vlan => ret.vlan_base_index = Some(*index),
+                InterfaceType::Vxlan => ret.vxlan_base_index = Some(*index),
+                _ => (),
+            },
+            LinkAttribute::LinkNetNsId(id) => ret.link_netnsid = Some(*id),
+            LinkAttribute::AfSpecBridge(nlas) => {
+                af_spec_bridge.extend(nlas.iter().cloned());
+            }
+            _ => (),
+        }
+    }
+
+    if ret.base.state != InterfaceState::Ignore {
+        ret.base.state =
+            state_from_nl80211(oper_state(message), message.header.flags);
+    }
+    ret.base.link_state = Some(link_state_from_nl80211(oper_state(message)));
+
+    if ret.base.driver.is_none() {
+        ret.base.driver = sysfs::iface_driver(name.as_str());
+    }
+    if ret.base.pci_address.is_none() {
+        ret.base.pci_address = sysfs::iface_pci_address(name.as_str());
+    }
+    if ret.base.mtu.is_none() {
+        ret.base.mtu = Some(0);
+    }
+
+    if let Some(port_data) = link_info.port_data.as_ref() {
+        match port_data {
+            InfoPortData::BondPort(nlas) => {
+                let port = super::bond::parse_bond_port(nlas);
+                ret.bond_port = Some(port.config);
+                ret.bond_port_perm_mac = port.permanent_mac;
+            }
+            InfoPortData::BridgePort(nlas) => {
+                ret.bridge_port = Some(super::bridge::parse_bridge_port(nlas));
+            }
+            _ => (),
+        }
+    }
+
+    if ret.base.permanent_mac_address.is_none() {
+        ret.base.permanent_mac_address = ret.bond_port_perm_mac.clone();
+    }
+
+    if !af_spec_bridge.is_empty() {
+        let vlans = bridge::parse_af_spec_bridge(&af_spec_bridge);
+        if ret.bridge_port.is_some() {
+            ret.bridge_port_vlans = vlans;
+        } else if ret.base.iface_type == InterfaceType::LinuxBridge {
+            ret.bridge_vlans = vlans;
+        }
+    }
+
+    if let Some(data) = link_info.data.as_ref() {
+        match ret.base.iface_type {
+            InterfaceType::Vlan => {
+                ret.vlan = parse_vlan(data);
+            }
+            InterfaceType::Vrf => {
+                ret.vrf = parse_vrf(data);
+            }
+            InterfaceType::Vxlan => {
+                ret.vxlan = parse_vxlan(data);
+            }
+            InterfaceType::Bond => {
+                if let Some((config, primary_index)) = parse_bond(data) {
+                    ret.bond = Some(config);
+                    ret.bond_primary_index = primary_index;
+                }
+            }
+            InterfaceType::LinuxBridge => {
+                if let Some((config, filtering, default_pvid)) =
+                    parse_bridge(data)
+                {
+                    ret.bridge = Some(config);
+                    ret.bridge_filtering = filtering;
+                    ret.bridge_default_pvid = default_pvid;
+                }
+            }
+            _ => (),
+        }
+    }
+
+    if ret.base.iface_type == InterfaceType::Veth
+        && ret.veth.is_none()
+        && let Some(peer_index) = ret.veth_peer_index.or({
+            // The kernel does not fill IFLA_INFO_DATA for veth dumps, but
+            // keep the peer from a create/echo message as fallback.
+            if let Some(InfoData::Veth(
+                rtnetlink::packet_route::link::InfoVeth::Peer(peer),
+            )) = link_info.data.as_ref()
+            {
+                Some(peer.header.index)
+            } else {
+                None
+            }
+        })
+    {
+        ret.veth_peer_index = Some(peer_index);
+    }
+
+    if !ret.base.iface_type.is_supported() {
+        log::trace!(
+            "Got unsupported interface type {}: {}, ignoring",
+            ret.base.iface_type,
+            ret.base.name
+        );
+        ret.base.state = InterfaceState::Ignore;
+    }
+    Some(ret)
+}
+
