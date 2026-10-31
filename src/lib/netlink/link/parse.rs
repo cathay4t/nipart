@@ -278,3 +278,17 @@ pub(crate) fn parse_link(
     Some(ret)
 }
 
+pub(crate) fn link_name(message: &LinkMessage) -> Option<String> {
+    message
+        .attributes
+        .iter()
+        .find_map(|attribute| {
+            if let LinkAttribute::IfName(name) = attribute {
+                Some(name.to_string())
+            } else {
+                None
+            }
+        })
+        .filter(|name| !name.is_empty())
+}
+
