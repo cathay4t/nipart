@@ -184,3 +184,16 @@ pub(crate) fn parse_bond_port(nlas: &[InfoBondPort]) -> ParsedBondPort {
     }
 }
 
+fn bond_mode_from_nl80211(mode: NlBondMode) -> BondMode {
+    match mode {
+        NlBondMode::BalanceRr => BondMode::RoundRobin,
+        NlBondMode::ActiveBackup => BondMode::ActiveBackup,
+        NlBondMode::BalanceXor => BondMode::XOR,
+        NlBondMode::Broadcast => BondMode::Broadcast,
+        NlBondMode::Ieee8023Ad => BondMode::LACP,
+        NlBondMode::BalanceTlb => BondMode::TLB,
+        NlBondMode::BalanceAlb => BondMode::ALB,
+        _ => BondMode::Unknown,
+    }
+}
+
