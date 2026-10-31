@@ -273,3 +273,11 @@ fn get_stp_options(bridge: &InfoBridgeState) -> LinuxBridgeStpOptions {
     }
 }
 
+fn vlan_protocol_from_nl80211(protocol: NlVlanProtocol) -> VlanProtocol {
+    match protocol {
+        NlVlanProtocol::Ieee8021Q => VlanProtocol::Ieee8021Q,
+        NlVlanProtocol::Ieee8021Ad => VlanProtocol::Ieee8021Ad,
+        _ => VlanProtocol::Unknown,
+    }
+}
+
