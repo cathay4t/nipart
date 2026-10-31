@@ -193,3 +193,55 @@ pub(crate) async fn get_wifi_infos() -> HashMap<String, Option<WifiConfig>> {
     ret
 }
 
+async fn get_mac_ssid_map(
+    handle: &Nl80211Handle,
+    iface_index: u32,
+) -> Result<HashMap<String, String>, wl_nl80211::Nl80211Error> {
+    let mut ret = HashMap::new();
+    let mut scan_stream = handle.scan().dump(iface_index).execute().await;
+    while let Some(message) = scan_stream.try_next().await? {
+        let mut ssid = None;
+        let mut mac = None;
+        for attribute in &message.payload.attributes {
+            if ssid.is_some() && mac.is_some() {
+                break;
+            }
+            if let Nl80211Attr::Bss(bss_infos) = attribute {
+                for bss_info in bss_infos {
+                    if ssid.is_some() && mac.is_some() {
+                        break;
+                    }
+                    match bss_info {
+                        Nl80211BssInfo::Bssid(value) => {
+                            mac = format_mac_address(value.as_slice())
+                        }
+                        Nl80211BssInfo::RawInformationElements(raw)
+                        | Nl80211BssInfo::RawBeaconInformationElements(raw)
+                        | Nl80211BssInfo::RawProbeResponseInformationElements(
+                            raw,
+                        ) => {
+                            ssid = Ieee80211Elements::parse(raw).ok().and_then(
+                                |elements| {
+                                    elements.0.iter().find_map(|element| {
+                                        if let Ieee80211Element::Ssid(ssid) =
+                                            element
+                                        {
+                                            Some(ssid.to_string())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                },
+                            );
+                        }
+                        _ => (),
+                    }
+                }
+            }
+        }
+        if let (Some(ssid), Some(mac)) = (ssid, mac) {
+            ret.insert(mac, ssid);
+        }
+    }
+    Ok(ret)
+}
