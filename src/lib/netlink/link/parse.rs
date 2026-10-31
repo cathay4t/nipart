@@ -61,3 +61,22 @@ pub(crate) struct ParsedLinkInfo {
     port_data: Option<InfoPortData>,
 }
 
+pub(crate) fn parsed_link_info(attributes: &[LinkAttribute]) -> ParsedLinkInfo {
+    let mut ret = ParsedLinkInfo::default();
+    for attribute in attributes {
+        let LinkAttribute::LinkInfo(infos) = attribute else {
+            continue;
+        };
+        for info in infos {
+            match info {
+                LinkInfo::Kind(kind) => ret.kind = Some(kind.clone()),
+                LinkInfo::Data(data) => ret.data = Some(data.clone()),
+                LinkInfo::PortKind(kind) => ret.port_kind = Some(kind.clone()),
+                LinkInfo::PortData(data) => ret.port_data = Some(data.clone()),
+                _ => (),
+            }
+        }
+    }
+    ret
+}
+
