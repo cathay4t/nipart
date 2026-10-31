@@ -46,3 +46,49 @@ fn parse_bridge(messages: &[LinkMessage]) -> LinuxBridgeInterface {
     }
 }
 
+#[test]
+fn test_parse_bridge_options_and_stp() {
+    let bridge = parse_bridge(&[bridge_message(
+        10,
+        vec![
+            InfoBridge::ForwardDelay(1500),
+            InfoBridge::HelloTime(200),
+            InfoBridge::MaxAge(2000),
+            InfoBridge::AgeingTime(30000),
+            InfoBridge::StpState(BridgeStpState::KernelStp),
+            InfoBridge::Priority(32768),
+            InfoBridge::GroupFwdMask(0),
+            InfoBridge::MulticastRouter(NlMcastRouter::TempQuery),
+            InfoBridge::MulticastSnooping(true),
+            InfoBridge::VlanFiltering(false),
+            InfoBridge::VlanProtocol(NlVlanProtocol::Ieee8021Q),
+            InfoBridge::VlanDefaultPvid(1),
+            InfoBridge::GcTimer(123),
+            InfoBridge::HelloTimer(456),
+        ],
+        Vec::new(),
+    )]);
+    let config = bridge.bridge.expect("Bridge config missing");
+    let options = config.options.expect("Bridge options missing");
+    let user_hz = get_user_hz();
+    assert_eq!(options.mac_ageing_time, Some((30000 + 1) / user_hz));
+    assert_eq!(options.gc_timer, Some(123));
+    assert_eq!(options.hello_timer, Some(456));
+    assert_eq!(options.group_fwd_mask, Some(0));
+    assert_eq!(options.group_forward_mask, Some(0));
+    assert_eq!(
+        options.multicast_router,
+        Some(LinuxBridgeMulticastRouterType::Auto)
+    );
+    assert_eq!(options.multicast_snooping, Some(true));
+    assert_eq!(options.vlan_protocol, Some(VlanProtocol::Ieee8021Q));
+    assert_eq!(options.vlan_default_pvid, Some(1));
+    let stp = options.stp.expect("STP options missing");
+    assert_eq!(stp.enabled, Some(true));
+    assert_eq!(stp.forward_delay, Some((1500 / user_hz) as u8));
+    assert_eq!(stp.hello_time, Some((200 / user_hz) as u8));
+    assert_eq!(stp.max_age, Some((2000 / user_hz) as u8));
+    assert_eq!(stp.priority, Some(32768));
+    assert_eq!(config.vlan, None);
+}
+
