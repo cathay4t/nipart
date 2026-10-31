@@ -20,3 +20,19 @@ fn veth(index: u32, name: &str, peer: u32) -> LinkMessage {
     message
 }
 
+fn ethernet_by_name(
+    interfaces: Vec<Interface>,
+    name: &str,
+) -> EthernetInterface {
+    let interface = interfaces
+        .into_iter()
+        .find(|interface| interface.name() == name)
+        .unwrap_or_else(|| panic!("Interface {name} not found"));
+    assert_eq!(interface.iface_type(), &InterfaceType::Veth);
+    if let Interface::Ethernet(ethernet) = interface {
+        *ethernet
+    } else {
+        panic!("Not an ethernet interface");
+    }
+}
+
