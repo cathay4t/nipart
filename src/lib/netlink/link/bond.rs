@@ -298,3 +298,15 @@ fn bond_lacp_rate_from_nl80211(value: NlBondLacpRate) -> Option<BondLacpRate> {
     }
 }
 
+fn bond_ad_select_from_nl80211(value: NlBondAdSelect) -> Option<BondAdSelect> {
+    match value {
+        NlBondAdSelect::Stable => Some(BondAdSelect::Stable),
+        NlBondAdSelect::Bandwidth => Some(BondAdSelect::Bandwidth),
+        NlBondAdSelect::Count => Some(BondAdSelect::Count),
+        NlBondAdSelect::ActorPortPrio => Some(BondAdSelect::ActorPortPrio),
+        _ => {
+            log::warn!("Unsupported bond ad_select option {value:?}");
+            None
+        }
+    }
+}
