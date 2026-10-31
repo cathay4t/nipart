@@ -92,3 +92,60 @@ fn test_parse_bridge_options_and_stp() {
     assert_eq!(config.vlan, None);
 }
 
+#[test]
+fn test_parse_bridge_ports_and_vlans() {
+    let mut port = link_message(2, "eth1", LinkLayerType::Ether, LinkFlags::Up);
+    port.attributes.push(LinkAttribute::Controller(10));
+    port.attributes.push(LinkAttribute::LinkInfo(vec![
+        LinkInfo::PortKind(InfoPortKind::Bridge),
+        LinkInfo::PortData(InfoPortData::BridgePort(vec![
+            InfoBridgePort::HairpinMode(true),
+            InfoBridgePort::Cost(100),
+            InfoBridgePort::Priority(32),
+        ])),
+    ]));
+    port.attributes.push(LinkAttribute::AfSpecBridge(vec![
+        AfSpecBridge::VlanInfo(BridgeVlanInfo {
+            flags: BridgeVlanInfoFlags::Pvid | BridgeVlanInfoFlags::Untagged,
+            vid: 100,
+        }),
+        AfSpecBridge::VlanInfo(BridgeVlanInfo {
+            flags: BridgeVlanInfoFlags::Untagged,
+            vid: 200,
+        }),
+    ]));
+    let bridge = parse_bridge(&[
+        bridge_message(
+            10,
+            vec![
+                InfoBridge::VlanFiltering(true),
+                InfoBridge::VlanDefaultPvid(1),
+            ],
+            vec![AfSpecBridge::VlanInfo(BridgeVlanInfo {
+                flags: BridgeVlanInfoFlags::Pvid
+                    | BridgeVlanInfoFlags::Untagged,
+                vid: 10,
+            })],
+        ),
+        port,
+    ]);
+    let config = bridge.bridge.expect("Bridge config missing");
+    let bridge_vlan = config.vlan.expect("Bridge VLAN config missing");
+    assert_eq!(bridge_vlan.mode, Some(BridgeVlanMode::Access));
+    assert_eq!(bridge_vlan.tag, Some(10));
+    let ports = config.ports.expect("Bridge ports missing");
+    assert_eq!(ports.len(), 1);
+    assert_eq!(ports[0].name, "eth1");
+    assert_eq!(ports[0].stp_hairpin_mode, Some(true));
+    assert_eq!(ports[0].stp_path_cost, Some(100));
+    assert_eq!(ports[0].stp_priority, Some(32));
+    let port_vlan = ports[0].vlan.clone().expect("Port VLAN config missing");
+    assert_eq!(port_vlan.mode, Some(BridgeVlanMode::Trunk));
+    assert_eq!(port_vlan.tag, Some(100));
+    assert_eq!(port_vlan.enable_native, Some(true));
+    assert_eq!(
+        port_vlan.trunk_tags,
+        Some(vec![BridgeVlanTrunkTag::Id(200)])
+    );
+}
+
