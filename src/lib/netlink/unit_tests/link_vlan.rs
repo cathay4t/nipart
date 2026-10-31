@@ -26,3 +26,7 @@ fn parse_vlan_interface(messages: &[LinkMessage]) -> VlanInterface {
     }
 }
 
+fn eth0() -> LinkMessage {
+    link_message(2, "eth0", LinkLayerType::Ether, LinkFlags::Up)
+}
+
