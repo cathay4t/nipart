@@ -10,27 +10,11 @@
 use std::{net::Ipv4Addr, str::FromStr};
 
 use crate::{
-    BaseInterface, BondAdSelect, BondAllPortActive, BondArpAllTargets,
-    BondArpValidate, BondConfig, BondFailOverMac, BondInterface, BondLacpRate,
-    BondMode, BondOptions, BondPortConfig, BondPrimaryReselect,
-    BondXmitHashPolicy, ErrorKind, Interface, MergedInterface,
-    MergedInterfaces, NipartError, NipartInterface,
+    BondAdSelect, BondAllPortActive, BondArpAllTargets, BondArpValidate,
+    BondFailOverMac, BondInterface, BondLacpRate, BondMode, BondPortConfig,
+    BondPrimaryReselect, BondXmitHashPolicy, ErrorKind, Interface,
+    MergedInterface, MergedInterfaces, NipartError, NipartInterface,
 };
-
-impl From<nispor::BondMode> for BondMode {
-    fn from(v: nispor::BondMode) -> Self {
-        match v {
-            nispor::BondMode::BalanceRoundRobin => BondMode::RoundRobin,
-            nispor::BondMode::ActiveBackup => BondMode::ActiveBackup,
-            nispor::BondMode::BalanceXor => BondMode::XOR,
-            nispor::BondMode::Broadcast => BondMode::Broadcast,
-            nispor::BondMode::Ieee8021AD => BondMode::LACP,
-            nispor::BondMode::BalanceTlb => BondMode::TLB,
-            nispor::BondMode::BalanceAlb => BondMode::ALB,
-            _ => BondMode::Unknown,
-        }
-    }
-}
 
 impl From<BondMode> for nispor::BondMode {
     fn from(v: BondMode) -> Self {
@@ -131,25 +115,6 @@ impl From<BondAdSelect> for nispor::BondAdSelect {
             BondAdSelect::Bandwidth => Self::Bandwidth,
             BondAdSelect::Count => Self::Count,
             BondAdSelect::ActorPortPrio => Self::Other(3),
-        }
-    }
-}
-
-impl From<&nispor::BondInfo> for BondConfig {
-    fn from(np_bond: &nispor::BondInfo) -> Self {
-        BondConfig {
-            mode: Some(np_bond.mode.into()),
-            options: Some(np_bond_options_to_nipart(np_bond)),
-            ports: Some(
-                np_bond
-                    .ports
-                    .iter()
-                    .map(|kernel_iface_name| BondPortConfig {
-                        name: kernel_iface_name.to_string(),
-                        ..Default::default()
-                    })
-                    .collect(),
-            ),
         }
     }
 }
@@ -307,56 +272,7 @@ pub(crate) fn apply_bond_conf(
     Ok(ret)
 }
 
-fn is_bond_mode_changed(
-    des_iface: &BondInterface,
-    cur_iface: &BondInterface,
-) -> bool {
-    if let Some(des_mode) = des_iface.bond.as_ref().and_then(|b| b.mode)
-        && let Some(cur_mode) = cur_iface.bond.as_ref().and_then(|b| b.mode)
-        && des_mode != cur_mode
-    {
-        true
-    } else {
-        false
-    }
-}
-
 impl BondInterface {
-    pub(crate) fn new_from_nispor(
-        base_iface: BaseInterface,
-        np_iface: &nispor::Iface,
-    ) -> Self {
-        if let Some(np_bond_conf) = np_iface.bond.as_ref() {
-            Self {
-                base: base_iface,
-                bond: Some(np_bond_conf.into()),
-            }
-        } else {
-            Self {
-                base: base_iface,
-                ..Default::default()
-            }
-        }
-    }
-
-    pub(crate) fn append_bond_port_config(
-        &mut self,
-        port_np_ifaces: Vec<&nispor::Iface>,
-    ) {
-        let mut port_confs: Vec<BondPortConfig> = Vec::new();
-        for port_np_iface in port_np_ifaces {
-            port_confs.push(BondPortConfig {
-                name: port_np_iface.name.to_string(),
-                priority: port_np_iface.bond_port.as_ref().map(|p| p.prio),
-                queue_id: port_np_iface.bond_port.as_ref().map(|p| p.queue_id),
-            })
-        }
-
-        if let Some(bond_conf) = self.bond.as_mut() {
-            bond_conf.ports = Some(port_confs);
-        }
-    }
-
     pub(crate) fn apply_bond_port_configs(&self) -> Vec<nispor::IfaceConf> {
         let mut ret: Vec<nispor::IfaceConf> = Vec::new();
         if let Some(ports_conf) =
@@ -374,152 +290,16 @@ impl BondInterface {
     }
 }
 
-fn np_bond_options_to_nipart(np_bond: &nispor::BondInfo) -> BondOptions {
-    BondOptions {
-        ad_actor_sys_prio: np_bond.ad_actor_sys_prio,
-        ad_actor_system: np_bond.ad_actor_system.clone(),
-        ad_select: np_bond.ad_select.as_ref().and_then(|r| match r {
-            nispor::BondAdSelect::Stable => Some(BondAdSelect::Stable),
-            nispor::BondAdSelect::Bandwidth => Some(BondAdSelect::Bandwidth),
-            nispor::BondAdSelect::Count => Some(BondAdSelect::Count),
-            nispor::BondAdSelect::Other(3) => Some(BondAdSelect::ActorPortPrio),
-            _ => {
-                log::warn!("Unsupported bond ad_select option {r:?}");
-                None
-            }
-        }),
-        ad_user_port_key: np_bond.ad_user_port_key,
-        all_ports_active: np_bond.all_ports_active.as_ref().and_then(
-            |r| match r {
-                nispor::BondAllPortActive::Dropped => {
-                    Some(BondAllPortActive::Dropped)
-                }
-                nispor::BondAllPortActive::Delivered => {
-                    Some(BondAllPortActive::Delivered)
-                }
-                _ => {
-                    log::warn!(
-                        "Unsupported bond all ports active options {r:?}"
-                    );
-                    None
-                }
-            },
-        ),
-        arp_all_targets: np_bond.arp_all_targets.as_ref().and_then(
-            |r| match r {
-                nispor::BondModeArpAllTargets::Any => {
-                    Some(BondArpAllTargets::Any)
-                }
-                nispor::BondModeArpAllTargets::All => {
-                    Some(BondArpAllTargets::All)
-                }
-                _ => {
-                    log::warn!("Unsupported bond arp_all_targets option {r:?}");
-                    None
-                }
-            },
-        ),
-        arp_interval: np_bond.arp_interval,
-        arp_ip_target: np_bond.arp_ip_target.clone(),
-        arp_validate: np_bond.arp_validate.as_ref().and_then(|r| match r {
-            nispor::BondArpValidate::None => Some(BondArpValidate::None),
-            nispor::BondArpValidate::Active => Some(BondArpValidate::Active),
-            nispor::BondArpValidate::Backup => Some(BondArpValidate::Backup),
-            nispor::BondArpValidate::All => Some(BondArpValidate::All),
-            nispor::BondArpValidate::FilterActive => {
-                Some(BondArpValidate::FilterActive)
-            }
-            nispor::BondArpValidate::FilterBackup => {
-                Some(BondArpValidate::FilterBackup)
-            }
-            _ => {
-                log::warn!("Unsupported bond arp_validate options {r:?}");
-                None
-            }
-        }),
-        downdelay: np_bond.downdelay,
-        fail_over_mac: np_bond.fail_over_mac.as_ref().and_then(|r| match r {
-            nispor::BondFailOverMac::None => Some(BondFailOverMac::None),
-            nispor::BondFailOverMac::Active => Some(BondFailOverMac::Active),
-            nispor::BondFailOverMac::Follow => Some(BondFailOverMac::Follow),
-            _ => {
-                log::warn!("Unsupported bond fail_over_mac options {r:?}");
-                None
-            }
-        }),
-        lacp_rate: np_bond.lacp_rate.as_ref().and_then(|r| match r {
-            nispor::BondLacpRate::Slow => Some(BondLacpRate::Slow),
-            nispor::BondLacpRate::Fast => Some(BondLacpRate::Fast),
-            _ => {
-                log::warn!("Unsupported bond lacp_rate options {r:?}");
-                None
-            }
-        }),
-        lp_interval: np_bond.lp_interval,
-        miimon: np_bond.miimon,
-        min_links: np_bond.min_links,
-        num_unsol_na: np_bond.num_grat_arp,
-        num_grat_arp: np_bond.num_grat_arp,
-        packets_per_port: np_bond.packets_per_port,
-        primary: np_bond.primary.clone(),
-        primary_reselect: np_bond.primary_reselect.as_ref().and_then(
-            |r| match r {
-                nispor::BondPrimaryReselect::Always => {
-                    Some(BondPrimaryReselect::Always)
-                }
-                nispor::BondPrimaryReselect::Better => {
-                    Some(BondPrimaryReselect::Better)
-                }
-                nispor::BondPrimaryReselect::Failure => {
-                    Some(BondPrimaryReselect::Failure)
-                }
-                _ => {
-                    log::warn!(
-                        "Unsupported bond primary_reselect options {r:?}"
-                    );
-                    None
-                }
-            },
-        ),
-        resend_igmp: np_bond.resend_igmp,
-        tlb_dynamic_lb: np_bond.tlb_dynamic_lb,
-        updelay: np_bond.updelay,
-        use_carrier: np_bond.use_carrier,
-        xmit_hash_policy: np_bond.xmit_hash_policy.as_ref().and_then(
-            |r| match r {
-                nispor::BondXmitHashPolicy::Layer2 => {
-                    Some(BondXmitHashPolicy::Layer2)
-                }
-                nispor::BondXmitHashPolicy::Layer34 => {
-                    Some(BondXmitHashPolicy::Layer34)
-                }
-                nispor::BondXmitHashPolicy::Layer23 => {
-                    Some(BondXmitHashPolicy::Layer23)
-                }
-                nispor::BondXmitHashPolicy::Encap23 => {
-                    Some(BondXmitHashPolicy::Encap23)
-                }
-                nispor::BondXmitHashPolicy::Encap34 => {
-                    Some(BondXmitHashPolicy::Encap34)
-                }
-                nispor::BondXmitHashPolicy::VlanSrcMac => {
-                    Some(BondXmitHashPolicy::VlanSrcMac)
-                }
-                _ => {
-                    log::warn!(
-                        "Unsupported bond xmit_hash_policy options {r:?}"
-                    );
-                    None
-                }
-            },
-        ),
-        arp_missed_max: np_bond.arp_missed_max,
-        lacp_active: np_bond.lacp_active,
-        ns_ip6_target: np_bond.ns_ip6_target.clone(),
-        peer_notif_delay: np_bond.peer_notif_delay,
+fn is_bond_mode_changed(
+    des_iface: &BondInterface,
+    cur_iface: &BondInterface,
+) -> bool {
+    if let Some(des_mode) = des_iface.bond.as_ref().and_then(|b| b.mode)
+        && let Some(cur_mode) = cur_iface.bond.as_ref().and_then(|b| b.mode)
+        && des_mode != cur_mode
+    {
+        true
+    } else {
+        false
     }
 }
-
-#[cfg(test)]
-#[path = "unit_tests/bond.rs"]
-mod test;
