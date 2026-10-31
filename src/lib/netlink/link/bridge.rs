@@ -331,3 +331,12 @@ struct InfoBridgeState {
     default_pvid: Option<u16>,
 }
 
+#[derive(Debug, Default, Clone)]
+struct KernelBridgeVlanEntry {
+    vid: u16,
+    is_pvid: bool,
+    is_egress_untagged: bool,
+    is_range_start: bool,
+    is_range_end: bool,
+}
+
