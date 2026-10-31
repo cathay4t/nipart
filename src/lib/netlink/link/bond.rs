@@ -160,3 +160,27 @@ pub(crate) fn parse_bond(data: &InfoData) -> Option<(BondConfig, Option<u32>)> {
     ))
 }
 
+pub(crate) fn parse_bond_port(nlas: &[InfoBondPort]) -> ParsedBondPort {
+    let mut priority = 0i32;
+    let mut queue_id = 0u16;
+    let mut permanent_mac = None;
+    for nla in nlas {
+        match nla {
+            InfoBondPort::Prio(value) => priority = *value,
+            InfoBondPort::QueueId(value) => queue_id = *value,
+            InfoBondPort::PermHwaddr(mac) => {
+                permanent_mac = format_mac_address(mac);
+            }
+            _ => (),
+        }
+    }
+    ParsedBondPort {
+        config: BondPortConfig {
+            name: String::new(),
+            priority: Some(priority),
+            queue_id: Some(queue_id),
+        },
+        permanent_mac,
+    }
+}
+
