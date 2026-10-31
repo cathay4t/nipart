@@ -1,42 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{BaseInterface, NipartError, VxlanConfig, VxlanInterface};
-
-impl From<&nispor::VxlanInfo> for VxlanConfig {
-    fn from(np_vxlan_conf: &nispor::VxlanInfo) -> Self {
-        VxlanConfig {
-            id: Some(np_vxlan_conf.vxlan_id),
-            base_iface: Some(np_vxlan_conf.base_iface.clone()),
-            remote: Some(np_vxlan_conf.remote.clone()),
-            local: Some(np_vxlan_conf.local.clone()),
-            learning: Some(np_vxlan_conf.learning),
-            ttl: Some(np_vxlan_conf.ttl),
-            tos: Some(np_vxlan_conf.tos),
-            ageing: Some(np_vxlan_conf.ageing),
-            max_address: Some(np_vxlan_conf.max_address),
-            src_port_min: Some(np_vxlan_conf.src_port_min),
-            src_port_max: Some(np_vxlan_conf.src_port_max),
-            proxy: Some(np_vxlan_conf.proxy),
-            rsc: Some(np_vxlan_conf.rsc),
-            l2miss: Some(np_vxlan_conf.l2miss),
-            l3miss: Some(np_vxlan_conf.l3miss),
-            destination_port: Some(np_vxlan_conf.dst_port),
-            udp_check_sum: Some(np_vxlan_conf.udp_check_sum),
-            udp6_zero_check_sum_tx: Some(np_vxlan_conf.udp6_zero_check_sum_tx),
-            udp6_zero_check_sum_rx: Some(np_vxlan_conf.udp6_zero_check_sum_rx),
-            remote_check_sum_tx: Some(np_vxlan_conf.remote_check_sum_tx),
-            remote_check_sum_rx: Some(np_vxlan_conf.remote_check_sum_rx),
-            gbp: Some(np_vxlan_conf.gbp),
-            remote_check_sum_no_partial: Some(
-                np_vxlan_conf.remote_check_sum_no_partial,
-            ),
-            collect_metadata: Some(np_vxlan_conf.collect_metadata),
-            label: Some(np_vxlan_conf.label),
-            gpe: Some(np_vxlan_conf.gpe),
-            ttl_inherit: Some(np_vxlan_conf.ttl_inherit),
-        }
-    }
-}
+use crate::{NipartError, VxlanConfig, VxlanInterface};
 
 impl From<&VxlanConfig> for nispor::VxlanConf {
     fn from(v: &VxlanConfig) -> Self {
@@ -88,23 +52,4 @@ pub(crate) fn apply_vxlan_conf(
         np_iface.vxlan = Some(vxlan_conf.into());
     }
     Ok(vec![np_iface])
-}
-
-impl VxlanInterface {
-    pub(crate) fn new_from_nispor(
-        base_iface: BaseInterface,
-        np_iface: &nispor::Iface,
-    ) -> Self {
-        if let Some(np_vxlan_conf) = np_iface.vxlan.as_ref() {
-            Self {
-                base: base_iface,
-                vxlan: Some(np_vxlan_conf.into()),
-            }
-        } else {
-            Self {
-                base: base_iface,
-                ..Default::default()
-            }
-        }
-    }
 }
