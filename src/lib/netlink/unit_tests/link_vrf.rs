@@ -53,3 +53,15 @@ fn test_parse_vrf_table_and_ports() {
     );
 }
 
+#[test]
+fn test_parse_vrf_without_table() {
+    let mut vrf = link_message(10, "vrf0", LinkLayerType::Ether, LinkFlags::Up);
+    vrf.attributes.push(link_info_attribute(
+        InfoKind::Vrf,
+        Some(InfoData::Vrf(Vec::new())),
+    ));
+    let vrf = parse_vrf(&[vrf]);
+    let config = vrf.vrf.expect("VRF config missing");
+    assert_eq!(config.table_id, Some(0));
+    assert_eq!(config.ports, Some(Vec::new()));
+}
