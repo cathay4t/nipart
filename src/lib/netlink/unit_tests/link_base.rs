@@ -125,3 +125,18 @@ fn test_parse_ignores_reserved_and_vti_links() {
     assert!(interfaces.is_empty());
 }
 
+#[test]
+fn test_parse_ovs_interface_type() {
+    let mut message =
+        link_message(7, "ovs0", LinkLayerType::Ether, LinkFlags::Up);
+    message.attributes.push(link_info_attribute(
+        InfoKind::Other("openvswitch".to_string()),
+        Some(InfoData::Other(Vec::new())),
+    ));
+    let interface = interface_by_name(
+        LinkState::from_messages(&[message]).into_interfaces(),
+        "ovs0",
+    );
+    assert_eq!(interface.iface_type(), &InterfaceType::OvsInterface);
+}
+
