@@ -78,3 +78,12 @@ fn test_parse_wireguard_device_and_peers() {
     );
 }
 
+#[test]
+fn test_wireguard_secrets_hidden_in_debug() {
+    let config = config_from_parsed(parsed_wireguard());
+    let debug_output = format!("{config:?}");
+    assert!(!debug_output.contains("wg-private-secret"));
+    assert!(!debug_output.contains("peer-preshared-secret"));
+    assert!(debug_output.contains("public-key"));
+    assert!(debug_output.contains(crate::NetworkState::HIDE_SECRET_STR));
+}
