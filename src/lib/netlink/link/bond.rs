@@ -197,3 +197,16 @@ fn bond_mode_from_nl80211(mode: NlBondMode) -> BondMode {
     }
 }
 
+fn bond_arp_all_targets_from_nl80211(
+    value: NlBondArpAllTargets,
+) -> Option<BondArpAllTargets> {
+    match value {
+        NlBondArpAllTargets::Any => Some(BondArpAllTargets::Any),
+        NlBondArpAllTargets::All => Some(BondArpAllTargets::All),
+        _ => {
+            log::warn!("Unsupported bond arp_all_targets option {value:?}");
+            None
+        }
+    }
+}
+
