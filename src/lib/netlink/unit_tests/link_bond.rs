@@ -38,3 +38,17 @@ fn eth_port(
     message
 }
 
+fn parse_bond(messages: &[LinkMessage]) -> BondInterface {
+    let mut interfaces = LinkState::from_messages(messages).into_interfaces();
+    let interface = interfaces
+        .drain(..)
+        .find(|interface| interface.name() == "bond0")
+        .expect("Bond interface not found");
+    assert_eq!(interface.iface_type(), &InterfaceType::Bond);
+    if let Interface::Bond(bond) = interface {
+        *bond
+    } else {
+        panic!("Not a bond interface");
+    }
+}
+
