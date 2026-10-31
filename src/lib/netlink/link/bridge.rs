@@ -301,3 +301,33 @@ fn multicast_router_from_nl80211(
     }
 }
 
+#[derive(Debug, Default, Clone)]
+struct InfoBridgeState {
+    forward_delay: Option<u32>,
+    hello_time: Option<u32>,
+    max_age: Option<u32>,
+    ageing_time: Option<u32>,
+    stp_state: Option<NlBridgeStpState>,
+    priority: Option<u16>,
+    vlan_filtering: Option<bool>,
+    vlan_protocol: Option<VlanProtocol>,
+    group_fwd_mask: Option<u16>,
+    group_addr: Option<String>,
+    multicast_router: Option<LinuxBridgeMulticastRouterType>,
+    multicast_snooping: Option<bool>,
+    multicast_query_use_ifaddr: Option<bool>,
+    multicast_querier: Option<bool>,
+    multicast_hash_max: Option<u32>,
+    multicast_last_member_count: Option<u32>,
+    multicast_startup_query_count: Option<u32>,
+    multicast_last_member_interval: Option<u64>,
+    multicast_membership_interval: Option<u64>,
+    multicast_querier_interval: Option<u64>,
+    multicast_query_interval: Option<u64>,
+    multicast_query_response_interval: Option<u64>,
+    multicast_startup_query_interval: Option<u64>,
+    hello_timer: Option<u64>,
+    gc_timer: Option<u64>,
+    default_pvid: Option<u16>,
+}
+
