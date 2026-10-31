@@ -52,3 +52,13 @@ fn parse_bond(messages: &[LinkMessage]) -> BondInterface {
     }
 }
 
+fn bond_message(index: u32, nlas: Vec<InfoBond>) -> LinkMessage {
+    let mut message =
+        link_message(index, "bond0", LinkLayerType::Ether, LinkFlags::Up);
+    message.attributes.push(link_info_attribute(
+        InfoKind::Bond,
+        Some(InfoData::Bond(nlas)),
+    ));
+    message
+}
+
