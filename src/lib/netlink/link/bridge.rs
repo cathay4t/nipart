@@ -142,3 +142,26 @@ pub(crate) fn parse_bridge(
     ))
 }
 
+pub(crate) fn parse_bridge_port(
+    nlas: &[InfoBridgePort],
+) -> LinuxBridgePortConfig {
+    let mut ret = LinuxBridgePortConfig {
+        name: String::new(),
+        stp_hairpin_mode: Some(false),
+        stp_path_cost: Some(0),
+        stp_priority: Some(0),
+        vlan: None,
+    };
+    for nla in nlas {
+        match nla {
+            InfoBridgePort::HairpinMode(value) => {
+                ret.stp_hairpin_mode = Some(*value)
+            }
+            InfoBridgePort::Cost(value) => ret.stp_path_cost = Some(*value),
+            InfoBridgePort::Priority(value) => ret.stp_priority = Some(*value),
+            _ => (),
+        }
+    }
+    ret
+}
+
