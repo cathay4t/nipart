@@ -346,3 +346,17 @@ fn iface_type_from_kind(kind: &InfoKind) -> InterfaceType {
     }
 }
 
+fn oper_state(message: &LinkMessage) -> State {
+    message
+        .attributes
+        .iter()
+        .find_map(|attribute| {
+            if let LinkAttribute::OperState(state) = attribute {
+                Some(*state)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(State::Unknown)
+}
+
