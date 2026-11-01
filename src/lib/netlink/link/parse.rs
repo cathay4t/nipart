@@ -317,3 +317,32 @@ fn link_iface_type(
     iface_type
 }
 
+fn iface_type_from_kind(kind: &InfoKind) -> InterfaceType {
+    match kind {
+        InfoKind::Bond => InterfaceType::Bond,
+        InfoKind::Bridge => InterfaceType::LinuxBridge,
+        InfoKind::Dummy => InterfaceType::Dummy,
+        InfoKind::Hsr => InterfaceType::Hsr,
+        InfoKind::IpVlan => InterfaceType::IpVlan,
+        InfoKind::Ipoib => InterfaceType::InfiniBand,
+        InfoKind::MacSec => InterfaceType::MacSec,
+        InfoKind::MacVlan => InterfaceType::MacVlan,
+        InfoKind::MacVtap => InterfaceType::MacVtap,
+        InfoKind::Tun => InterfaceType::Tun,
+        InfoKind::Veth => InterfaceType::Veth,
+        InfoKind::Vlan => InterfaceType::Vlan,
+        InfoKind::Vrf => InterfaceType::Vrf,
+        InfoKind::Vxlan => InterfaceType::Vxlan,
+        InfoKind::Wireguard => InterfaceType::Wireguard,
+        InfoKind::Xfrm => InterfaceType::Xfrm,
+        InfoKind::Vti | InfoKind::Vti6 => {
+            InterfaceType::Unknown("vti".to_string())
+        }
+        InfoKind::Other(kind) if kind == "openvswitch" => {
+            InterfaceType::OvsInterface
+        }
+        InfoKind::Other(kind) => InterfaceType::Unknown(kind.to_lowercase()),
+        kind => InterfaceType::Unknown(format!("{kind:?}").to_lowercase()),
+    }
+}
+
