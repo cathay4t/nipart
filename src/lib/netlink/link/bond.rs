@@ -274,3 +274,16 @@ fn bond_xmit_hash_policy_from_nl80211(
     }
 }
 
+fn bond_all_ports_active_from_nl80211(
+    value: NlBondAllPortActive,
+) -> Option<BondAllPortActive> {
+    match value {
+        NlBondAllPortActive::Dropped => Some(BondAllPortActive::Dropped),
+        NlBondAllPortActive::Delivered => Some(BondAllPortActive::Delivered),
+        _ => {
+            log::warn!("Unsupported bond all_ports_active option {value:?}");
+            None
+        }
+    }
+}
+
