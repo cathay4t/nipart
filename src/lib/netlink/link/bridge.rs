@@ -181,3 +181,49 @@ pub(crate) fn parse_af_spec_bridge(
     }
 }
 
+pub(crate) fn bridge_vlan_config(
+    entries: &[BridgeVlanEntry],
+    default_pvid: Option<u16>,
+) -> Option<BridgeVlanConfig> {
+    let mut ret = BridgeVlanConfig::default();
+    let mut is_native = false;
+    let mut trunk_tags = Vec::new();
+    let is_access_port = is_access_port(entries);
+
+    for entry in entries {
+        let default_pvid = default_pvid.unwrap_or(1);
+        let (vlan_min, vlan_max) = vlan_tag_range(entry);
+        if vlan_min == default_pvid && vlan_max == default_pvid {
+            continue;
+        }
+        if is_access_port {
+            ret.tag = Some(vlan_min);
+        } else if entry.is_pvid && entry.is_egress_untagged {
+            ret.tag = Some(vlan_max);
+            is_native = true;
+        } else if vlan_min == vlan_max {
+            trunk_tags.push(BridgeVlanTrunkTag::Id(vlan_min));
+        } else {
+            trunk_tags.push(BridgeVlanTrunkTag::IdRange(BridgeVlanRange {
+                max: vlan_max,
+                min: vlan_min,
+            }));
+        }
+    }
+    if trunk_tags.is_empty() {
+        ret.mode = Some(BridgeVlanMode::Access);
+    } else {
+        ret.mode = Some(BridgeVlanMode::Trunk);
+        ret.enable_native = Some(is_native);
+    }
+    if ret.mode == Some(BridgeVlanMode::Access)
+        && trunk_tags.is_empty()
+        && ret.tag.is_none()
+    {
+        None
+    } else {
+        ret.trunk_tags = Some(trunk_tags);
+        Some(ret)
+    }
+}
+
