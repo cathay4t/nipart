@@ -33,7 +33,7 @@ fn driver_name_from_sysfs_path(driver_path: &Path) -> Option<String> {
     driver_path.file_name()?.to_str().map(str::to_string)
 }
 
-fn format_pci_address(device_name: &str) -> Option<String> {
+pub(crate) fn format_pci_address(device_name: &str) -> Option<String> {
     let items: Vec<&str> = device_name.split(':').collect();
     let (domain, bus, slot_function) = match items.as_slice() {
         [bus, slot_function] => (0u32, *bus, *slot_function),
