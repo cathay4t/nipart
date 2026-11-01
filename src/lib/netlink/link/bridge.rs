@@ -340,3 +340,13 @@ struct KernelBridgeVlanEntry {
     is_range_end: bool,
 }
 
+fn kernel_vlan_from_nl80211(info: &BridgeVlanInfo) -> KernelBridgeVlanEntry {
+    KernelBridgeVlanEntry {
+        vid: info.vid,
+        is_pvid: info.flags.contains(BridgeVlanInfoFlags::Pvid),
+        is_egress_untagged: info.flags.contains(BridgeVlanInfoFlags::Untagged),
+        is_range_start: info.flags.contains(BridgeVlanInfoFlags::RangeBegin),
+        is_range_end: info.flags.contains(BridgeVlanInfoFlags::RangeEnd),
+    }
+}
+
