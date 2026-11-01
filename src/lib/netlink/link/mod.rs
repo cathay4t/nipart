@@ -163,3 +163,21 @@ mod tests {
         assert_eq!(map.index("missing"), None);
     }
 }
+
+pub(crate) async fn get_iface_index(
+    handle: &rtnetlink::Handle,
+    iface_name: &str,
+) -> Result<u32, NipartError> {
+    let mut messages = handle.link().get().match_name(iface_name).execute();
+    match messages
+        .try_next()
+        .await
+        .map_err(|e| map_rtnetlink_error("Failed to query interface index", e))?
+    {
+        Some(message) => Ok(message.header.index),
+        None => Err(NipartError::new(
+            crate::ErrorKind::InvalidArgument,
+            format!("Interface {iface_name} does not exist"),
+        )),
+    }
+}
