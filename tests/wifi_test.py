@@ -250,7 +250,9 @@ def _start_hostapd_2():
         f"hostapd -B -d {HOSTAPD_CONF_PATH_2} "
         f"-P {HOSTAPD_PID_PATH_2}".split(),
     )
-    assert retry_till_true_or_timeout(2, hostapd_is_up_2)
+    assert retry_till_true_or_timeout(
+        2, lambda: hostapd_is_up_2(TEST_NET_NS_2)
+    )
 
 
 @pytest.fixture(scope="class")
