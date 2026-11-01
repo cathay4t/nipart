@@ -597,3 +597,77 @@ pub(crate) fn bridge_port_message(
     }
     builder.build()
 }
+
+pub(crate) fn gen_bridge_vlan_entries(
+    desired: &BridgeVlanConfig,
+    current: Option<&BridgeVlanConfig>,
+) -> Vec<BridgeVlanEntry> {
+    let current_entries = current
+        .map(bridge_vlan_entries_from_config)
+        .unwrap_or_default();
+    let desired_entries = bridge_vlan_entries_from_config(desired);
+
+    let mut ret = Vec::new();
+    for mut entry in current_entries {
+        if !desired_entries.contains(&entry) {
+            entry.remove = true;
+            ret.push(entry);
+        }
+    }
+    ret.extend(desired_entries);
+    ret
+}
+
+fn bridge_vlan_entries_from_config(
+    config: &BridgeVlanConfig,
+) -> Vec<BridgeVlanEntry> {
+    let mut ret = Vec::new();
+    match config.mode {
+        Some(BridgeVlanMode::Trunk) => {
+            if let Some(trunk_tags) = config.trunk_tags.as_ref() {
+                for trunk_tag in trunk_tags {
+                    ret.push(trunk_tag_to_entry(trunk_tag));
+                }
+            }
+            if let Some(tag) = config.tag {
+                ret.push(access_tag_to_entry(tag));
+            }
+        }
+        Some(BridgeVlanMode::Access) => {
+            if let Some(tag) = config.tag {
+                ret.push(access_tag_to_entry(tag));
+            }
+        }
+        None => (),
+    }
+    ret
+}
+
+fn trunk_tag_to_entry(trunk_tag: &BridgeVlanTrunkTag) -> BridgeVlanEntry {
+    match trunk_tag {
+        BridgeVlanTrunkTag::Id(vid) => BridgeVlanEntry {
+            vid: Some(*vid),
+            vid_range: None,
+            is_pvid: false,
+            is_egress_untagged: false,
+            remove: false,
+        },
+        BridgeVlanTrunkTag::IdRange(range) => BridgeVlanEntry {
+            vid: None,
+            vid_range: Some((range.min, range.max)),
+            is_pvid: false,
+            is_egress_untagged: false,
+            remove: false,
+        },
+    }
+}
+
+fn access_tag_to_entry(tag: u16) -> BridgeVlanEntry {
+    BridgeVlanEntry {
+        vid: Some(tag),
+        vid_range: None,
+        is_pvid: true,
+        is_egress_untagged: true,
+        remove: false,
+    }
+}
