@@ -53,3 +53,11 @@ pub(crate) struct LinkIface {
     pub(crate) bridge_port_vlans: Option<Vec<BridgeVlanEntry>>,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct ParsedLinkInfo {
+    kind: Option<InfoKind>,
+    data: Option<InfoData>,
+    port_kind: Option<InfoPortKind>,
+    port_data: Option<InfoPortData>,
+}
+
