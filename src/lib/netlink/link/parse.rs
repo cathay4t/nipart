@@ -292,3 +292,28 @@ pub(crate) fn link_name(message: &LinkMessage) -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
+fn link_iface_type(
+    message: &LinkMessage,
+    kind: Option<&InfoKind>,
+) -> InterfaceType {
+    let mut iface_type = match message.header.link_layer_type {
+        LinkLayerType::Ether => InterfaceType::Ethernet,
+        LinkLayerType::Loopback => InterfaceType::Loopback,
+        LinkLayerType::Infiniband => InterfaceType::InfiniBand,
+        link_layer_type => {
+            InterfaceType::Unknown(link_layer_type.to_string().to_lowercase())
+        }
+    };
+    if let Some(kind) = kind {
+        let kind_type = iface_type_from_kind(kind);
+        if iface_type == InterfaceType::Loopback
+            || (iface_type == InterfaceType::InfiniBand
+                && kind_type.is_unknown())
+        {
+            return iface_type;
+        }
+        iface_type = kind_type;
+    }
+    iface_type
+}
+
