@@ -134,8 +134,8 @@ pub(crate) async fn apply_wireguard_config(
     iface_name: &str,
     config: &WireguardConfig,
 ) -> Result<(), crate::NipartError> {
-    let (connection, mut handle, _) = nl_wireguard::new_connection()
-        .map_err(|e| {
+    let (connection, mut handle, _) =
+        nl_wireguard::new_connection().map_err(|e| {
             crate::NipartError::new(
                 crate::ErrorKind::Bug,
                 format!("Failed to create wireguard netlink connection: {e}"),

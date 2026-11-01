@@ -12,10 +12,9 @@ use rtnetlink::packet_route::link::{
 
 use crate::{
     BridgeVlanConfig, BridgeVlanMode, BridgeVlanRange, BridgeVlanTrunkTag,
-    LinuxBridgeConfig, LinuxBridgeInterface,
-    LinuxBridgeMulticastRouterType, LinuxBridgeOptions,
-    LinuxBridgePortConfig, LinuxBridgeStpOptions, VlanProtocol,
-    netlink::mac::format_mac_address,
+    LinuxBridgeConfig, LinuxBridgeInterface, LinuxBridgeMulticastRouterType,
+    LinuxBridgeOptions, LinuxBridgePortConfig, LinuxBridgeStpOptions,
+    VlanProtocol, netlink::mac::format_mac_address,
 };
 
 const DEFAULT_USER_HZ: u32 = 100;
@@ -519,8 +518,8 @@ pub(crate) fn bridge_link_builder(
             }
         }
         if br_conf.vlan.is_some() {
-            builder =
-                builder.vlan_filtering(iface.vlan_filtering_is_enabled(cur_iface));
+            builder = builder
+                .vlan_filtering(iface.vlan_filtering_is_enabled(cur_iface));
         }
     } else if br_conf.vlan.is_some() {
         builder =
@@ -546,8 +545,9 @@ fn add_bridge_vlan_entries<'a>(
         if let Some(vid) = entry.vid {
             builder = builder.vlan(vid, flags);
         } else if let Some((min, max)) = entry.vid_range {
-            builder =
-                builder.vlan_range_start(min, flags).vlan_range_end(max, flags);
+            builder = builder
+                .vlan_range_start(min, flags)
+                .vlan_range_end(max, flags);
         }
     }
     builder
@@ -558,7 +558,8 @@ pub(crate) fn bridge_vlan_add_message(
     bridge_self: bool,
     entries: &[BridgeVlanEntry],
 ) -> Option<rtnetlink::packet_route::link::LinkMessage> {
-    let mut add_entries = entries.iter().filter(|entry| !entry.remove).peekable();
+    let mut add_entries =
+        entries.iter().filter(|entry| !entry.remove).peekable();
     add_entries.peek()?;
     let mut builder = rtnetlink::LinkBridgeVlan::new(index);
     if bridge_self {
@@ -572,7 +573,8 @@ pub(crate) fn bridge_vlan_del_message(
     bridge_self: bool,
     entries: &[BridgeVlanEntry],
 ) -> Option<rtnetlink::packet_route::link::LinkMessage> {
-    let mut del_entries = entries.iter().filter(|entry| entry.remove).peekable();
+    let mut del_entries =
+        entries.iter().filter(|entry| entry.remove).peekable();
     del_entries.peek()?;
     let mut builder = rtnetlink::LinkBridgeVlan::new(index);
     if bridge_self {
