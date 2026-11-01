@@ -227,3 +227,17 @@ fn bond_arp_validate_from_nl80211(
     }
 }
 
+fn bond_primary_reselect_from_nl80211(
+    value: NlBondPrimaryReselect,
+) -> Option<BondPrimaryReselect> {
+    match value {
+        NlBondPrimaryReselect::Always => Some(BondPrimaryReselect::Always),
+        NlBondPrimaryReselect::Better => Some(BondPrimaryReselect::Better),
+        NlBondPrimaryReselect::Failure => Some(BondPrimaryReselect::Failure),
+        _ => {
+            log::warn!("Unsupported bond primary_reselect option {value:?}");
+            None
+        }
+    }
+}
+
