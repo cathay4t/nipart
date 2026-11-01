@@ -25,6 +25,7 @@ serde_json = { workspace = true }
 rmsd_yaml = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
+wl-nl80211 = { workspace = true }
 
 [lib]
 name = "nipart"
