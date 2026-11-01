@@ -238,3 +238,19 @@ pub(crate) fn get_user_hz() -> u32 {
     }
 }
 
+// The kernel is multiplying these bridge properties by USER_HZ, we should
+// divide into seconds:
+//   * forward_delay
+//   * ageing_time
+//   * hello_time
+//   * max_age
+//
+// When kernel CONFIG_HZ is not multiple times of USER_HZ, we will notice 1
+// different between desired value and active value. For example, Arch Linux
+// has CONFIG_HZ=300 which causing ageing_time requested 600 got 599 in
+// return. To fix the verification error, we add 1 for this trivial
+// difference.
+fn devide_by_user_hz(value: u32) -> u32 {
+    (value + 1) / get_user_hz()
+}
+
