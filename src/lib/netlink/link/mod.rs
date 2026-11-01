@@ -7,6 +7,18 @@ use rtnetlink::packet_route::link::{LinkAttribute, LinkMessage};
 
 use crate::{NipartError, netlink::map_rtnetlink_error};
 
+pub(crate) mod bond;
+pub(crate) mod bridge;
+pub(crate) mod ethtool;
+pub(crate) mod parse;
+pub(crate) mod state;
+pub(crate) mod vlan;
+pub(crate) mod vrf;
+pub(crate) mod vxlan;
+pub(crate) mod wireguard;
+
+pub(crate) use self::state::LinkState;
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) struct LinkIndexMap {
