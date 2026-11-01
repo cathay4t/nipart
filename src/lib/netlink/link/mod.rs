@@ -135,6 +135,32 @@ pub(crate) async fn get_index_map(
     Ok(index_map_from_messages(links.iter()))
 }
 
+pub(crate) async fn get_iface_index_opt(
+    handle: &rtnetlink::Handle,
+    iface_name: &str,
+) -> Result<Option<u32>, NipartError> {
+    let mut messages = handle.link().get().match_name(iface_name).execute();
+    Ok(messages
+        .try_next()
+        .await
+        .map_err(|e| map_rtnetlink_error("Failed to query interface index", e))?
+        .map(|message| message.header.index))
+}
+
+pub(crate) async fn get_iface_index(
+    handle: &rtnetlink::Handle,
+    iface_name: &str,
+) -> Result<u32, NipartError> {
+    get_iface_index_opt(handle, iface_name)
+        .await?
+        .ok_or_else(|| {
+            NipartError::new(
+                crate::ErrorKind::InvalidArgument,
+                format!("Interface {iface_name} does not exist"),
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use rtnetlink::packet_route::{
@@ -163,30 +189,4 @@ mod tests {
         assert_eq!(map.name(3), None);
         assert_eq!(map.index("missing"), None);
     }
-}
-
-pub(crate) async fn get_iface_index_opt(
-    handle: &rtnetlink::Handle,
-    iface_name: &str,
-) -> Result<Option<u32>, NipartError> {
-    let mut messages = handle.link().get().match_name(iface_name).execute();
-    Ok(messages
-        .try_next()
-        .await
-        .map_err(|e| map_rtnetlink_error("Failed to query interface index", e))?
-        .map(|message| message.header.index))
-}
-
-pub(crate) async fn get_iface_index(
-    handle: &rtnetlink::Handle,
-    iface_name: &str,
-) -> Result<u32, NipartError> {
-    get_iface_index_opt(handle, iface_name)
-        .await?
-        .ok_or_else(|| {
-            NipartError::new(
-                crate::ErrorKind::InvalidArgument,
-                format!("Interface {iface_name} does not exist"),
-            )
-        })
 }
