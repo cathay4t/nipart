@@ -26,3 +26,137 @@ pub(crate) struct ParsedBondPort {
     pub(crate) permanent_mac: Option<String>,
 }
 
+pub(crate) fn parse_bond(data: &InfoData) -> Option<(BondConfig, Option<u32>)> {
+    let InfoData::Bond(nlas) = data else {
+        return None;
+    };
+    let mode = nlas
+        .iter()
+        .find_map(|nla| {
+            if let InfoBond::Mode(mode) = nla {
+                Some(bond_mode_from_nl80211(*mode))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+    let mut primary_index = None;
+    let mut options = BondOptions::default();
+    for nla in nlas {
+        match nla {
+            InfoBond::Mode(_) => (),
+            InfoBond::MiiMon(value) => options.miimon = Some(*value),
+            InfoBond::UpDelay(value) => options.updelay = Some(*value),
+            InfoBond::DownDelay(value) => options.downdelay = Some(*value),
+            InfoBond::UseCarrier(value) => options.use_carrier = Some(*value),
+            InfoBond::ArpInterval(value) => options.arp_interval = Some(*value),
+            InfoBond::ArpIpTarget(addresses) => {
+                options.arp_ip_target = Some(
+                    addresses
+                        .iter()
+                        .map(|address| address.to_string())
+                        .collect::<Vec<String>>()
+                        .join(","),
+                );
+            }
+            InfoBond::ArpValidate(value) => {
+                options.arp_validate = bond_arp_validate_from_nl80211(*value);
+            }
+            InfoBond::ArpAllTargets(value) => {
+                options.arp_all_targets =
+                    bond_arp_all_targets_from_nl80211(*value);
+            }
+            InfoBond::Primary(value)
+                if [BondMode::ActiveBackup, BondMode::ALB, BondMode::TLB]
+                    .contains(&mode) =>
+            {
+                primary_index = Some(*value);
+            }
+            InfoBond::PrimaryReselect(value) => {
+                options.primary_reselect =
+                    bond_primary_reselect_from_nl80211(*value);
+            }
+            InfoBond::FailOverMac(value) if mode == BondMode::ActiveBackup => {
+                options.fail_over_mac = bond_fail_over_mac_from_nl80211(*value);
+            }
+            InfoBond::XmitHashPolicy(value)
+                if [BondMode::XOR, BondMode::LACP, BondMode::TLB]
+                    .contains(&mode) =>
+            {
+                options.xmit_hash_policy =
+                    bond_xmit_hash_policy_from_nl80211(*value);
+            }
+            InfoBond::ResendIgmp(value)
+                if [
+                    BondMode::RoundRobin,
+                    BondMode::ActiveBackup,
+                    BondMode::TLB,
+                    BondMode::ALB,
+                ]
+                .contains(&mode) =>
+            {
+                options.resend_igmp = Some(*value);
+            }
+            InfoBond::NumPeerNotif(value) if mode == BondMode::ActiveBackup => {
+                options.num_unsol_na = Some(*value);
+                options.num_grat_arp = Some(*value);
+            }
+            InfoBond::AllPortsActive(value) => {
+                options.all_ports_active =
+                    bond_all_ports_active_from_nl80211(*value);
+            }
+            InfoBond::MinLinks(value) => options.min_links = Some(*value),
+            InfoBond::LpInterval(value) => options.lp_interval = Some(*value),
+            InfoBond::PacketsPerPort(value) if mode == BondMode::RoundRobin => {
+                options.packets_per_port = Some(*value);
+            }
+            InfoBond::AdLacpRate(value) if mode == BondMode::LACP => {
+                options.lacp_rate = bond_lacp_rate_from_nl80211(*value);
+            }
+            InfoBond::AdSelect(value) if mode == BondMode::LACP => {
+                options.ad_select = bond_ad_select_from_nl80211(*value);
+            }
+            InfoBond::AdActorSysPrio(value) if mode == BondMode::LACP => {
+                options.ad_actor_sys_prio = Some(*value);
+            }
+            InfoBond::AdUserPortKey(value) if mode == BondMode::LACP => {
+                options.ad_user_port_key = Some(*value);
+            }
+            InfoBond::AdActorSystem(mac) if mode == BondMode::LACP => {
+                options.ad_actor_system = format_mac_address(mac);
+            }
+            InfoBond::TlbDynamicLb(value)
+                if [BondMode::TLB, BondMode::ALB].contains(&mode) =>
+            {
+                options.tlb_dynamic_lb = Some(*value);
+            }
+            InfoBond::PeerNotifDelay(value) => {
+                options.peer_notif_delay = Some(*value)
+            }
+            InfoBond::AdLacpActive(value) if mode == BondMode::LACP => {
+                options.lacp_active = Some(*value);
+            }
+            InfoBond::MissedMax(value)
+                if ![BondMode::LACP, BondMode::TLB, BondMode::ALB]
+                    .contains(&mode) =>
+            {
+                options.arp_missed_max = Some(*value);
+            }
+            InfoBond::NsIp6Target(addresses) => {
+                options.ns_ip6_target = Some(addresses.clone());
+            }
+            _ => {
+                log::debug!("Unsupported bond info {nla:?}");
+            }
+        }
+    }
+    Some((
+        BondConfig {
+            mode: Some(mode),
+            options: Some(options),
+            ports: Some(Vec::new()),
+        },
+        primary_index,
+    ))
+}
+
