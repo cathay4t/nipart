@@ -55,6 +55,9 @@ rev = "da7f6db8cf1640b5d1208dd0b128b14a3a7df78b"
 version = "0.3.2"
 default-features = false
 
+[workspace.dependencies.ethtool]
+version = "0.3.0"
+
 [workspace.dependencies.rtnetlink]
 git = "https://github.com/rust-netlink/rtnetlink"
 rev = "47e910d74fad2d00a8b4221db11d53b1287145dd"

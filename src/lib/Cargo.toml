@@ -11,6 +11,7 @@ rust-version.workspace = true
 [dependencies]
 nipart_derive = { "path" = "../derive" }
 
+ethtool = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 mozim = { workspace = true, features = ["netlink"] }
