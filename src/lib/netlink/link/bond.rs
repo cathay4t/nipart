@@ -287,3 +287,14 @@ fn bond_all_ports_active_from_nl80211(
     }
 }
 
+fn bond_lacp_rate_from_nl80211(value: NlBondLacpRate) -> Option<BondLacpRate> {
+    match value {
+        NlBondLacpRate::Slow => Some(BondLacpRate::Slow),
+        NlBondLacpRate::Fast => Some(BondLacpRate::Fast),
+        _ => {
+            log::warn!("Unsupported bond lacp_rate option {value:?}");
+            None
+        }
+    }
+}
+
