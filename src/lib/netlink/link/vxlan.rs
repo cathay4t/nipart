@@ -103,3 +103,136 @@ pub(crate) fn parse_vxlan(data: &InfoData) -> Option<VxlanConfig> {
     }
     Some(config)
 }
+
+pub(crate) async fn vxlan_link_builder(
+    handle: &rtnetlink::Handle,
+    iface: &crate::VxlanInterface,
+    cur_iface: Option<&crate::VxlanInterface>,
+) -> Result<
+    rtnetlink::LinkMessageBuilder<rtnetlink::LinkVxlan>,
+    crate::NipartError,
+> {
+    use rtnetlink::packet_route::link::InfoVxlan;
+
+    let Some(vxlan_conf) = iface.vxlan.as_ref() else {
+        return Err(crate::NipartError::new(
+            crate::ErrorKind::InvalidArgument,
+            format!(
+                "Missing vxlan section for creating new VxLAN {}",
+                iface.base.name
+            ),
+        ));
+    };
+    let mut builder = if let Some(id) = vxlan_conf.id {
+        rtnetlink::LinkVxlan::new(iface.base.name.as_str(), id)
+    } else if cur_iface.is_none() {
+        return Err(crate::NipartError::new(
+            crate::ErrorKind::InvalidArgument,
+            format!(
+                "Missing vxlan.id for creating new VxLAN {}",
+                iface.base.name
+            ),
+        ));
+    } else {
+        rtnetlink::LinkMessageBuilder::<rtnetlink::LinkVxlan>::new(
+            iface.base.name.as_str(),
+        )
+    };
+
+    if let Some(parent) = vxlan_conf.base_iface.as_deref() {
+        builder = builder.dev(super::get_iface_index(handle, parent).await?);
+    }
+    if let Some(remote) = vxlan_conf.remote.as_deref() {
+        let remote = remote.parse::<std::net::IpAddr>().map_err(|e| {
+            crate::NipartError::new(
+                crate::ErrorKind::InvalidArgument,
+                format!("Invalid vxlan remote address {remote}: {e}"),
+            )
+        })?;
+        builder = match remote {
+            std::net::IpAddr::V4(address) => builder.remote(address),
+            std::net::IpAddr::V6(address) => builder.remote6(address),
+        };
+    }
+    if let Some(local) = vxlan_conf.local.as_deref() {
+        let local = local.parse::<std::net::IpAddr>().map_err(|e| {
+            crate::NipartError::new(
+                crate::ErrorKind::InvalidArgument,
+                format!("Invalid vxlan local address {local}: {e}"),
+            )
+        })?;
+        builder = match local {
+            std::net::IpAddr::V4(address) => builder.local(address),
+            std::net::IpAddr::V6(address) => builder.local6(address),
+        };
+    }
+    if let Some(value) = vxlan_conf.destination_port {
+        builder = builder.port(value);
+    }
+    if let Some(value) = vxlan_conf.learning {
+        builder = builder.learning(value);
+    }
+    if let Some(value) = vxlan_conf.ttl {
+        builder = builder.ttl(value);
+    }
+    if let Some(value) = vxlan_conf.tos {
+        builder = builder.tos(value);
+    }
+    if let Some(value) = vxlan_conf.ageing {
+        builder = builder.ageing(value);
+    }
+    if let Some(value) = vxlan_conf.max_address {
+        builder = builder.limit(value);
+    }
+    if let (Some(min), Some(max)) =
+        (vxlan_conf.src_port_min, vxlan_conf.src_port_max)
+    {
+        builder = builder.port_range(min, max);
+    }
+    if let Some(value) = vxlan_conf.proxy {
+        builder = builder.proxy(value);
+    }
+    if let Some(value) = vxlan_conf.rsc {
+        builder = builder.rsc(value);
+    }
+    if let Some(value) = vxlan_conf.l2miss {
+        builder = builder.l2miss(value);
+    }
+    if let Some(value) = vxlan_conf.l3miss {
+        builder = builder.l3miss(value);
+    }
+    if let Some(value) = vxlan_conf.udp_check_sum {
+        builder = builder.udp_csum(value);
+    }
+    if let Some(value) = vxlan_conf.udp6_zero_check_sum_tx {
+        builder = builder.append_info_data(InfoVxlan::UDPZeroCsumTX(value));
+    }
+    if let Some(value) = vxlan_conf.udp6_zero_check_sum_rx {
+        builder = builder.append_info_data(InfoVxlan::UDPZeroCsumRX(value));
+    }
+    if let Some(value) = vxlan_conf.remote_check_sum_tx {
+        builder = builder.append_info_data(InfoVxlan::RemCsumTX(value));
+    }
+    if let Some(value) = vxlan_conf.remote_check_sum_rx {
+        builder = builder.append_info_data(InfoVxlan::RemCsumRX(value));
+    }
+    if vxlan_conf.gbp == Some(true) {
+        builder = builder.append_info_data(InfoVxlan::Gbp);
+    }
+    if vxlan_conf.remote_check_sum_no_partial == Some(true) {
+        builder = builder.append_info_data(InfoVxlan::RemCsumNoPartial);
+    }
+    if let Some(value) = vxlan_conf.collect_metadata {
+        builder = builder.collect_metadata(value);
+    }
+    if let Some(value) = vxlan_conf.label {
+        builder = builder.label(value);
+    }
+    if vxlan_conf.gpe == Some(true) {
+        builder = builder.append_info_data(InfoVxlan::Gpe);
+    }
+    if vxlan_conf.ttl_inherit == Some(true) {
+        builder = builder.append_info_data(InfoVxlan::TtlInheritFlag);
+    }
+    Ok(builder)
+}
