@@ -210,3 +210,20 @@ fn bond_arp_all_targets_from_nl80211(
     }
 }
 
+fn bond_arp_validate_from_nl80211(
+    value: NlBondArpValidate,
+) -> Option<BondArpValidate> {
+    match value {
+        NlBondArpValidate::None => Some(BondArpValidate::None),
+        NlBondArpValidate::Active => Some(BondArpValidate::Active),
+        NlBondArpValidate::Backup => Some(BondArpValidate::Backup),
+        NlBondArpValidate::All => Some(BondArpValidate::All),
+        NlBondArpValidate::FilterActive => Some(BondArpValidate::FilterActive),
+        NlBondArpValidate::FilterBackup => Some(BondArpValidate::FilterBackup),
+        _ => {
+            log::warn!("Unsupported bond arp_validate option {value:?}");
+            None
+        }
+    }
+}
+
