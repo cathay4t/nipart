@@ -68,3 +68,26 @@ fn vlan_protocol_from_nl80211(protocol: NlVlanProtocol) -> VlanProtocol {
     }
 }
 
+fn qos_map_from_nl80211(
+    mappings: &[NlVlanQosMapping],
+) -> Option<Vec<VlanQosMapping>> {
+    let mut ret: Vec<VlanQosMapping> = mappings
+        .iter()
+        .filter_map(|mapping| {
+            if let NlVlanQosMapping::Mapping(from, to) = mapping {
+                Some(VlanQosMapping {
+                    from: *from,
+                    to: *to,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+    if ret.is_empty() {
+        None
+    } else {
+        ret.sort_unstable();
+        Some(ret)
+    }
+}
