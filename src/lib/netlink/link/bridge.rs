@@ -12,7 +12,8 @@ use rtnetlink::packet_route::link::{
 
 use crate::{
     BridgeVlanConfig, BridgeVlanMode, BridgeVlanRange, BridgeVlanTrunkTag,
-    LinuxBridgeConfig, LinuxBridgeMulticastRouterType, LinuxBridgeOptions,
+    LinuxBridgeConfig, LinuxBridgeInterface,
+    LinuxBridgeMulticastRouterType, LinuxBridgeOptions,
     LinuxBridgePortConfig, LinuxBridgeStpOptions, VlanProtocol,
     netlink::mac::format_mac_address,
 };
@@ -25,6 +26,7 @@ pub(crate) struct BridgeVlanEntry {
     pub(crate) vid_range: Option<(u16, u16)>,
     pub(crate) is_pvid: bool,
     pub(crate) is_egress_untagged: bool,
+    pub(crate) remove: bool,
 }
 
 pub(crate) fn parse_bridge(
@@ -368,6 +370,7 @@ fn merge_vlan_range(
                         vid_range: Some((start, kernel_vlan.vid)),
                         is_pvid: kernel_vlan.is_pvid,
                         is_egress_untagged: kernel_vlan.is_egress_untagged,
+                        remove: false,
                     });
                 } else {
                     log::warn!(
@@ -384,6 +387,7 @@ fn merge_vlan_range(
                     vid_range: None,
                     is_pvid: kernel_vlan.is_pvid,
                     is_egress_untagged: kernel_vlan.is_egress_untagged,
+                    remove: false,
                 });
                 vlan_start = None;
             }
@@ -421,4 +425,175 @@ impl From<LinuxBridgeStpOptions> for NlBridgeStpState {
             Self::Disabled
         }
     }
+}
+
+pub(crate) fn bridge_link_builder(
+    iface: &LinuxBridgeInterface,
+    cur_iface: Option<&LinuxBridgeInterface>,
+) -> Result<
+    rtnetlink::LinkMessageBuilder<rtnetlink::LinkBridge>,
+    crate::NipartError,
+> {
+    let mut builder = rtnetlink::LinkBridge::new(iface.base.name.as_str());
+    let Some(br_conf) = iface.bridge.as_ref() else {
+        return Ok(builder);
+    };
+    if let Some(opts) = br_conf.options.as_ref() {
+        if let Some(value) = opts.group_addr.as_deref() {
+            let mac = crate::netlink::mac::parse_mac_address(value)?;
+            let mac: [u8; 6] = mac.try_into().map_err(|_| {
+                crate::NipartError::new(
+                    crate::ErrorKind::InvalidArgument,
+                    format!(
+                        "Invalid bridge group address {value}, expecting \
+                         format like 01:80:C2:00:00:00"
+                    ),
+                )
+            })?;
+            builder = builder.group_address(mac);
+        }
+        if let Some(value) = opts.group_fwd_mask.or(opts.group_forward_mask) {
+            builder = builder.group_fwd_mask(value);
+        }
+        if let Some(value) = opts.hash_max {
+            builder = builder.mcast_hash_max(value);
+        }
+        if let Some(value) = opts.mac_ageing_time {
+            builder = builder.ageing_time(value * get_user_hz());
+        }
+        if let Some(value) = opts.multicast_last_member_count {
+            builder = builder.mcast_last_member_count(value);
+        }
+        if let Some(value) = opts.multicast_last_member_interval {
+            builder = builder.mcast_last_member_interval(value);
+        }
+        if let Some(value) = opts.multicast_membership_interval {
+            builder = builder.mcast_membership_interval(value);
+        }
+        if let Some(value) = opts.multicast_querier {
+            builder = builder.mcast_querier(value);
+        }
+        if let Some(value) = opts.multicast_querier_interval {
+            builder = builder.mcast_querier_interval(value);
+        }
+        if let Some(value) = opts.multicast_query_interval {
+            builder = builder.mcast_query_interval(value);
+        }
+        if let Some(value) = opts.multicast_query_response_interval {
+            builder = builder.mcast_query_response_interval(value);
+        }
+        if let Some(value) = opts.multicast_query_use_ifaddr {
+            builder = builder.mcast_query_use_ifaddr(value);
+        }
+        if let Some(value) = opts.multicast_router.clone() {
+            builder = builder.mcast_router(value.into());
+        }
+        if let Some(value) = opts.multicast_snooping {
+            builder = builder.mcast_snooping(value);
+        }
+        if let Some(value) = opts.multicast_startup_query_count {
+            builder = builder.mcast_startup_query_count(value);
+        }
+        if let Some(value) = opts.multicast_startup_query_interval {
+            builder = builder.mcast_startup_query_interval(value);
+        }
+        if let Some(value) = opts.vlan_protocol {
+            builder = builder.vlan_protocol(value.into());
+        }
+        if let Some(value) = opts.vlan_default_pvid {
+            builder = builder.vlan_default_pvid(value);
+        }
+        if let Some(stp) = opts.stp.as_ref() {
+            builder = builder.stp_state(stp.clone().into());
+            if let Some(value) = stp.forward_delay {
+                builder = builder.forward_delay(value as u32 * get_user_hz());
+            }
+            if let Some(value) = stp.hello_time {
+                builder = builder.hello_time(value as u32 * get_user_hz());
+            }
+            if let Some(value) = stp.max_age {
+                builder = builder.max_age(value as u32 * get_user_hz());
+            }
+            if let Some(value) = stp.priority {
+                builder = builder.priority(value);
+            }
+        }
+        if br_conf.vlan.is_some() {
+            builder =
+                builder.vlan_filtering(iface.vlan_filtering_is_enabled(cur_iface));
+        }
+    } else if br_conf.vlan.is_some() {
+        builder =
+            builder.vlan_filtering(iface.vlan_filtering_is_enabled(cur_iface));
+    }
+    Ok(builder)
+}
+
+fn add_bridge_vlan_entries<'a>(
+    mut builder: rtnetlink::LinkMessageBuilder<rtnetlink::LinkBridgeVlan>,
+    entries: impl Iterator<Item = &'a BridgeVlanEntry>,
+) -> rtnetlink::LinkMessageBuilder<rtnetlink::LinkBridgeVlan> {
+    use rtnetlink::packet_route::link::BridgeVlanInfoFlags;
+
+    for entry in entries {
+        let mut flags = BridgeVlanInfoFlags::empty();
+        if entry.is_pvid {
+            flags |= BridgeVlanInfoFlags::Pvid;
+        }
+        if entry.is_egress_untagged {
+            flags |= BridgeVlanInfoFlags::Untagged;
+        }
+        if let Some(vid) = entry.vid {
+            builder = builder.vlan(vid, flags);
+        } else if let Some((min, max)) = entry.vid_range {
+            builder =
+                builder.vlan_range_start(min, flags).vlan_range_end(max, flags);
+        }
+    }
+    builder
+}
+
+pub(crate) fn bridge_vlan_add_message(
+    index: u32,
+    bridge_self: bool,
+    entries: &[BridgeVlanEntry],
+) -> Option<rtnetlink::packet_route::link::LinkMessage> {
+    let mut add_entries = entries.iter().filter(|entry| !entry.remove).peekable();
+    add_entries.peek()?;
+    let mut builder = rtnetlink::LinkBridgeVlan::new(index);
+    if bridge_self {
+        builder = builder.bridge_self();
+    }
+    Some(add_bridge_vlan_entries(builder, add_entries).build())
+}
+
+pub(crate) fn bridge_vlan_del_message(
+    index: u32,
+    bridge_self: bool,
+    entries: &[BridgeVlanEntry],
+) -> Option<rtnetlink::packet_route::link::LinkMessage> {
+    let mut del_entries = entries.iter().filter(|entry| entry.remove).peekable();
+    del_entries.peek()?;
+    let mut builder = rtnetlink::LinkBridgeVlan::new(index);
+    if bridge_self {
+        builder = builder.bridge_self();
+    }
+    Some(add_bridge_vlan_entries(builder, del_entries).build())
+}
+
+pub(crate) fn bridge_port_message(
+    port_index: u32,
+    conf: &LinuxBridgePortConfig,
+) -> rtnetlink::packet_route::link::LinkMessage {
+    let mut builder = rtnetlink::LinkBridgePort::new(port_index);
+    if let Some(value) = conf.stp_hairpin_mode {
+        builder = builder.hairpin(value);
+    }
+    if let Some(value) = conf.stp_priority {
+        builder = builder.priority(value);
+    }
+    if let Some(value) = conf.stp_path_cost {
+        builder = builder.cost(value);
+    }
+    builder.build()
 }
