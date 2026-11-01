@@ -165,3 +165,19 @@ pub(crate) fn parse_bridge_port(
     ret
 }
 
+pub(crate) fn parse_af_spec_bridge(
+    nlas: &[AfSpecBridge],
+) -> Option<Vec<BridgeVlanEntry>> {
+    let mut vlans = Vec::new();
+    for nla in nlas {
+        if let AfSpecBridge::VlanInfo(info) = nla {
+            vlans.push(kernel_vlan_from_nl80211(info));
+        }
+    }
+    if vlans.is_empty() {
+        None
+    } else {
+        Some(merge_vlan_range(&vlans))
+    }
+}
+
