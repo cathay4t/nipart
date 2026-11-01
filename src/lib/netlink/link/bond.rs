@@ -255,3 +255,22 @@ fn bond_fail_over_mac_from_nl80211(
     }
 }
 
+fn bond_xmit_hash_policy_from_nl80211(
+    value: NlBondXmitHashPolicy,
+) -> Option<BondXmitHashPolicy> {
+    match value {
+        NlBondXmitHashPolicy::Layer2 => Some(BondXmitHashPolicy::Layer2),
+        NlBondXmitHashPolicy::Layer34 => Some(BondXmitHashPolicy::Layer34),
+        NlBondXmitHashPolicy::Layer23 => Some(BondXmitHashPolicy::Layer23),
+        NlBondXmitHashPolicy::Encap23 => Some(BondXmitHashPolicy::Encap23),
+        NlBondXmitHashPolicy::Encap34 => Some(BondXmitHashPolicy::Encap34),
+        NlBondXmitHashPolicy::VlanSrcMac => {
+            Some(BondXmitHashPolicy::VlanSrcMac)
+        }
+        _ => {
+            log::warn!("Unsupported bond xmit_hash_policy option {value:?}");
+            None
+        }
+    }
+}
+
