@@ -312,15 +312,16 @@ async fn apply_base_link_changes<T>(
         }
     }
 
+    // Apply the controller unconditionally when it is defined: the cached
+    // current state may be stale after a controller was deleted and recreated
+    // in this same apply, which detaches all of its ports in the kernel.
+    // Re-attaching an already attached port is a no-op.
     if let Some(des_controller) = des_base.controller.as_ref() {
-        let cur_controller = cur_base.and_then(|cur| cur.controller.as_ref());
-        if cur_controller != Some(des_controller) {
-            if des_controller.is_empty() {
-                builder = builder.nocontroller();
-            } else {
-                builder = builder
-                    .controller(get_iface_index(handle, des_controller).await?);
-            }
+        if des_controller.is_empty() {
+            builder = builder.nocontroller();
+        } else {
+            builder = builder
+                .controller(get_iface_index(handle, des_controller).await?);
         }
     }
 
