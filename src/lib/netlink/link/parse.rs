@@ -380,3 +380,13 @@ pub(crate) fn state_from_nl80211(
     }
 }
 
+pub(crate) fn link_state_from_nl80211(state: State) -> InterfaceLinkState {
+    match state {
+        State::Up => InterfaceLinkState::Up,
+        State::Dormant => InterfaceLinkState::Dormant,
+        State::Down => InterfaceLinkState::Down,
+        State::LowerLayerDown => InterfaceLinkState::LowerLayerDown,
+        State::Testing => InterfaceLinkState::Testing,
+        _ => InterfaceLinkState::Unknown,
+    }
+}
