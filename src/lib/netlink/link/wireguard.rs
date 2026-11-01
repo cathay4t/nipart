@@ -94,3 +94,64 @@ fn last_handshake_to_human_str(last_handshake: Duration) -> Option<String> {
         Some(format!("{} seconds ago", (now - last_handshake).as_secs()))
     }
 }
+
+impl From<&WireguardConfig> for nl_wireguard::WireguardParsed {
+    fn from(config: &WireguardConfig) -> Self {
+        let mut parsed = Self::default();
+        parsed.private_key = config.private_key.clone();
+        parsed.listen_port = config.listen_port;
+        parsed.fwmark = config.fwmark;
+        parsed.peers = config
+            .peers
+            .as_ref()
+            .map(|peers| peers.iter().map(Into::into).collect());
+        parsed
+    }
+}
+
+impl From<&WireguardPeerConfig> for nl_wireguard::WireguardPeerParsed {
+    fn from(peer: &WireguardPeerConfig) -> Self {
+        let mut parsed = Self::default();
+        parsed.endpoint = peer.endpoint;
+        parsed.public_key = peer.public_key.clone();
+        parsed.preshared_key = peer.preshared_key.clone();
+        parsed.persistent_keepalive = peer.persistent_keepalive;
+        parsed.protocol_version = peer.protocol_version;
+        parsed.allowed_ips = peer.allowed_ips.as_ref().map(|ips| {
+            ips.iter()
+                .map(|ip| nl_wireguard::WireguardIpAddress {
+                    ip_addr: ip.ip,
+                    prefix_length: ip.prefix_length,
+                    flags: None,
+                })
+                .collect()
+        });
+        parsed
+    }
+}
+
+pub(crate) async fn apply_wireguard_config(
+    iface_name: &str,
+    config: &WireguardConfig,
+) -> Result<(), crate::NipartError> {
+    let (connection, mut handle, _) = nl_wireguard::new_connection()
+        .map_err(|e| {
+            crate::NipartError::new(
+                crate::ErrorKind::Bug,
+                format!("Failed to create wireguard netlink connection: {e}"),
+            )
+        })?;
+    tokio::spawn(connection);
+    let mut parsed: nl_wireguard::WireguardParsed = config.into();
+    parsed.iface_name = Some(iface_name.to_string());
+    log::trace!("Applying wireguard configuration for interface {iface_name}");
+    handle.set(parsed).await.map_err(|e| {
+        crate::NipartError::new(
+            crate::ErrorKind::Bug,
+            format!(
+                "Failed to apply wireguard configuration for interface \
+                 {iface_name}: {e}"
+            ),
+        )
+    })
+}
