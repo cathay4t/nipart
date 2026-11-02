@@ -36,3 +36,20 @@ fn ethernet_by_name(
     }
 }
 
+#[test]
+fn test_parse_veth_peer() {
+    let interfaces =
+        LinkState::from_messages(&[veth(5, "veth0", 6), veth(6, "veth1", 5)])
+            .into_interfaces();
+    let veth0 = ethernet_by_name(interfaces.clone(), "veth0");
+    assert_eq!(
+        veth0.veth.as_ref().map(|veth| veth.peer.as_str()),
+        Some("veth1")
+    );
+    let veth1 = ethernet_by_name(interfaces, "veth1");
+    assert_eq!(
+        veth1.veth.as_ref().map(|veth| veth.peer.as_str()),
+        Some("veth0")
+    );
+}
+
