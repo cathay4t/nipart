@@ -257,3 +257,11 @@ impl LinkState {
     }
 }
 
+fn empty_bond_port_config() -> BondPortConfig {
+    BondPortConfig {
+        name: String::new(),
+        priority: None,
+        queue_id: None,
+    }
+}
+
