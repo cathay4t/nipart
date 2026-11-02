@@ -49,3 +49,38 @@ fn peer_config_from_parsed(
     }
 }
 
+pub(crate) async fn get_wireguard_configs(
+    iface_names: &[String],
+) -> HashMap<String, WireguardConfig> {
+    let mut ret = HashMap::new();
+    if iface_names.is_empty() {
+        return ret;
+    }
+    let (connection, mut handle, _) = match nl_wireguard::new_connection() {
+        Ok(value) => value,
+        Err(error) => {
+            log::warn!(
+                "Failed to create wireguard netlink connection: {error}"
+            );
+            return ret;
+        }
+    };
+    tokio::spawn(connection);
+    for iface_name in iface_names {
+        match handle.get_by_name(iface_name.as_str()).await {
+            Ok(parsed) => {
+                ret.insert(iface_name.clone(), config_from_parsed(parsed));
+            }
+            Err(error) => {
+                // Mostly permission error because querying wireguard info
+                // needs root access.
+                log::debug!(
+                    "Failed to query wireguard information of {iface_name}: \
+                     {error}"
+                );
+            }
+        }
+    }
+    ret
+}
+
