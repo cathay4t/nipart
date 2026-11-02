@@ -297,3 +297,70 @@ fn should_skip(iface: &LinkIface) -> bool {
         if name.eq_ignore_ascii_case("vti"))
 }
 
+impl LinkIface {
+    fn into_interface(self) -> Interface {
+        let LinkIface {
+            mut base,
+            veth,
+            vlan,
+            vrf,
+            vxlan,
+            bond,
+            bridge,
+            ethernet,
+            wireguard,
+            wifi,
+            is_wifi,
+            ..
+        } = self;
+        if is_wifi {
+            base.iface_type = InterfaceType::WifiPhy;
+        }
+        match base.iface_type {
+            InterfaceType::Ethernet | InterfaceType::Veth => {
+                Interface::Ethernet(Box::new(EthernetInterface {
+                    base,
+                    ethernet,
+                    veth,
+                }))
+            }
+            InterfaceType::Loopback => {
+                Interface::Loopback(Box::new(LoopbackInterface::new(base)))
+            }
+            InterfaceType::Dummy => {
+                Interface::Dummy(Box::new(DummyInterface { base }))
+            }
+            InterfaceType::Vlan => {
+                Interface::Vlan(Box::new(VlanInterface { base, vlan }))
+            }
+            InterfaceType::Vrf => {
+                Interface::Vrf(Box::new(VrfInterface { base, vrf }))
+            }
+            InterfaceType::Vxlan => {
+                Interface::Vxlan(Box::new(VxlanInterface { base, vxlan }))
+            }
+            InterfaceType::Bond => {
+                Interface::Bond(Box::new(crate::BondInterface { base, bond }))
+            }
+            InterfaceType::LinuxBridge => {
+                Interface::LinuxBridge(Box::new(LinuxBridgeInterface {
+                    base,
+                    bridge,
+                }))
+            }
+            InterfaceType::Wireguard => {
+                Interface::Wireguard(Box::new(WireguardInterface {
+                    base,
+                    wireguard,
+                }))
+            }
+            InterfaceType::WifiPhy => {
+                Interface::WifiPhy(Box::new(WifiPhyInterface { base, wifi }))
+            }
+            InterfaceType::OvsInterface => {
+                Interface::OvsInterface(Box::new(OvsInterface::new(base)))
+            }
+            _ => Interface::Unknown(Box::new(UnknownInterface::new(base))),
+        }
+    }
+}
