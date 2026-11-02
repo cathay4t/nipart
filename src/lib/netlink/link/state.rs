@@ -289,3 +289,11 @@ fn resolve_base_index(
     }
 }
 
+fn should_skip(iface: &LinkIface) -> bool {
+    if matches!(iface.base.name.as_str(), "ovs-system" | "ovs-netdev") {
+        return true;
+    }
+    matches!(&iface.base.iface_type, InterfaceType::Unknown(name)
+        if name.eq_ignore_ascii_case("vti"))
+}
+
