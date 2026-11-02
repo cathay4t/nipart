@@ -142,3 +142,48 @@ fn test_parse_bond_lacp_options() {
     );
 }
 
+#[test]
+fn test_parse_bond_ports_and_primary() {
+    let bond = parse_bond(&[
+        bond_message(
+            10,
+            vec![
+                InfoBond::Mode(NlBondMode::ActiveBackup),
+                InfoBond::Primary(3),
+                InfoBond::FailOverMac(NlFailOverMac::Follow),
+                InfoBond::NumPeerNotif(4),
+                InfoBond::MissedMax(2),
+            ],
+        ),
+        eth_port(
+            3,
+            "eth1",
+            10,
+            vec![
+                InfoBondPort::Prio(5),
+                InfoBondPort::QueueId(2),
+                InfoBondPort::PermHwaddr(vec![
+                    0x02, 0x00, 0x00, 0x00, 0x00, 0x11,
+                ]),
+            ],
+        ),
+        eth_port(2, "eth0", 10, vec![InfoBondPort::Prio(100)]),
+    ]);
+    let config = bond.bond.expect("Bond config missing");
+    assert_eq!(config.mode, Some(BondMode::ActiveBackup));
+    let options = config.options.expect("Bond options missing");
+    assert_eq!(options.primary.as_deref(), Some("eth1"));
+    assert_eq!(options.fail_over_mac, Some(BondFailOverMac::Follow));
+    assert_eq!(options.num_unsol_na, Some(4));
+    assert_eq!(options.num_grat_arp, Some(4));
+    assert_eq!(options.arp_missed_max, Some(2));
+    let ports = config.ports.expect("Bond ports missing");
+    assert_eq!(ports.len(), 2);
+    assert_eq!(ports[0].name, "eth0");
+    assert_eq!(ports[0].priority, Some(100));
+    assert_eq!(ports[0].queue_id, Some(0));
+    assert_eq!(ports[1].name, "eth1");
+    assert_eq!(ports[1].priority, Some(5));
+    assert_eq!(ports[1].queue_id, Some(2));
+}
+
