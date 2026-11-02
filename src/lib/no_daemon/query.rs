@@ -9,7 +9,11 @@ use crate::{
             get_address_messages, ipv4_map_from_messages,
             ipv6_map_from_messages,
         },
-        link::{LinkState, get_link_messages},
+        link::{
+            LinkState, ethtool::get_ethtool_link_modes, get_link_messages,
+            wireguard::get_wireguard_configs,
+        },
+        wifi::get_wifi_infos,
     },
 };
 
@@ -31,6 +35,14 @@ impl NipartNoDaemon {
         let mut net_state = NetworkState::default();
         let link_messages = get_link_messages().await?;
         let mut link_state = LinkState::from_messages(&link_messages);
+
+        for (iface_name, wifi_config) in get_wifi_infos().await {
+            link_state.apply_wifi(iface_name.as_str(), wifi_config);
+        }
+        link_state.apply_ethtool(get_ethtool_link_modes().await);
+        let wireguard_names = link_state.wireguard_names();
+        link_state
+            .apply_wireguard(get_wireguard_configs(&wireguard_names).await);
 
         let address_messages = match get_address_messages().await {
             Ok(messages) => messages,
