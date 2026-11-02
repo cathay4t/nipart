@@ -40,3 +40,15 @@ fn test_apply_wifi_marks_interface_type() {
     }
 }
 
+#[test]
+fn test_apply_wifi_without_config() {
+    let message = link_message(2, "wlan0", LinkLayerType::Ether, LinkFlags::Up);
+    let mut state = LinkState::from_messages(&[message]);
+    state.apply_wifi("wlan0", None);
+    let mut interfaces = state.into_interfaces();
+    let interface = interfaces.drain(..).next().expect("Interface missing");
+    assert_eq!(interface.iface_type(), &InterfaceType::WifiPhy);
+    if let Interface::WifiPhy(wifi) = interface {
+        assert_eq!(wifi.wifi, None);
+    }
+}
