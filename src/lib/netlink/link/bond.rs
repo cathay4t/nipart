@@ -310,3 +310,103 @@ fn bond_ad_select_from_nl80211(value: NlBondAdSelect) -> Option<BondAdSelect> {
         }
     }
 }
+
+impl From<BondMode> for NlBondMode {
+    fn from(value: BondMode) -> Self {
+        match value {
+            BondMode::RoundRobin => Self::BalanceRr,
+            BondMode::ActiveBackup => Self::ActiveBackup,
+            BondMode::XOR => Self::BalanceXor,
+            BondMode::Broadcast => Self::Broadcast,
+            BondMode::LACP => Self::Ieee8023Ad,
+            BondMode::TLB => Self::BalanceTlb,
+            BondMode::ALB => Self::BalanceAlb,
+            BondMode::Unknown => Self::ActiveBackup,
+        }
+    }
+}
+
+impl From<BondArpAllTargets> for NlBondArpAllTargets {
+    fn from(value: BondArpAllTargets) -> Self {
+        match value {
+            BondArpAllTargets::All => Self::All,
+            BondArpAllTargets::Any => Self::Any,
+        }
+    }
+}
+
+impl From<BondArpValidate> for NlBondArpValidate {
+    fn from(value: BondArpValidate) -> Self {
+        match value {
+            BondArpValidate::None => Self::None,
+            BondArpValidate::Active => Self::Active,
+            BondArpValidate::Backup => Self::Backup,
+            BondArpValidate::All => Self::All,
+            BondArpValidate::Filter => Self::Filter,
+            BondArpValidate::FilterActive => Self::FilterActive,
+            BondArpValidate::FilterBackup => Self::FilterBackup,
+        }
+    }
+}
+
+impl From<BondPrimaryReselect> for NlBondPrimaryReselect {
+    fn from(value: BondPrimaryReselect) -> Self {
+        match value {
+            BondPrimaryReselect::Always => Self::Always,
+            BondPrimaryReselect::Better => Self::Better,
+            BondPrimaryReselect::Failure => Self::Failure,
+        }
+    }
+}
+
+impl From<BondFailOverMac> for NlBondFailOverMac {
+    fn from(value: BondFailOverMac) -> Self {
+        match value {
+            BondFailOverMac::None => Self::None,
+            BondFailOverMac::Active => Self::Active,
+            BondFailOverMac::Follow => Self::Follow,
+        }
+    }
+}
+
+impl From<BondXmitHashPolicy> for NlBondXmitHashPolicy {
+    fn from(value: BondXmitHashPolicy) -> Self {
+        match value {
+            BondXmitHashPolicy::Layer2 => Self::Layer2,
+            BondXmitHashPolicy::Layer34 => Self::Layer34,
+            BondXmitHashPolicy::Layer23 => Self::Layer23,
+            BondXmitHashPolicy::Encap23 => Self::Encap23,
+            BondXmitHashPolicy::Encap34 => Self::Encap34,
+            BondXmitHashPolicy::VlanSrcMac => Self::VlanSrcMac,
+        }
+    }
+}
+
+impl From<BondAllPortActive> for NlBondAllPortActive {
+    fn from(value: BondAllPortActive) -> Self {
+        match value {
+            BondAllPortActive::Dropped => Self::Dropped,
+            BondAllPortActive::Delivered => Self::Delivered,
+        }
+    }
+}
+
+impl From<BondLacpRate> for NlBondLacpRate {
+    fn from(value: BondLacpRate) -> Self {
+        match value {
+            BondLacpRate::Fast => Self::Fast,
+            BondLacpRate::Slow => Self::Slow,
+        }
+    }
+}
+
+impl From<BondAdSelect> for NlBondAdSelect {
+    fn from(value: BondAdSelect) -> Self {
+        match value {
+            BondAdSelect::Stable => Self::Stable,
+            BondAdSelect::Bandwidth => Self::Bandwidth,
+            BondAdSelect::Count => Self::Count,
+            BondAdSelect::ActorPortPrio => Self::ActorPortPrio,
+        }
+    }
+}
