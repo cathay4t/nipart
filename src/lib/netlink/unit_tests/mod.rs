@@ -2,7 +2,5 @@
 
 pub(super) mod addr;
 pub(super) mod fixtures;
-pub(super) mod parity;
-pub(super) mod parity_base_link;
 pub(super) mod route;
 pub(super) mod rule;
