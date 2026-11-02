@@ -6,6 +6,7 @@ mod mac;
 pub(crate) mod route;
 pub(crate) mod rule;
 mod sysfs;
+pub(crate) mod wifi;
 
 #[cfg(test)]
 mod unit_tests;
