@@ -77,3 +77,19 @@ fn test_parse_base_link_attributes() {
     assert_eq!(base.pci_address.as_deref(), Some("0000:02:00.0"));
 }
 
+#[test]
+fn test_parse_link_state_defaults() {
+    let message =
+        link_message(3, "dummy0", LinkLayerType::Ether, LinkFlags::empty());
+    let interface = interface_by_name(
+        LinkState::from_messages(&[message]).into_interfaces(),
+        "dummy0",
+    );
+    let base = interface.base_iface();
+    assert_eq!(base.state, InterfaceState::Unknown);
+    assert_eq!(base.link_state, Some(InterfaceLinkState::Unknown));
+    assert_eq!(base.mtu, Some(0));
+    assert_eq!(base.mac_address.as_deref(), Some(""));
+    assert_eq!(base.permanent_mac_address, None);
+}
+
