@@ -140,3 +140,29 @@ fn test_parse_ovs_interface_type() {
     assert_eq!(interface.iface_type(), &InterfaceType::OvsInterface);
 }
 
+#[test]
+fn test_parse_infiniband_and_unknown_kind() {
+    let mut ipoib =
+        link_message(8, "ib0", LinkLayerType::Infiniband, LinkFlags::Up);
+    ipoib.attributes.push(link_info_attribute(
+        InfoKind::Ipoib,
+        Some(InfoData::Other(Vec::new())),
+    ));
+    let mut unknown =
+        link_message(9, "foo0", LinkLayerType::Ether, LinkFlags::Up);
+    unknown
+        .attributes
+        .push(LinkAttribute::LinkInfo(vec![LinkInfo::Kind(
+            InfoKind::Other("FooBar".to_string()),
+        )]));
+    let interfaces =
+        LinkState::from_messages(&[ipoib, unknown]).into_interfaces();
+    let ipoib = interface_by_name(interfaces.clone(), "ib0");
+    assert_eq!(ipoib.iface_type(), &InterfaceType::InfiniBand);
+    let unknown = interface_by_name(interfaces, "foo0");
+    assert_eq!(
+        unknown.iface_type(),
+        &InterfaceType::Unknown("foobar".to_string())
+    );
+    assert_eq!(unknown.base_iface().state, InterfaceState::Ignore);
+}
