@@ -265,3 +265,27 @@ fn empty_bond_port_config() -> BondPortConfig {
     }
 }
 
+fn resolve_base_index(
+    index_map: &LinkIndexMap,
+    base_index: Option<u32>,
+    fallback: Option<&str>,
+) -> String {
+    if let Some(base_index) = base_index {
+        index_map
+            .name(base_index)
+            .map(str::to_string)
+            .unwrap_or_else(|| base_index.to_string())
+    } else if let Some(fallback) = fallback {
+        if let Ok(index) = fallback.parse::<u32>() {
+            index_map
+                .name(index)
+                .map(str::to_string)
+                .unwrap_or_else(|| fallback.to_string())
+        } else {
+            fallback.to_string()
+        }
+    } else {
+        String::new()
+    }
+}
+
