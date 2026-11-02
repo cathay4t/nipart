@@ -53,3 +53,37 @@ pub(crate) fn parse_link_mode_message(
     Some((iface_name?, link_mode?))
 }
 
+pub(crate) async fn get_ethtool_link_modes() -> HashMap<String, EthernetConfig>
+{
+    let mut ret = HashMap::new();
+    let (connection, mut handle, _) = match ethtool::new_connection() {
+        Ok(value) => value,
+        Err(error) => {
+            log::warn!("Failed to create ethtool netlink connection: {error}");
+            return ret;
+        }
+    };
+    tokio::spawn(connection);
+    let mut stream = match handle.link_mode().get(None).execute().await {
+        Ok(stream) => stream,
+        Err(error) => {
+            log::warn!("Failed to query ethtool link mode: {error}");
+            return ret;
+        }
+    };
+    while let Some(genl_message) = stream.next().await {
+        let message = match genl_message {
+            Ok(message) => message,
+            Err(error) => {
+                log::warn!("Failed to parse ethtool link mode reply: {error}");
+                continue;
+            }
+        };
+        if let Some((name, config)) =
+            parse_link_mode_message(message.payload.nlas.as_slice())
+        {
+            ret.insert(name, config);
+        }
+    }
+    ret
+}
