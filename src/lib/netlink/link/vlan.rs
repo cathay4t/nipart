@@ -91,3 +91,12 @@ fn qos_map_from_nl80211(
         Some(ret)
     }
 }
+
+impl From<VlanProtocol> for NlVlanProtocol {
+    fn from(value: VlanProtocol) -> Self {
+        match value {
+            VlanProtocol::Ieee8021Q | VlanProtocol::Unknown => Self::Ieee8021Q,
+            VlanProtocol::Ieee8021Ad => Self::Ieee8021Ad,
+        }
+    }
+}

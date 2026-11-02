@@ -401,3 +401,24 @@ fn vlan_tag_range(entry: &BridgeVlanEntry) -> (u16, u16) {
         .vid_range
         .unwrap_or((entry.vid.unwrap_or(1), entry.vid.unwrap_or(1)))
 }
+
+impl From<LinuxBridgeMulticastRouterType> for NlBridgeMulticastRouterType {
+    fn from(value: LinuxBridgeMulticastRouterType) -> Self {
+        match value {
+            LinuxBridgeMulticastRouterType::Disabled => Self::Disabled,
+            LinuxBridgeMulticastRouterType::Auto => Self::TempQuery,
+            LinuxBridgeMulticastRouterType::Enabled => Self::Permanent,
+            LinuxBridgeMulticastRouterType::Unknown => Self::TempQuery,
+        }
+    }
+}
+
+impl From<LinuxBridgeStpOptions> for NlBridgeStpState {
+    fn from(value: LinuxBridgeStpOptions) -> Self {
+        if value.enabled == Some(true) {
+            Self::KernelStp
+        } else {
+            Self::Disabled
+        }
+    }
+}
