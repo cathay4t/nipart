@@ -149,3 +149,33 @@ fn test_parse_bridge_ports_and_vlans() {
     );
 }
 
+#[test]
+fn test_parse_bridge_vlan_range() {
+    let bridge = parse_bridge(&[bridge_message(
+        10,
+        vec![
+            InfoBridge::VlanFiltering(true),
+            InfoBridge::VlanDefaultPvid(1),
+        ],
+        vec![
+            AfSpecBridge::VlanInfo(BridgeVlanInfo {
+                flags: BridgeVlanInfoFlags::RangeBegin,
+                vid: 100,
+            }),
+            AfSpecBridge::VlanInfo(BridgeVlanInfo {
+                flags: BridgeVlanInfoFlags::RangeEnd,
+                vid: 200,
+            }),
+        ],
+    )]);
+    let config = bridge.bridge.expect("Bridge config missing");
+    let bridge_vlan = config.vlan.expect("Bridge VLAN config missing");
+    assert_eq!(bridge_vlan.mode, Some(BridgeVlanMode::Trunk));
+    assert_eq!(
+        bridge_vlan.trunk_tags,
+        Some(vec![BridgeVlanTrunkTag::IdRange(BridgeVlanRange {
+            min: 100,
+            max: 200,
+        })])
+    );
+}
