@@ -410,3 +410,196 @@ impl From<BondAdSelect> for NlBondAdSelect {
         }
     }
 }
+
+pub(crate) async fn bond_link_builder(
+    handle: &rtnetlink::Handle,
+    iface: &crate::BondInterface,
+    cur_iface: Option<&crate::BondInterface>,
+) -> Result<
+    rtnetlink::LinkMessageBuilder<rtnetlink::LinkBond>,
+    crate::NipartError,
+> {
+    let mut builder = rtnetlink::LinkBond::new(iface.base.name.as_str());
+    let Some(bond_conf) = iface.bond.as_ref() else {
+        return Ok(builder);
+    };
+    if let Some(mode) = bond_conf.mode
+        && cur_iface.is_none()
+    {
+        builder = builder.mode(mode.into());
+    }
+    let Some(opts) = bond_conf.options.as_ref() else {
+        return Ok(builder);
+    };
+    if let Some(v) = opts.miimon {
+        builder = builder.miimon(v);
+    }
+    if let Some(v) = opts.updelay {
+        builder = builder.updelay(v);
+    }
+    if let Some(v) = opts.downdelay {
+        builder = builder.downdelay(v);
+    }
+    if let Some(v) = opts.use_carrier {
+        builder = builder.use_carrier(v);
+    }
+    if let Some(v) = opts.arp_interval {
+        builder = builder.arp_interval(v);
+    }
+    if let Some(v) = opts.arp_ip_target.as_deref() {
+        let mut addresses = Vec::new();
+        for address in v.split(',') {
+            addresses.push(
+                address.parse::<std::net::Ipv4Addr>().map_err(|_| {
+                    crate::NipartError::new(
+                        crate::ErrorKind::InvalidArgument,
+                        format!(
+                            "Invalid bond `arp_ip_target` property, should \
+                             be IPv4 addresses separated by ',', but got {v}"
+                        ),
+                    )
+                })?,
+            );
+        }
+        builder = builder.arp_ip_target(addresses);
+    }
+    if let Some(v) = opts.arp_all_targets.clone() {
+        builder = builder.arp_all_targets(v.into());
+    }
+    if let Some(v) = opts.arp_validate.clone() {
+        builder = builder.arp_validate(v.into());
+    }
+    if let Some(v) = opts.primary.as_deref() {
+        builder = builder.primary(super::get_iface_index(handle, v).await?);
+    }
+    if let Some(v) = opts.primary_reselect.clone() {
+        builder = builder.primary_reselect(v.into());
+    }
+    if let Some(v) = opts.fail_over_mac {
+        builder = builder.fail_over_mac(v.into());
+    }
+    if let Some(v) = opts.xmit_hash_policy {
+        builder = builder.xmit_hash_policy(v.into());
+    }
+    if let Some(v) = opts.resend_igmp {
+        builder = builder.resend_igmp(v);
+    }
+    if let Some(v) = opts.num_unsol_na.or(opts.num_grat_arp) {
+        builder = builder.num_peer_notif(v);
+    }
+    if let Some(v) = opts.all_ports_active.clone() {
+        builder = builder.all_ports_active(v.into());
+    }
+    if let Some(v) = opts.min_links {
+        builder = builder.min_links(v);
+    }
+    if let Some(v) = opts.lp_interval {
+        builder = builder.lp_interval(v);
+    }
+    if let Some(v) = opts.packets_per_port {
+        builder = builder.packets_per_port(v);
+    }
+    if let Some(v) = opts.lacp_rate {
+        builder = builder.ad_lacp_rate(v.into());
+    }
+    if let Some(v) = opts.ad_select {
+        builder = builder.ad_select(v.into());
+    }
+    if let Some(v) = opts.ad_actor_sys_prio {
+        builder = builder.ad_actor_sys_prio(v);
+    }
+    if let Some(v) = opts.ad_user_port_key {
+        builder = builder.ad_user_port_key(v);
+    }
+    if let Some(v) = opts.ad_actor_system.as_deref() {
+        let mac = crate::netlink::mac::parse_mac_address(v)?;
+        let mac: [u8; 6] = mac.try_into().map_err(|_| {
+            crate::NipartError::new(
+                crate::ErrorKind::InvalidArgument,
+                format!(
+                    "Invalid MAC address length for bond \
+                     ad_actor_system {v}, should be like 02:00:00:00:00:01"
+                ),
+            )
+        })?;
+        builder = builder.ad_actor_system(mac);
+    }
+    if let Some(v) = opts.tlb_dynamic_lb {
+        builder = builder.tlb_dynamic_lb(v);
+    }
+    if let Some(v) = opts.peer_notif_delay {
+        builder = builder.peer_notif_delay(v);
+    }
+    if let Some(v) = opts.lacp_active {
+        builder = builder.ad_lacp_active(v);
+    }
+    if let Some(v) = opts.arp_missed_max {
+        builder = builder.missed_max(v);
+    }
+    if let Some(v) = opts.ns_ip6_target.as_ref() {
+        builder = builder.ns_ip6_target(v.clone());
+    }
+    Ok(builder)
+}
+
+/// Changing the bond mode requires detaching every port, changing the mode,
+/// then reattaching the ports which existed before the apply.
+pub(crate) async fn bond_mode_change_messages(
+    handle: &rtnetlink::Handle,
+    iface: &crate::BondInterface,
+    cur_iface: &crate::BondInterface,
+    existing_iface_names: &std::collections::HashSet<String>,
+) -> Result<Vec<rtnetlink::packet_route::link::LinkMessage>, crate::NipartError>
+{
+    let Some(des_mode) = iface.bond.as_ref().and_then(|b| b.mode) else {
+        return Ok(Vec::new());
+    };
+    let Some(cur_mode) = cur_iface.bond.as_ref().and_then(|b| b.mode) else {
+        return Ok(Vec::new());
+    };
+    if des_mode == cur_mode {
+        return Ok(Vec::new());
+    }
+
+    let bond_name = iface.base.name.as_str();
+    let bond_index = match cur_iface.base.iface_index {
+        Some(index) => index,
+        None => super::get_iface_index(handle, bond_name).await?,
+    };
+
+    let mut ret = Vec::new();
+    if let Some(ports) = cur_iface.bond.as_ref().and_then(|b| b.ports.as_ref())
+    {
+        for port in ports {
+            ret.push(
+                rtnetlink::LinkUnspec::new_with_name(port.name.as_str())
+                    .nocontroller()
+                    .up()
+                    .build(),
+            );
+        }
+    }
+    ret.push(
+        rtnetlink::LinkBond::new(bond_name)
+            .mode(des_mode.into())
+            .build(),
+    );
+    if let Some(ports) = iface
+        .bond
+        .as_ref()
+        .and_then(|b| b.ports.as_ref())
+        .or_else(|| cur_iface.bond.as_ref().and_then(|b| b.ports.as_ref()))
+    {
+        for port in ports {
+            if existing_iface_names.contains(port.name.as_str()) {
+                ret.push(
+                    rtnetlink::LinkUnspec::new_with_name(port.name.as_str())
+                        .controller(bond_index)
+                        .up()
+                        .build(),
+                );
+            }
+        }
+    }
+    Ok(ret)
+}
