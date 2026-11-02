@@ -32,3 +32,17 @@ fn bridge_message(
     message
 }
 
+fn parse_bridge(messages: &[LinkMessage]) -> LinuxBridgeInterface {
+    let mut interfaces = LinkState::from_messages(messages).into_interfaces();
+    let interface = interfaces
+        .drain(..)
+        .find(|interface| interface.name() == "br0")
+        .expect("Bridge interface not found");
+    assert_eq!(interface.iface_type(), &InterfaceType::LinuxBridge);
+    if let Interface::LinuxBridge(bridge) = interface {
+        *bridge
+    } else {
+        panic!("Not a Linux bridge interface");
+    }
+}
+
