@@ -23,3 +23,20 @@ fn wifi_config() -> WifiConfig {
     config
 }
 
+#[test]
+fn test_apply_wifi_marks_interface_type() {
+    let message = link_message(2, "wlan0", LinkLayerType::Ether, LinkFlags::Up);
+    let mut state = LinkState::from_messages(&[message]);
+    state.apply_wifi("wlan0", Some(wifi_config()));
+    let mut interfaces = state.into_interfaces();
+    let interface = interfaces.drain(..).next().expect("Interface missing");
+    assert_eq!(interface.iface_type(), &InterfaceType::WifiPhy);
+    assert!(matches!(interface, Interface::WifiPhy(_)));
+    if let Interface::WifiPhy(wifi) = interface {
+        let config = wifi.wifi.expect("WIFI config missing");
+        assert_eq!(config.ssid, "test-wifi");
+        assert_eq!(config.signal_dbm, Some(-55));
+        assert_eq!(config.signal_percent, Some(90));
+    }
+}
+
