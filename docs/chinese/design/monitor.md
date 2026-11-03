@@ -417,7 +417,7 @@ wifi 门控决定是否联系插件；IP 部分由链路事件驱动。
 
 当内核 socket 缓冲区溢出时（例如恢复后或驱动复位时的载波状态突变），
 netlink 组播消息可能丢失。因此监视器会定期使用完整网络状态查询
-（nispor）与内核进行对账，该查询也携带 wifi SSID。
+与内核进行对账，该查询也携带 wifi SSID。
 
 ### 节奏
 
@@ -477,16 +477,16 @@ WIFI 配置再次发送给插件。
 
 实时关联通知在其 IE 中携带 SSID，`parse_link_msg()` 会提取它。初始与
 resume 的 RTM_GETLINK 转储不携带关联 IE，因此它们的 up 事件以
-`ssid = None` 到达事件 worker；事件 worker 随后轮询 nispor
+`ssid = None` 到达事件 worker；事件 worker 随后重复网络状态查询
 （10 次 × 500 毫秒），并回退到 wifi 插件的实时（shuli）状态
-（`event_worker.rs:185-243`），因为某些驱动不会及时通过 nispor 发布
+（`event_worker.rs:185-243`），因为某些驱动不会及时通过该查询发布
 关联 SSID（提交 `efe82fc` "dhcp: query wifi plugin when waiting for
 SSID" 与 `4bfb8be` "monitor: avoid duplicate up reapplies and spurious
 DHCP restarts"）。
 
-`reconcile()` 避免了该盲区：它查询完整网络状态（nispor），因此一旦
+`reconcile()` 避免了该盲区：它查询完整网络状态（含 SSID），因此一旦
 内核发布 SSID，丢失的关联会连同其 SSID 一起被恢复。如果查询仍然没有
-SSID，事件 worker 的 nispor 重试与插件回退照常生效；对账本身从不查询
+SSID，事件 worker 的查询重试与插件回退照常生效；对账本身从不查询
 插件。
 
 发生在两次对账之间并且已经恢复的快速 down/up 抖动仍可能被漏掉。
@@ -512,7 +512,7 @@ SSID，事件 worker 的 nispor 重试与插件回退照常生效；对账本身
 | `should_start_netlink()` | 需要 `started` | 同上 |
 | 初始转储收集器 | `notify()` 缓冲为一个批次 | 同上 |
 | udev 门控 | 启动转储 + 对账跳过没有 udev 记录的 NIC | 同上 |
-| `reconcile()` + 间隔常量 | 新增；完整 nispor 状态查询（含 SSID） | 同上 |
+| `reconcile()` + 间隔常量 | 新增；完整网络状态查询（含 SSID） | 同上 |
 | `pause()` 保留延迟队列 | 被去抖的 down 事件在 apply 后仍存活 | 同上 |
 | `NipartMonitorManager::start()` | 新增 | `src/daemon/monitor/monitor_manager.rs` |
 | `NipartManagerCmd::LinkEvents { events, boot }` | 新增 | `src/daemon/daemon.rs` |
