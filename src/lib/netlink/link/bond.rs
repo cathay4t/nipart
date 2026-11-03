@@ -449,17 +449,17 @@ pub(crate) async fn bond_link_builder(
     if let Some(v) = opts.arp_ip_target.as_deref() {
         let mut addresses = Vec::new();
         for address in v.split(',') {
-            addresses.push(
-                address.parse::<std::net::Ipv4Addr>().map_err(|_| {
+            addresses.push(address.parse::<std::net::Ipv4Addr>().map_err(
+                |_| {
                     crate::NipartError::new(
                         crate::ErrorKind::InvalidArgument,
                         format!(
-                            "Invalid bond `arp_ip_target` property, should \
-                             be IPv4 addresses separated by ',', but got {v}"
+                            "Invalid bond `arp_ip_target` property, should be \
+                             IPv4 addresses separated by ',', but got {v}"
                         ),
                     )
-                })?,
-            );
+                },
+            )?);
         }
         builder = builder.arp_ip_target(addresses);
     }
@@ -487,7 +487,7 @@ pub(crate) async fn bond_link_builder(
     if let Some(v) = opts.num_unsol_na.or(opts.num_grat_arp) {
         builder = builder.num_peer_notif(v);
     }
-    if let Some(v) = opts.all_ports_active.clone() {
+    if let Some(v) = opts.all_ports_active {
         builder = builder.all_ports_active(v.into());
     }
     if let Some(v) = opts.min_links {
@@ -517,8 +517,8 @@ pub(crate) async fn bond_link_builder(
             crate::NipartError::new(
                 crate::ErrorKind::InvalidArgument,
                 format!(
-                    "Invalid MAC address length for bond \
-                     ad_actor_system {v}, should be like 02:00:00:00:00:01"
+                    "Invalid MAC address length for bond ad_actor_system {v}, \
+                     should be like 02:00:00:00:00:01"
                 ),
             )
         })?;
@@ -571,9 +571,20 @@ pub(crate) async fn bond_mode_change_messages(
     if let Some(ports) = cur_iface.bond.as_ref().and_then(|b| b.ports.as_ref())
     {
         for port in ports {
+            let index =
+                super::get_iface_index(handle, port.name.as_str()).await?;
+            // The kernel cannot detach a port while applying a state flag in
+            // the same message, so change the state separately.
+            ret.push(
+                rtnetlink::LinkUnspec::new_with_index(index).down().build(),
+            );
             ret.push(
                 rtnetlink::LinkUnspec::new_with_name(port.name.as_str())
                     .nocontroller()
+                    .build(),
+            );
+            ret.push(
+                rtnetlink::LinkUnspec::new_with_name(port.name.as_str())
                     .up()
                     .build(),
             );
@@ -592,9 +603,18 @@ pub(crate) async fn bond_mode_change_messages(
     {
         for port in ports {
             if existing_iface_names.contains(port.name.as_str()) {
+                let index =
+                    super::get_iface_index(handle, port.name.as_str()).await?;
+                ret.push(
+                    rtnetlink::LinkUnspec::new_with_index(index).down().build(),
+                );
                 ret.push(
                     rtnetlink::LinkUnspec::new_with_name(port.name.as_str())
                         .controller(bond_index)
+                        .build(),
+                );
+                ret.push(
+                    rtnetlink::LinkUnspec::new_with_name(port.name.as_str())
                         .up()
                         .build(),
                 );
