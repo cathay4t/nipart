@@ -841,8 +841,8 @@ impl NipartMonitorWorker {
     ///
     /// Netlink multicast messages can be dropped when the kernel socket
     /// buffer overflows; this periodic query recovers the final state.  It
-    /// uses the full nispor query (not the RTM_GETLINK dump) so a missed
-    /// wifi association is recovered together with its SSID.
+    /// uses the full network state query (not the RTM_GETLINK dump) so a
+    /// missed wifi association is recovered together with its SSID.
     async fn reconcile(&mut self) -> Result<(), NipartError> {
         if !self.started
             || self.manual_pause_count > 0
