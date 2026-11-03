@@ -58,11 +58,10 @@ version = "0.3.0"
 
 [workspace.dependencies.rtnetlink]
 git = "https://github.com/rust-netlink/rtnetlink"
-rev = "47e910d74fad2d00a8b4221db11d53b1287145dd"
 
 [workspace.dependencies.unicode-width]
 version = "0.2.2"
 
 [patch.crates-io]
-rtnetlink = { git = "https://github.com/rust-netlink/rtnetlink", rev = "47e910d74fad2d00a8b4221db11d53b1287145dd" }
-netlink-packet-route = { git = "https://github.com/rust-netlink/netlink-packet-route", rev = "dc30bfa245fcb1f1e543fcdd5aa981c1427f8cb0" }
+rtnetlink = { git = "https://github.com/rust-netlink/rtnetlink" }
+netlink-packet-route = { git = "https://github.com/rust-netlink/netlink-packet-route" }
