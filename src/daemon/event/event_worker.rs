@@ -254,12 +254,14 @@ impl NipartEventWorker {
                         cur_state.ifaces.kernel_ifaces.get(&event.iface_name);
                 }
                 if event.ssid.is_none() {
-                    // nispor still cannot see the SSID although the wifi plugin
-                    // may already know from its shuli connection state machine
+                    // The link query still cannot see the SSID although the
+                    // wifi plugin may already know from its shuli connection
+                    // state machine
                     // (e.g. the kernel has not yet published the authorized
                     // station).  Query the plugins and merge their live state.
                     log::trace!(
-                        "{}: SSID not visible via nispor, querying wifi plugin",
+                        "{}: SSID not visible via netlink, querying wifi \
+                         plugin",
                         event.iface_name
                     );
                     let plugin_states = commander
