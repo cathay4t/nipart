@@ -67,7 +67,7 @@ async fn main() -> Result<(), CliError> {
         0 => (vec!["nipart"], log::LevelFilter::Info),
         1 => (vec!["nipart"], log::LevelFilter::Debug),
         2 => (vec!["nipart"], log::LevelFilter::Trace),
-        3 => (vec!["nipart", "nispor"], log::LevelFilter::Trace),
+        3 => (vec!["nipart"], log::LevelFilter::Trace),
         _ => (vec![""], log::LevelFilter::Trace),
     };
 
