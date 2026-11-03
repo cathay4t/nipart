@@ -26,10 +26,8 @@ pub(crate) fn parse_vrf(data: &InfoData) -> Option<VrfConfig> {
 pub(crate) fn vrf_link_builder(
     iface: &crate::VrfInterface,
     cur_iface: Option<&crate::VrfInterface>,
-) -> Result<
-    rtnetlink::LinkMessageBuilder<rtnetlink::LinkVrf>,
-    crate::NipartError,
-> {
+) -> Result<rtnetlink::LinkMessageBuilder<rtnetlink::LinkVrf>, crate::NipartError>
+{
     use rtnetlink::packet_route::link::InfoKind;
 
     let mut builder =
