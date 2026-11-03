@@ -568,7 +568,7 @@ impl NipartInterface for Interface {
 
 impl From<BaseInterface> for Interface {
     fn from(mut base_iface: BaseInterface) -> Self {
-        // The kernel and nispor report veth NICs as `Veth` while nipart
+        // The kernel reports veth NICs as `Veth` while nipart
         // treats them as ethernet (see
         // `Interfaces::unify_veth_and_ethernet()`): normalize before
         // matching, otherwise this conversion panics for veth NICs.
