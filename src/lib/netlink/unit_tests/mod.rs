@@ -5,6 +5,7 @@ pub(super) mod fixtures;
 pub(super) mod link_apply;
 pub(super) mod link_apply_bond;
 pub(super) mod link_apply_bridge;
+pub(super) mod link_apply_vlan;
 pub(super) mod link_apply_vrf;
 pub(super) mod link_apply_wireguard;
 pub(super) mod link_base;
