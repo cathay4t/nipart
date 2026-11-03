@@ -1,23 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod apply;
-mod base_iface;
-mod bond;
 mod dhcp;
-mod ethernet;
-mod iface;
 mod inter_ifaces;
 mod ip;
-mod linux_bridge;
-mod linux_bridge_vlan;
 mod query;
 mod resolv_conf;
 mod route;
 mod route_rule;
-mod vlan;
-mod vxlan;
 mod watcher;
-mod wireguard;
 
 use std::collections::HashSet;
 
