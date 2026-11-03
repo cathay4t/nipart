@@ -28,7 +28,7 @@ flowchart TB
 
     %% ============ 内核 ============
     subgraph KRN["内核 · 系统层"]
-        N["nispor · rtnetlink · nl80211<br/>netlink 查询 / 修改 / WiFi"]
+        N["rtnetlink · ethtool · nl-wireguard · nl80211<br/>netlink 查询 / 修改 / WiFi"]
         KS["Linux 内核网络子系统<br/>ip · route · bond · bridge · vlan · vxlan"]
     end
 
