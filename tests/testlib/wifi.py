@@ -275,14 +275,22 @@ def hostapd_is_up():
     return "Test-WIFI" in output
 
 
-def hostapd_is_up_open():
-    output = exec_cmd(f"iw {WIFI_TEST_NIC} scan".split(), check=False)[1]
-    return TEST_WIFI_SSID_OPEN in output
+def hostapd_is_up_open(net_ns=TEST_NET_NS):
+    # Check the AP side: shuli may be scanning on the client interface,
+    # making a client-side scan fail with -EBUSY.
+    output = exec_cmd(
+        f"ip netns exec {net_ns} iw dev {DHCP_SRV_NIC} info".split(),
+        check=False,
+    )[1]
+    return "type AP" in output and TEST_WIFI_SSID_OPEN in output
 
 
-def hostapd_is_up_2():
-    output = exec_cmd(f"iw {WIFI_TEST_NIC} scan".split(), check=False)[1]
-    return TEST_WIFI_SSID_2 in output
+def hostapd_is_up_2(net_ns=TEST_NET_NS):
+    output = exec_cmd(
+        f"ip netns exec {net_ns} iw dev {AP2_NIC} info".split(),
+        check=False,
+    )[1]
+    return "type AP" in output and TEST_WIFI_SSID_2 in output
 
 
 def start_hostapd_2():
@@ -318,7 +326,7 @@ def start_hostapd_open(net_ns):
         f"hostapd -B -d {HOSTAPD_CONF_PATH} -P {HOSTAPD_PID_PATH}".split(),
     )
 
-    assert retry_till_true_or_timeout(2, hostapd_is_up_open)
+    assert retry_till_true_or_timeout(2, lambda: hostapd_is_up_open(net_ns))
 
     start_dhcp_server(net_ns)
 
