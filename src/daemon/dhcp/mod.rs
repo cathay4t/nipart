@@ -214,8 +214,8 @@ pub(crate) async fn wait_wifi_ssid(
                 .await?;
         if wifi_state_has_ssid(&state, iface_name, ssid) || {
             // mac80211_hwsim and some drivers do not expose the
-            // association SSID through nispor in time, while the wifi
-            // plugin's shuli client already knows it is connected.
+            // association SSID through the link query in time, while the
+            // wifi plugin's shuli client already knows it is connected.
             let plugin_states = plugin_manager
                 .query_network_state(NipartQueryOption::running(), &state)
                 .await?;
