@@ -28,7 +28,7 @@ flowchart TB
 
     %% ============ Kernel ============
     subgraph KRN["Kernel · System Layer"]
-        N["nispor · rtnetlink · nl80211<br/>netlink query / modify / WiFi"]
+        N["rtnetlink · ethtool · nl-wireguard · nl80211<br/>netlink query / modify / WiFi"]
         KS["Linux kernel network subsystem<br/>ip · route · bond · bridge · vlan · vxlan"]
     end
 
