@@ -590,6 +590,12 @@ pub(crate) async fn bond_mode_change_messages(
             );
         }
     }
+    // The kernel only allows changing the mode while the bond is down.
+    ret.push(
+        rtnetlink::LinkUnspec::new_with_index(bond_index)
+            .down()
+            .build(),
+    );
     ret.push(
         rtnetlink::LinkBond::new(bond_name)
             .mode(des_mode.into())
