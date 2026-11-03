@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use nipart::{
     ErrorKind, NipartError, WifiAuthType, WifiAuthTypeDetailed, WifiConfig,
-    WifiScanResult,
+    WifiScanResult, get_wifi_ifaces,
 };
 use rtnetlink::packet_core::Parseable;
 use shuli::BssInfo;
@@ -94,25 +94,17 @@ async fn _wifi_scan(
 async fn wifi_ifaces(
     iface_name: Option<&str>,
 ) -> Result<(Vec<String>, Vec<String>), NipartError> {
-    let mut filter = nispor::NetStateFilter::minimum();
-    filter.iface = Some(nispor::NetStateIfaceFilter::minimum());
-    let np_state =
-        nispor::NetState::retrieve_with_filter_async(&filter).await?;
-
     let mut wifi_phys: Vec<String> = Vec::new();
     let mut connected_ssids: Vec<String> = Vec::new();
-    for np_iface in np_state.ifaces.values() {
-        if np_iface.iface_type != nispor::IfaceType::Wifi {
-            continue;
-        }
-        wifi_phys.push(np_iface.name.clone());
+    for info in get_wifi_ifaces().await {
+        wifi_phys.push(info.name);
         // Remember the SSID we are currently connected to, so a hidden
         // network we are attached to can still be probed and reported.
-        if let Some(ssid) = np_iface.wifi.as_ref().and_then(|w| w.ssid.clone())
-            && !ssid.is_empty()
-            && !connected_ssids.contains(&ssid)
+        if let Some(config) = info.config
+            && !config.ssid.is_empty()
+            && !connected_ssids.contains(&config.ssid)
         {
-            connected_ssids.push(ssid);
+            connected_ssids.push(config.ssid);
         }
     }
 
