@@ -364,9 +364,9 @@ pub(crate) fn state_from_nl80211(
     state: State,
     flags: LinkFlags,
 ) -> InterfaceState {
-    // nispor::IfaceState::Up means operational up. A link with the Running
-    // flag is also considered operationally up, and `state: up` in nipart
-    // also means administratively up.
+    // An operationally up link reports `State::Up`. A link with the
+    // Running flag is also considered operationally up, and `state: up` in
+    // nipart also means administratively up.
     // https://www.kernel.org/doc/Documentation/networking/operstates.txt
     if state == State::Up
         || flags.contains(LinkFlags::Running)
