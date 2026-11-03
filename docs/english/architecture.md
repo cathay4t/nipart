@@ -17,4 +17,5 @@ The overall architecture of Nipart consists of the following layers:
   network state directly; it is the shared engine for both daemon and
   daemonless modes.
 * **Kernel layer**: interacts with the Linux kernel network subsystem via
-  nispor (query), rtnetlink / mozim (modify), and nl80211 (WiFi).
+  rtnetlink (query and modify), ethtool (link modes), nl-wireguard
+  (WireGuard), and nl80211 (WiFi).
