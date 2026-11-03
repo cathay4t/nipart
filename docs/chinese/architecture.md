@@ -14,5 +14,5 @@ Nipart 的整体架构由以下层级组成：
   支持 WiFi、Open vSwitch 及第三方扩展。
 * **内核引擎**：no_daemon 模块负责直接应用与查询内核网络状态，是守护
   进程模式和无守护进程模式共用的内核交互引擎。
-* **内核层**：通过 nispor (查询)、rtnetlink / mozim (修改)、
-  nl80211 (WiFi) 与 Linux 内核网络子系统交互。
+* **内核层**：通过 rtnetlink (查询与修改)、ethtool (链路模式)、
+  nl-wireguard (WireGuard)、nl80211 (WiFi) 与 Linux 内核网络子系统交互。
