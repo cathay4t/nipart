@@ -14,8 +14,19 @@ use wl_nl80211::{
 
 use crate::{WifiConfig, netlink::mac::format_mac_address};
 
-pub(crate) async fn get_wifi_infos() -> HashMap<String, Option<WifiConfig>> {
-    let mut ret = HashMap::new();
+/// A WiFi interface discovered through nl80211.
+#[derive(Debug, Clone)]
+pub struct WifiIfaceInfo {
+    pub name: String,
+    pub if_index: u32,
+    /// Current connection state, or `None` when the interface is not
+    /// associated with an SSID.
+    pub config: Option<WifiConfig>,
+}
+
+/// Enumerate every WiFi interface visible through nl80211.
+pub async fn get_wifi_ifaces() -> Vec<WifiIfaceInfo> {
+    let mut ret = Vec::new();
     let (connection, handle, _) = match wl_nl80211::new_connection() {
         Ok(value) => value,
         Err(error) => {
@@ -26,6 +37,7 @@ pub(crate) async fn get_wifi_infos() -> HashMap<String, Option<WifiConfig>> {
     tokio::spawn(connection);
 
     let mut wifi_ifaces: HashMap<String, WifiConfig> = HashMap::new();
+    let mut iface_indexes: HashMap<String, u32> = HashMap::new();
     let mut station_ifaces: Vec<(String, u32)> = Vec::new();
     let mut interface_stream =
         handle.interface().get(Vec::new()).execute().await;
@@ -77,6 +89,9 @@ pub(crate) async fn get_wifi_infos() -> HashMap<String, Option<WifiConfig>> {
             && let Some(iface_index) = iface_index
         {
             station_ifaces.push((iface_name.clone(), iface_index));
+        }
+        if let Some(iface_index) = iface_index {
+            iface_indexes.insert(iface_name.clone(), iface_index);
         }
         wifi_ifaces.insert(iface_name, config);
     }
@@ -184,13 +199,29 @@ pub(crate) async fn get_wifi_infos() -> HashMap<String, Option<WifiConfig>> {
 
     for (iface_name, mut config) in wifi_ifaces {
         config.sanitize_signal();
-        if config.ssid.is_empty() {
-            ret.insert(iface_name, None);
+        let config = if config.ssid.is_empty() {
+            None
         } else {
-            ret.insert(iface_name, Some(config));
-        }
+            Some(config)
+        };
+        ret.push(WifiIfaceInfo {
+            if_index: iface_indexes
+                .get(&iface_name)
+                .copied()
+                .unwrap_or_default(),
+            name: iface_name,
+            config,
+        });
     }
     ret
+}
+
+pub(crate) async fn get_wifi_infos() -> HashMap<String, Option<WifiConfig>> {
+    get_wifi_ifaces()
+        .await
+        .into_iter()
+        .map(|info| (info.name, info.config))
+        .collect()
 }
 
 async fn get_mac_ssid_map(
