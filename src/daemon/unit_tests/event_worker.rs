@@ -752,8 +752,9 @@ fn test_boot_rename_event_skips_stale_ip_purge_entry() {
     // MAC-identified profile renames it to `wlan0`. The auto-connect entry
     // for the link-down event already purges the IP stack, so the standalone
     // purge entry must be skipped: keyed by `wlp194s0` it would survive the
-    // rename, making nispor try to create a non-exist wifi interface
-    // (EOPNOTSUPP) and handing the wifi plugin a stale interface name.
+    // rename, making the netlink apply try to create a non-exist wifi
+    // interface (EOPNOTSUPP) and handing the wifi plugin a stale interface
+    // name.
     let saved_state = gen_renaming_wifi_phy_saved_state();
     let cur_state = gen_renaming_wifi_phy_cur_state();
     let cur_iface = cur_state.ifaces.kernel_ifaces.get("wlp194s0");
@@ -805,8 +806,8 @@ fn test_wifi_phy_down_event_generates_ip_purge_when_not_covered() {
     assert_eq!(removed.base_iface().state, InterfaceState::Absent);
 
     // Stale event: the current kernel interface is not a wifi-phy (e.g. a
-    // wiphy moving back to the root netns while nispor still sees an
-    // Ethernet interface).  A purge must not be generated: merging a
+    // wiphy moving back to the root netns while the link query still sees
+    // an Ethernet interface).  A purge must not be generated: merging a
     // wifi-phy desired state against another interface type is a bug.
     let eth_iface: Interface = rmsd_yaml::from_str(
         r#"---
