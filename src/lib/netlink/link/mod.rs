@@ -140,11 +140,22 @@ pub(crate) async fn get_iface_index_opt(
     iface_name: &str,
 ) -> Result<Option<u32>, NipartError> {
     let mut messages = handle.link().get().match_name(iface_name).execute();
-    Ok(messages
-        .try_next()
-        .await
-        .map_err(|e| map_rtnetlink_error("Failed to query interface index", e))?
-        .map(|message| message.header.index))
+    match messages.try_next().await {
+        Ok(Some(message)) => Ok(Some(message.header.index)),
+        Ok(None) => Ok(None),
+        // A single-link query returns ENODEV when the interface is gone,
+        // which is not an error for the optional lookup.
+        Err(error) if is_errno(&error, nix::errno::Errno::ENODEV) => Ok(None),
+        Err(error) => Err(map_rtnetlink_error(
+            "Failed to query interface index",
+            error,
+        )),
+    }
+}
+
+fn is_errno(error: &rtnetlink::Error, errno: nix::errno::Errno) -> bool {
+    matches!(error, rtnetlink::Error::NetlinkError(e)
+        if e.raw_code() == -(errno as i32))
 }
 
 pub(crate) async fn get_iface_index(
