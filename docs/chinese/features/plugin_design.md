@@ -71,7 +71,7 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
 
 | 方法 | 说明 |
 |------|------|
-| `query_network_state()` | 查询此插件管理的网络状态。接收当前内核状态（通过 nispor 查询）作为参考 |
+| `query_network_state()` | 查询此插件管理的网络状态。接收当前内核状态（通过 netlink 查询）作为参考 |
 | `apply_network_state()` | 将期望的网络状态应用到托管子系统 |
 | `wifi_scan()` | 执行主动 WiFi 扫描并返回发现的网络 |
 | `quit()` | 优雅退出。默认实现调用 `std::process::exit(0)` |
