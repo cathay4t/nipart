@@ -119,8 +119,8 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
     /// Return network state managed by this plugin only.
     /// Optionally, you may send log via `conn::log_debug()` and etc.
     /// The `cur_net_state` is the current kernel network state queried by
-    /// the daemon via nispor. Plugins can use it instead of querying nispor
-    /// themselves.
+    /// the daemon via netlink. Plugins can use it instead of querying the
+    /// kernel themselves.
     /// Default implementation is return no support error.
     ///
     /// This function must never block: it should only read the live
