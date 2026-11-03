@@ -1017,12 +1017,12 @@ fn auto_connect_targets_event_nic(
 /// (`gen_desired_iface_down()` disables both IP stacks). The latter matters
 /// when a saved config renames the NIC at boot: pushing this standalone
 /// purge under the current kernel name would leave a second merged entry
-/// whose name no longer exists after the rename, failing the nispor batch
+/// whose name no longer exists after the rename, failing the netlink batch
 /// with `EOPNOTSUPP` and handing the wifi plugin a non-existent interface.
 ///
 /// `None` is also returned when the current kernel interface exists but is
-/// not a wifi-phy: the event was classified from sysfs while nispor still
-/// sees the old non-WIFI interface (e.g. a wiphy moving back to the root
+/// not a wifi-phy: the event was classified from sysfs while the link query
+/// still sees the old non-WIFI interface (e.g. a wiphy moving back to the root
 /// netns while the nl80211 interface dump lags).  Merging a wifi-phy
 /// desired state against another interface type is a bug, and a stale
 /// event has no IP stack to purge.
