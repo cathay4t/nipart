@@ -130,15 +130,6 @@ impl From<std::net::AddrParseError> for NipartError {
     }
 }
 
-// TODO: Properly handle cases like:
-//  * Permission deny
-//  * Invalid argument
-impl From<nispor::NisporError> for NipartError {
-    fn from(e: nispor::NisporError) -> Self {
-        Self::new(ErrorKind::Bug, format!("{}: {}", e.kind, e.msg))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::ErrorKind;
