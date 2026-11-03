@@ -27,9 +27,13 @@ pub(crate) async fn apply_iface_link_changes(
     cur_iface: Option<&Interface>,
     existing_iface_names: &HashSet<String>,
 ) -> Result<(), NipartError> {
-    let mut messages =
-        prepare_link_messages(handle, des_iface, cur_iface, existing_iface_names)
-            .await?;
+    let mut messages = prepare_link_messages(
+        handle,
+        des_iface,
+        cur_iface,
+        existing_iface_names,
+    )
+    .await?;
 
     if cur_iface.is_some() {
         for message in messages {
@@ -38,17 +42,12 @@ pub(crate) async fn apply_iface_link_changes(
                 des_iface.name(),
                 des_iface.iface_type()
             );
-            handle
-                .link()
-                .change(message)
-                .execute()
-                .await
-                .map_err(|e| {
-                    map_rtnetlink_error(
-                        &format!("Failed to change interface {}", des_iface.name()),
-                        e,
-                    )
-                })?;
+            handle.link().change(message).execute().await.map_err(|e| {
+                map_rtnetlink_error(
+                    &format!("Failed to change interface {}", des_iface.name()),
+                    e,
+                )
+            })?;
         }
     } else {
         if !messages.is_empty() {
@@ -58,17 +57,12 @@ pub(crate) async fn apply_iface_link_changes(
                 des_iface.name(),
                 des_iface.iface_type()
             );
-            handle
-                .link()
-                .add(message)
-                .execute()
-                .await
-                .map_err(|e| {
-                    map_rtnetlink_error(
-                        &format!("Failed to create interface {}", des_iface.name()),
-                        e,
-                    )
-                })?;
+            handle.link().add(message).execute().await.map_err(|e| {
+                map_rtnetlink_error(
+                    &format!("Failed to create interface {}", des_iface.name()),
+                    e,
+                )
+            })?;
         }
         for message in messages {
             log::trace!(
@@ -76,17 +70,12 @@ pub(crate) async fn apply_iface_link_changes(
                 des_iface.name(),
                 des_iface.iface_type()
             );
-            handle
-                .link()
-                .change(message)
-                .execute()
-                .await
-                .map_err(|e| {
-                    map_rtnetlink_error(
-                        &format!("Failed to change interface {}", des_iface.name()),
-                        e,
-                    )
-                })?;
+            handle.link().change(message).execute().await.map_err(|e| {
+                map_rtnetlink_error(
+                    &format!("Failed to change interface {}", des_iface.name()),
+                    e,
+                )
+            })?;
         }
     }
 
@@ -114,10 +103,11 @@ async fn prepare_link_messages(
     match des_iface {
         Interface::LinuxBridge(bridge_iface) => {
             let cur_bridge = cur_iface.and_then(|i| match i {
-                Interface::LinuxBridge(cur) => Some(cur),
+                Interface::LinuxBridge(cur) => Some(cur.as_ref()),
                 _ => None,
             });
-            let builder = bridge::bridge_link_builder(bridge_iface, cur_bridge)?;
+            let builder =
+                bridge::bridge_link_builder(bridge_iface, cur_bridge)?;
             apply_base_link_changes(handle, builder, des_iface, cur_iface).await
         }
         Interface::Ethernet(eth_iface) => {
@@ -136,8 +126,8 @@ async fn prepare_link_messages(
                         return Err(NipartError::new(
                             ErrorKind::InvalidArgument,
                             format!(
-                                "Cannot change veth interface {} peer from \
-                                 {} to {} without removing a veth first",
+                                "Cannot change veth interface {} peer from {} \
+                                 to {} without removing a veth first",
                                 eth_iface.base.name, cur_peer, veth.peer
                             ),
                         ));
@@ -183,7 +173,7 @@ async fn prepare_link_messages(
         }
         Interface::Bond(bond_iface) => {
             let cur_bond = cur_iface.and_then(|i| match i {
-                Interface::Bond(cur) => Some(cur),
+                Interface::Bond(cur) => Some(cur.as_ref()),
                 _ => None,
             });
             let mut messages = Vec::new();
@@ -198,12 +188,8 @@ async fn prepare_link_messages(
                     .await?,
                 );
             }
-            let builder = bond::bond_link_builder(
-                handle,
-                bond_iface,
-                cur_bond,
-            )
-            .await?;
+            let builder =
+                bond::bond_link_builder(handle, bond_iface, cur_bond).await?;
             messages.extend(
                 apply_base_link_changes(handle, builder, des_iface, cur_iface)
                     .await?,
@@ -212,7 +198,7 @@ async fn prepare_link_messages(
         }
         Interface::Vlan(vlan_iface) => {
             let cur_vlan = cur_iface.and_then(|i| match i {
-                Interface::Vlan(cur) => Some(cur),
+                Interface::Vlan(cur) => Some(cur.as_ref()),
                 _ => None,
             });
             let builder =
@@ -221,7 +207,7 @@ async fn prepare_link_messages(
         }
         Interface::Vrf(vrf_iface) => {
             let cur_vrf = cur_iface.and_then(|i| match i {
-                Interface::Vrf(cur) => Some(cur),
+                Interface::Vrf(cur) => Some(cur.as_ref()),
                 _ => None,
             });
             let builder = vrf::vrf_link_builder(vrf_iface, cur_vrf)?;
@@ -229,7 +215,7 @@ async fn prepare_link_messages(
         }
         Interface::Vxlan(vxlan_iface) => {
             let cur_vxlan = cur_iface.and_then(|i| match i {
-                Interface::Vxlan(cur) => Some(cur),
+                Interface::Vxlan(cur) => Some(cur.as_ref()),
                 _ => None,
             });
             if cur_iface.is_some() {
@@ -241,11 +227,9 @@ async fn prepare_link_messages(
                 )
                 .await?;
                 messages.push(
-                    vxlan::vxlan_link_builder(
-                        handle, vxlan_iface, cur_vxlan,
-                    )
-                    .await?
-                    .build(),
+                    vxlan::vxlan_link_builder(handle, vxlan_iface, cur_vxlan)
+                        .await?
+                        .build(),
                 );
                 Ok(messages)
             } else {
@@ -323,21 +307,19 @@ async fn apply_base_link_changes<T>(
             })
             .unwrap_or(true);
         if should_set {
-            builder =
-                builder.address(crate::netlink::mac::parse_mac_address(des_mac)?);
+            builder = builder
+                .address(crate::netlink::mac::parse_mac_address(des_mac)?);
         }
     }
 
     if let Some(des_controller) = des_base.controller.as_ref() {
-        let cur_controller =
-            cur_base.and_then(|cur| cur.controller.as_ref());
+        let cur_controller = cur_base.and_then(|cur| cur.controller.as_ref());
         if cur_controller != Some(des_controller) {
             if des_controller.is_empty() {
                 builder = builder.nocontroller();
             } else {
-                builder = builder.controller(
-                    get_iface_index(handle, des_controller).await?,
-                );
+                builder = builder
+                    .controller(get_iface_index(handle, des_controller).await?);
             }
         }
     }
@@ -379,12 +361,7 @@ fn need_state_down_before_apply(
     {
         return true;
     }
-    if des_base.controller.is_some()
-        && des_base.controller != cur_base.controller
-    {
-        return true;
-    }
-    false
+    des_base.controller.is_some() && des_base.controller != cur_base.controller
 }
 
 async fn apply_alt_names(
@@ -458,13 +435,14 @@ async fn apply_bridge_vlans(
         return Ok(());
     };
     let cur_bridge = cur_iface.and_then(|i| match i {
-        Interface::LinuxBridge(cur) => Some(cur),
+        Interface::LinuxBridge(cur) => Some(cur.as_ref()),
         _ => None,
     });
     let cur_vlan = cur_bridge
         .and_then(|cur| cur.bridge.as_ref())
         .and_then(|bridge| bridge.vlan.as_ref());
-    let index = get_iface_index(handle, bridge_iface.base.name.as_str()).await?;
+    let index =
+        get_iface_index(handle, bridge_iface.base.name.as_str()).await?;
     let entries = bridge::gen_bridge_vlan_entries(des_vlan, cur_vlan);
     if let Some(message) =
         bridge::bridge_vlan_del_message(index, true, &entries)
@@ -481,12 +459,9 @@ async fn apply_bridge_vlans(
     if let Some(message) =
         bridge::bridge_vlan_add_message(index, true, &entries)
     {
-        handle
-            .link()
-            .set(message)
-            .execute()
-            .await
-            .map_err(|e| map_rtnetlink_error("Failed to set bridge VLANs", e))?;
+        handle.link().set(message).execute().await.map_err(|e| {
+            map_rtnetlink_error("Failed to set bridge VLANs", e)
+        })?;
     }
     Ok(())
 }
@@ -511,8 +486,7 @@ pub(crate) async fn apply_bond_port_configs(
     handle: &Handle,
     iface: &BondInterface,
 ) -> Result<(), NipartError> {
-    let Some(ports) =
-        iface.bond.as_ref().and_then(|bond| bond.ports.as_ref())
+    let Some(ports) = iface.bond.as_ref().and_then(|bond| bond.ports.as_ref())
     else {
         return Ok(());
     };
@@ -545,34 +519,27 @@ pub(crate) async fn apply_bridge_port_configs(
     iface: &LinuxBridgeInterface,
     cur_iface: Option<&LinuxBridgeInterface>,
 ) -> Result<(), NipartError> {
-    let Some(ports) =
-        iface.bridge.as_ref().and_then(|bridge| bridge.ports.as_ref())
+    let Some(ports) = iface
+        .bridge
+        .as_ref()
+        .and_then(|bridge| bridge.ports.as_ref())
     else {
         return Ok(());
     };
     for port in ports.iter().filter(|port| !port.is_name_only()) {
         let index = get_iface_index(handle, port.name.as_str()).await?;
         let message = bridge::bridge_port_message(index, port);
-        handle
-            .link()
-            .change(message)
-            .execute()
-            .await
-            .map_err(|e| {
-                map_rtnetlink_error(
-                    &format!(
-                        "Failed to configure linux bridge port {}",
-                        port.name
-                    ),
-                    e,
-                )
-            })?;
+        handle.link().change(message).execute().await.map_err(|e| {
+            map_rtnetlink_error(
+                &format!("Failed to configure linux bridge port {}", port.name),
+                e,
+            )
+        })?;
         if let Some(des_vlan) = port.vlan.as_ref() {
             let cur_vlan = cur_iface
                 .and_then(|cur| cur.get_port_conf(port.name.as_str()))
                 .and_then(|cur_port| cur_port.vlan.as_ref());
-            let entries =
-                bridge::gen_bridge_vlan_entries(des_vlan, cur_vlan);
+            let entries = bridge::gen_bridge_vlan_entries(des_vlan, cur_vlan);
             if let Some(message) =
                 bridge::bridge_vlan_del_message(index, false, &entries)
             {
@@ -594,20 +561,15 @@ pub(crate) async fn apply_bridge_port_configs(
             if let Some(message) =
                 bridge::bridge_vlan_add_message(index, false, &entries)
             {
-                handle
-                    .link()
-                    .set(message)
-                    .execute()
-                    .await
-                    .map_err(|e| {
-                        map_rtnetlink_error(
-                            &format!(
-                                "Failed to set bridge port VLANs of {}",
-                                port.name
-                            ),
-                            e,
-                        )
-                    })?;
+                handle.link().set(message).execute().await.map_err(|e| {
+                    map_rtnetlink_error(
+                        &format!(
+                            "Failed to set bridge port VLANs of {}",
+                            port.name
+                        ),
+                        e,
+                    )
+                })?;
             }
         }
     }
