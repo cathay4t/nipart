@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{
-    iface::{apply_iface_link_changes, nipart_iface_type_to_nispor},
-    ip::apply_iface_ip_changes,
-};
+use std::collections::HashSet;
+
+use super::ip::apply_iface_ip_changes;
 use crate::{
     ErrorKind, Interface, MergedInterface, MergedInterfaces, NipartError,
     NipartInterface, NipartNoDaemon,
+    netlink::{
+        link::apply::{
+            apply_bond_port_configs, apply_bridge_port_configs,
+            apply_iface_link_changes, delete_iface,
+        },
+        new_connection,
+    },
 };
 
 pub(crate) async fn apply_ifaces(
@@ -34,7 +40,7 @@ pub(crate) async fn apply_ifaces(
 async fn delete_ifaces_before_apply(
     merged_ifaces: &mut MergedInterfaces,
 ) -> Result<(), NipartError> {
-    let mut np_ifaces: Vec<nispor::IfaceConf> = Vec::new();
+    let mut to_delete: Vec<String> = Vec::new();
 
     // Some changed interfaces might need delete first
     for merged_iface in merged_ifaces.kernel_ifaces.values_mut().filter(|m| {
@@ -50,12 +56,7 @@ async fn delete_ifaces_before_apply(
                 for_apply.name(),
                 for_apply.iface_type()
             );
-            let mut np_iface = nispor::IfaceConf::default();
-            np_iface.name = for_apply.kernel_iface_name().to_string();
-            np_iface.iface_type =
-                Some(nipart_iface_type_to_nispor(for_apply.iface_type()));
-            np_iface.state = nispor::IfaceState::Absent;
-            np_ifaces.push(np_iface);
+            to_delete.push(for_apply.kernel_iface_name().to_string());
             merged_iface.current = None;
             merged_iface.merged = for_save.clone();
             merged_iface.for_apply = Some(for_save.clone());
@@ -77,37 +78,26 @@ async fn delete_ifaces_before_apply(
                 ),
             ));
         }
-        let mut np_iface = nispor::IfaceConf::default();
-        np_iface.name = for_apply.kernel_iface_name().to_string();
-        np_iface.iface_type =
-            Some(nipart_iface_type_to_nispor(for_apply.iface_type()));
-        np_iface.state = nispor::IfaceState::Absent;
-        np_ifaces.push(np_iface);
+        to_delete.push(for_apply.kernel_iface_name().to_string());
     }
-    if !np_ifaces.is_empty() {
-        let mut net_conf = nispor::NetConf::default();
-        net_conf.ifaces = Some(np_ifaces);
 
-        log::debug!(
-            "Pending nispor changes {}",
-            serde_json::to_string(&net_conf).unwrap_or_default()
-        );
+    if to_delete.is_empty() {
+        return Ok(());
+    }
 
-        if let Err(e) = net_conf.apply_async().await {
-            return Err(NipartError::new(
-                ErrorKind::Bug,
-                format!("Failed to delete interfaces: {e}"),
-            ));
-        }
+    let handle = new_connection().await?;
+    for iface_name in to_delete {
+        log::debug!("Deleting interface {iface_name}");
+        delete_iface(&handle, &iface_name).await?;
     }
     Ok(())
 }
 
 /// Rename the interfaces whose desired `kernel-iface-name` differs from
 /// their current kernel name (e.g. a `identifier: mac-address` config with
-/// an explicit `kernel-iface-name` renames the matched interface).  nispor
-/// cannot rename an existing interface, so the rename must be done before
-/// the nispor batch below (which looks the interface up by its new name).
+/// an explicit `kernel-iface-name` renames the matched interface).  The
+/// rename must be done before the link batch below (which looks the
+/// interface up by its new name).
 ///
 /// This order is also required when the desired `alt-names` lists the
 /// current kernel name: the kernel rejects an alt-name equal to the
@@ -141,13 +131,7 @@ async fn rename_ifaces_before_apply(
     if renames.is_empty() {
         return Ok(());
     }
-    let (conn, handle, _) = rtnetlink::new_connection().map_err(|e| {
-        NipartError::new(
-            ErrorKind::Bug,
-            format!("Failed to create rtnetlink connection: {e}"),
-        )
-    })?;
-    tokio::spawn(conn);
+    let handle = new_connection().await?;
     for (iface_index, cur_name, new_name) in renames {
         log::info!("Renaming interface {cur_name} to {new_name}");
         let msg = rtnetlink::LinkUnspec::new_with_index(iface_index)
@@ -169,8 +153,6 @@ async fn rename_ifaces_before_apply(
 async fn apply_ifaces_link_changes(
     merged_ifaces: &MergedInterfaces,
 ) -> Result<(), NipartError> {
-    let mut np_ifaces: Vec<nispor::IfaceConf> = Vec::new();
-
     let mut sorted_changed_mergd_ifaces: Vec<MergedInterface> = merged_ifaces
         .iter()
         .filter_map(|m| {
@@ -186,10 +168,17 @@ async fn apply_ifaces_link_changes(
         (!m.is_absent(), m.up_priority.unwrap_or_default())
     });
 
+    let existing_iface_names: HashSet<String> = merged_ifaces
+        .kernel_ifaces
+        .iter()
+        .filter(|(_, merged_iface)| merged_iface.current.is_some())
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    let handle = new_connection().await?;
+
     for merged_iface in sorted_changed_mergd_ifaces.as_slice() {
-        let apply_iface = if let Some(i) = merged_iface.for_apply.as_ref() {
-            i
-        } else {
+        let Some(apply_iface) = merged_iface.for_apply.as_ref() else {
             continue;
         };
 
@@ -203,13 +192,17 @@ async fn apply_ifaces_link_changes(
             continue;
         }
 
-        if !apply_iface.iface_type().is_userspace() {
-            for np_iface in
-                apply_iface_link_changes(merged_iface, merged_ifaces)?
-            {
-                np_ifaces.push(np_iface);
-            }
+        if apply_iface.iface_type().is_userspace() {
+            continue;
         }
+
+        apply_iface_link_changes(
+            &handle,
+            apply_iface,
+            merged_iface.current.as_ref(),
+            &existing_iface_names,
+        )
+        .await?;
     }
 
     // When port config changed in controller, the `apply_ifaces` above
@@ -223,46 +216,28 @@ async fn apply_ifaces_link_changes(
                 && merged_iface.merged.is_up()
         })
     {
-        let apply_iface = if let Some(i) = merged_iface.for_apply.as_ref() {
-            i
-        } else {
+        let Some(apply_iface) = merged_iface.for_apply.as_ref() else {
             continue;
         };
         match apply_iface {
             Interface::Bond(bond_iface) => {
-                np_ifaces.extend(bond_iface.apply_bond_port_configs());
+                apply_bond_port_configs(&handle, bond_iface).await?;
             }
             Interface::LinuxBridge(br_iface) => {
-                np_ifaces.extend(br_iface.apply_linux_bridge_port_configs(
-                    if let Some(Interface::LinuxBridge(cur_br_iface)) =
-                        merged_iface.current.as_ref()
-                    {
-                        Some(cur_br_iface)
-                    } else {
-                        None
-                    },
-                ));
+                let cur_br_iface = if let Some(Interface::LinuxBridge(cur)) =
+                    merged_iface.current.as_ref()
+                {
+                    Some(cur.as_ref())
+                } else {
+                    None
+                };
+                apply_bridge_port_configs(&handle, br_iface, cur_br_iface)
+                    .await?;
             }
             Interface::OvsBridge(_) => {
                 // Place holder
             }
             _ => (),
-        }
-    }
-
-    if !np_ifaces.is_empty() {
-        let mut net_conf = nispor::NetConf::default();
-        net_conf.ifaces = Some(np_ifaces);
-
-        log::trace!(
-            "Pending nispor changes {}",
-            serde_json::to_string(&net_conf).unwrap_or_default()
-        );
-        if let Err(e) = net_conf.apply_async().await {
-            return Err(NipartError::new(
-                ErrorKind::Bug,
-                format!("Failed to change link layer: {e}"),
-            ));
         }
     }
 
