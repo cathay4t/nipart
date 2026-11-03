@@ -151,3 +151,49 @@ fn test_bridge_port_message_sets_options() {
     assert!(infos.contains(&InfoBridgePort::Cost(100)));
     assert!(infos.contains(&InfoBridgePort::Priority(10)));
 }
+
+#[test]
+fn test_bridge_vlan_message_range_flags() {
+    use rtnetlink::packet_route::link::{
+        AfSpecBridge, BridgeVlanInfo, BridgeVlanInfoFlags, LinkAttribute,
+    };
+
+    use crate::netlink::link::bridge::BridgeVlanEntry;
+
+    let entries = vec![BridgeVlanEntry {
+        vid: None,
+        vid_range: Some((100, 200)),
+        is_pvid: false,
+        is_egress_untagged: true,
+        remove: false,
+    }];
+    let message = bridge::bridge_vlan_add_message(3, false, &entries)
+        .expect("add message should be generated");
+    let vlans: Vec<BridgeVlanInfo> = message
+        .attributes
+        .iter()
+        .find_map(|attribute| {
+            if let LinkAttribute::AfSpecBridge(infos) = attribute {
+                Some(
+                    infos
+                        .iter()
+                        .filter_map(|info| {
+                            if let AfSpecBridge::VlanInfo(vlan) = info {
+                                Some(*vlan)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                None
+            }
+        })
+        .expect("bridge vlan attributes should exist");
+    assert_eq!(vlans.len(), 2);
+    assert!(vlans[0].flags.contains(BridgeVlanInfoFlags::RangeBegin));
+    assert!(vlans[1].flags.contains(BridgeVlanInfoFlags::RangeEnd));
+    assert_eq!(vlans[0].vid, 100);
+    assert_eq!(vlans[1].vid, 200);
+}
