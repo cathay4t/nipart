@@ -462,7 +462,7 @@ by the link event.
 Netlink multicast messages can be lost when the kernel socket buffer
 overflows (e.g. a burst of carrier transitions after resume or a driver
 reset). The monitor therefore reconciles its tracked state with the
-kernel periodically using a full network state query (nispor), which
+kernel periodically using a full network state query, which
 also carries the wifi SSID.
 
 ### Cadence
@@ -535,17 +535,18 @@ deadline, so an idle monitor does not spin.
 Live association notifications carry the SSID in their IEs and
 `parse_link_msg()` extracts it. The initial and resume RTM_GETLINK dumps
 carry no association IEs, so their up events reach the event worker with
-`ssid = None`; the event worker then polls nispor (10 x 500 ms) and falls
+`ssid = None`; the event worker then repeats the network state query
+(10 x 500 ms) and falls
 back to the wifi plugin's live (shuli) state
 (`event_worker.rs:185-243`) because some drivers do not publish the
-associated SSID through nispor in time (commits `efe82fc` "dhcp: query
+associated SSID through the query in time (commits `efe82fc` "dhcp: query
 wifi plugin when waiting for SSID" and `4bfb8be` "monitor: avoid
 duplicate up reapplies and spurious DHCP restarts").
 
 `reconcile()` avoids that blind spot: it queries the full network state
-(nispor), so a missed association is recovered together with its SSID
+(including the SSID), so a missed association is recovered with its SSID
 once the kernel publishes it. If the query still reports no SSID, the
-event worker's nispor retry and plugin fallback apply as usual;
+event worker's query retry and plugin fallback apply as usual;
 reconciliation itself never queries the plugin.
 
 A rapid down/up flap that both happens and recovers between two
@@ -575,7 +576,7 @@ event for the same interface replaces or removes the queued entry.
 | `should_start_netlink()` | requires `started` | same |
 | initial dump collector | `notify()` buffers into a batch | same |
 | udev gate | boot dump + reconcile skip NICs without a udev record | same |
-| `reconcile()` + interval constants | new; full nispor state query (SSID included) | same |
+| `reconcile()` + interval constants | new; full network state query (SSID included) | same |
 | `pause()` keeps the delay queue | debounced down events survive an apply | same |
 | `NipartMonitorManager::start()` | new | `src/daemon/monitor/monitor_manager.rs` |
 | `NipartManagerCmd::LinkEvents { events, boot }` | new | `src/daemon/daemon.rs` |
