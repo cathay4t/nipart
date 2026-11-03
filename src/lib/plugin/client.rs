@@ -25,7 +25,8 @@ pub enum NipartPluginCmd {
     QueryPluginInfo,
     /// Query network state, should reply with [NetworkState]
     /// The `NipartQueryOption` and current kernel [NetworkState] are
-    /// provided so plugins can use them instead of querying nispor again.
+    /// provided so plugins can use them instead of querying the kernel
+    /// again.
     QueryNetworkState(Box<(NipartQueryOption, NetworkState)>),
     ApplyNetworkState(Box<(NetworkState, NipartApplyOption)>),
     WifiScan(Box<NipartWifiScanOption>),
