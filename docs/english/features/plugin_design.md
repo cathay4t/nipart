@@ -75,7 +75,7 @@ pub trait NipartPlugin: Send + Sync + Sized + 'static {
 
 | Method | Description |
 |--------|-------------|
-| `query_network_state()` | Query the network state managed by this plugin. Receives the current kernel state (queried via nispor) for reference |
+| `query_network_state()` | Query the network state managed by this plugin. Receives the current kernel state (queried via netlink) for reference |
 | `apply_network_state()` | Apply desired network state to the managed subsystem |
 | `wifi_scan()` | Perform an active WiFi scan and return discovered networks |
 | `quit()` | Clean shutdown. Default implementation calls `std::process::exit(0)` |
