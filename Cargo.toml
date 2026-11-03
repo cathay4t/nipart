@@ -46,11 +46,6 @@ version = "0.31.0"
 default-features = false
 features = ["feature", "hostname", "socket"]
 
-
-[workspace.dependencies.nispor]
-git = "https://github.com/nispor/nispor"
-rev = "da7f6db8cf1640b5d1208dd0b128b14a3a7df78b"
-
 [workspace.dependencies.mozim]
 version = "0.3.2"
 default-features = false
