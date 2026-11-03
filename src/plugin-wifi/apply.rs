@@ -413,19 +413,8 @@ impl WifiClientState {
         // reload): the cached shuli client is then bound to a dead
         // device and must be restarted.
         let mut wifi_phys_if_index: HashMap<String, u32> = HashMap::new();
-        {
-            let mut filter = nispor::NetStateFilter::minimum();
-            filter.iface = Some(nispor::NetStateIfaceFilter::minimum());
-            if let Ok(np_state) =
-                nispor::NetState::retrieve_with_filter_async(&filter).await
-            {
-                for np_iface in np_state.ifaces.values() {
-                    if np_iface.iface_type == nispor::IfaceType::Wifi {
-                        wifi_phys_if_index
-                            .insert(np_iface.name.to_string(), np_iface.index);
-                    }
-                }
-            }
+        for info in nipart::get_wifi_ifaces().await {
+            wifi_phys_if_index.insert(info.name, info.if_index);
         }
 
         // Group every desired wifi config by the phy it binds to. All
