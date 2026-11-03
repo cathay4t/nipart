@@ -24,6 +24,7 @@ pub use self::{
     error::{ErrorKind, NipartError},
     ipc::{NipartCanIpc, NipartIpcConnection},
     logging::{NipartLogEntry, NipartLogLevel},
+    netlink::wifi::{WifiIfaceInfo, get_wifi_ifaces},
     no_daemon::NipartNoDaemon,
     plugin::{
         NipartIpcListener, NipartPlugin, NipartPluginClient, NipartPluginCmd,
