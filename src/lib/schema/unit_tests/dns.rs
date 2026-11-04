@@ -21,8 +21,8 @@ dns-resolver:
     bind: "127.0.0.1:53"
     max-cache-size: 1048576
     load-etc-hosts: false
+    auto-dns: true
     fallback:
-      auto-dns: true
       nameservers:
         - "https://dns.example.org/dns-query"
         - "https://doh.example.net/dns-query"
@@ -91,7 +91,7 @@ fn test_dns_resolver_doc_example() {
     assert_eq!(cache.bind, "127.0.0.1:53");
     assert_eq!(cache.max_cache_size, 1048576);
     assert!(!cache.load_etc_hosts);
-    assert!(cache.fallback.auto_dns);
+    assert!(cache.auto_dns);
     assert_eq!(
         cache.fallback.nameservers,
         vec![
@@ -148,7 +148,7 @@ fn test_dns_cache_defaults() {
     assert_eq!(cache.bind, DnsCacheConfig::DEFAULT_BIND);
     assert_eq!(cache.max_cache_size, DnsCacheConfig::DEFAULT_MAX_CACHE_SIZE);
     assert!(cache.load_etc_hosts);
-    assert!(cache.fallback.auto_dns);
+    assert!(cache.auto_dns);
     assert!(cache.fallback.nameservers.is_empty());
     assert!(cache.doh.is_none());
     assert!(cache.groups.is_empty());
@@ -698,6 +698,7 @@ fn test_dns_upstream_server_parse() {
         DnsUpstreamServer::Ip {
             addr: "192.0.2.53:5353".parse().unwrap(),
             port_explicit: true,
+            interface: None,
         }
     );
     assert_eq!(
@@ -709,6 +710,7 @@ fn test_dns_upstream_server_parse() {
         DnsUpstreamServer::Ip {
             addr: "[2001:db8::53]:5353".parse().unwrap(),
             port_explicit: true,
+            interface: None,
         }
     );
     assert_eq!(
@@ -716,6 +718,7 @@ fn test_dns_upstream_server_parse() {
         DnsUpstreamServer::Ip {
             addr: "[fe80::1%2]:53".parse().unwrap(),
             port_explicit: true,
+            interface: None,
         }
     );
     assert_eq!(
@@ -931,8 +934,8 @@ dns-resolver:
     bind: "127.0.0.1:53"
     max-cache-size: 4096
     load-etc-hosts: true
+    auto-dns: true
     fallback:
-      auto-dns: true
       nameservers:
         - "https://dns.example.org/dns-query"
         - "https://doh.example.com/dns-query"

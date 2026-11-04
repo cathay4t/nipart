@@ -1256,6 +1256,66 @@ fn test_ipv4_auto_gateway_true() {
     assert_eq!(iface.auto_gateway, Some(true));
 }
 
+/// Test parsing `auto-dns` and `auto-dns-priority` in IPv4 DHCP config.
+#[test]
+fn test_ipv4_auto_dns_parse() {
+    let net_state: NetworkState = rmsd_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+              auto-dns: false
+              auto-dns-priority: 321
+        "#,
+    )
+    .unwrap();
+
+    let iface = net_state
+        .ifaces
+        .kernel_ifaces
+        .get("eth1")
+        .map(|i| i.base_iface().ipv4.as_ref().unwrap().clone())
+        .unwrap();
+
+    assert_eq!(iface.auto_dns, Some(false));
+    assert_eq!(iface.auto_dns_priority, Some(321));
+    assert!(!iface.auto_dns_enabled());
+    assert_eq!(iface.auto_dns_priority_value(), 321);
+}
+
+/// Test that `auto-dns` defaults to enabled with priority zero.
+#[test]
+fn test_ipv4_auto_dns_defaults() {
+    let net_state: NetworkState = rmsd_yaml::from_str(
+        r#"
+        interfaces:
+          - name: eth1
+            type: ethernet
+            state: up
+            ipv4:
+              enabled: true
+              dhcp: true
+        "#,
+    )
+    .unwrap();
+
+    let iface = net_state
+        .ifaces
+        .kernel_ifaces
+        .get("eth1")
+        .map(|i| i.base_iface().ipv4.as_ref().unwrap().clone())
+        .unwrap();
+
+    assert_eq!(iface.auto_dns, None);
+    assert_eq!(iface.auto_dns_priority, None);
+    assert!(iface.auto_dns_enabled());
+    assert_eq!(iface.auto_dns_priority_value(), 0);
+}
+
 /// Test parsing `auto-route-metric` in IPv4 DHCP config.
 #[test]
 fn test_ipv4_auto_route_metric() {
@@ -1441,6 +1501,8 @@ fn test_ipv4_auto_gateway_false_survives_merge() {
 fn test_ipv4_new_disabled() {
     let ipv4 = InterfaceIpv4::new_disabled();
     assert_eq!(ipv4.auto_gateway, None);
+    assert_eq!(ipv4.auto_dns, None);
+    assert_eq!(ipv4.auto_dns_priority, None);
     assert_eq!(ipv4.auto_route_metric, None);
 }
 
@@ -1453,10 +1515,14 @@ fn test_ipv4_sanitize_clears_when_dhcp_off() {
         dhcp_state: None,
         addresses: None,
         auto_gateway: Some(false),
+        auto_dns: Some(false),
+        auto_dns_priority: Some(7),
         auto_route_metric: Some(321),
     };
     ipv4.sanitize(None).unwrap();
     assert_eq!(ipv4.auto_gateway, None);
+    assert_eq!(ipv4.auto_dns, None);
+    assert_eq!(ipv4.auto_dns_priority, None);
     assert_eq!(ipv4.auto_route_metric, None);
 }
 
@@ -1469,10 +1535,14 @@ fn test_ipv4_sanitize_clears_when_ip_disabled() {
         dhcp_state: None,
         addresses: None,
         auto_gateway: Some(false),
+        auto_dns: Some(false),
+        auto_dns_priority: Some(7),
         auto_route_metric: Some(321),
     };
     ipv4.sanitize(None).unwrap();
     assert_eq!(ipv4.auto_gateway, None);
+    assert_eq!(ipv4.auto_dns, None);
+    assert_eq!(ipv4.auto_dns_priority, None);
     assert_eq!(ipv4.auto_route_metric, None);
 }
 
@@ -1485,6 +1555,8 @@ fn test_ipv4_sanitize_rejects_out_of_range_auto_route_metric() {
         dhcp_state: None,
         addresses: None,
         auto_gateway: None,
+        auto_dns: None,
+        auto_dns_priority: None,
         auto_route_metric: Some(u32::MAX as i64 + 1),
     };
     assert!(ipv4.sanitize(None).is_err());

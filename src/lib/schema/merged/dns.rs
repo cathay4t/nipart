@@ -48,12 +48,24 @@ pub struct MergedDnsResolver {
     pub cache_for_save: Option<DnsCacheConfig>,
 }
 
+/// Drop DHCP-derived groups from a desired cache configuration.
+///
+/// `npt show` marks generated groups with `from-dhcp: true` so the output
+/// can be applied back. Such groups are rebuilt from the current DHCP
+/// leases and must not become persistent static groups.
+fn strip_from_dhcp_groups(desired: &mut DnsResolver) {
+    if let Some(cache) = desired.cache.as_mut() {
+        cache.groups.retain(|group| !group.from_dhcp);
+    }
+}
+
 impl MergedDnsResolver {
     pub(crate) fn new(
-        desired: DnsResolver,
+        mut desired: DnsResolver,
         mut current: DnsResolver,
         saved: Option<DnsResolver>,
     ) -> Result<Self, NipartError> {
+        strip_from_dhcp_groups(&mut desired);
         if let Some(saved_config) =
             saved.as_ref().and_then(|s| s.config.as_ref())
         {
