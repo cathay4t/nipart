@@ -47,6 +47,7 @@ impl NipartCommander {
             &mut HashSet::new(),
         );
         fill_saved_dns_resolver(&mut net_state, &saved_state);
+        self.fill_running_dns_cache(&mut net_state).await?;
         self.fill_dhcp_states(&mut net_state).await?;
         if !opt.include_secrets {
             net_state.hide_secrets();
@@ -123,11 +124,24 @@ impl NipartCommander {
         append_saved_only_route_rules(&mut net_state, &saved_state);
 
         fill_saved_dns_resolver(&mut net_state, &saved_state);
+        self.fill_running_dns_cache(&mut net_state).await?;
         self.fill_dhcp_states(&mut net_state).await?;
         if !opt.include_secrets {
             net_state.hide_secrets();
         }
         Ok(net_state)
+    }
+
+    /// Replace the saved cache view with the effective running cache view,
+    /// including generated DHCP groups.
+    async fn fill_running_dns_cache(
+        &mut self,
+        net_state: &mut NetworkState,
+    ) -> Result<(), NipartError> {
+        if let Some(cache) = self.dns_manager.query_config().await? {
+            net_state.dns_resolver.cache = Some(cache);
+        }
+        Ok(())
     }
 
     async fn query_kernel_state(

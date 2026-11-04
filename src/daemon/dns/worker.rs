@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::net::IpAddr;
-
 use futures_channel::{mpsc::UnboundedReceiver, oneshot::Sender};
 use mudz::{MudzNotifier, MudzServer};
-use nipart::{ErrorKind, NipartError};
+use nipart::{DnsCacheConfig, ErrorKind, NipartError};
 use tokio::{sync::oneshot as tokio_oneshot, task::JoinHandle};
 
 use super::NipartDnsServerConfig;
@@ -13,7 +11,6 @@ use crate::TaskWorker;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NipartDnsCmd {
     Start(NipartDnsServerConfig),
-    RefreshAutoDns(Vec<IpAddr>),
     /// The network path of the upstream nameservers changed, e.g. the
     /// default gateway was replaced by a route apply, a DHCP lease or the
     /// boot-up state restore. The running cache server keeps its cached
@@ -32,9 +29,6 @@ impl std::fmt::Display for NipartDnsCmd {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Start(config) => write!(f, "start:{}", config.bind),
-            Self::RefreshAutoDns(servers) => {
-                write!(f, "refresh-auto-dns:{}", servers.len())
-            }
             Self::NotifyNetworkChange => write!(f, "notify-network-change"),
             Self::Stop => write!(f, "stop"),
             Self::Query => write!(f, "query"),
@@ -45,7 +39,7 @@ impl std::fmt::Display for NipartDnsCmd {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NipartDnsReply {
     None,
-    Running(bool),
+    Running(Option<DnsCacheConfig>),
 }
 
 type FromManager = (NipartDnsCmd, Sender<Result<NipartDnsReply, NipartError>>);
@@ -98,20 +92,6 @@ impl TaskWorker for NipartDnsWorker {
                 self.start_server(config).await?;
                 Ok(NipartDnsReply::None)
             }
-            NipartDnsCmd::RefreshAutoDns(servers) => {
-                if let Some(running) = self.running.as_mut()
-                    && running.config.auto_dns_servers != servers
-                {
-                    let mut config = running.config.clone();
-                    config.set_auto_dns_servers(&servers);
-                    // Auto-DNS changes only affect upstream selection;
-                    // restarting the server is the simplest way to apply
-                    // them without a shared mutable config.
-                    self.stop_server().await;
-                    self.start_server(config).await?;
-                }
-                Ok(NipartDnsReply::None)
-            }
             NipartDnsCmd::NotifyNetworkChange => {
                 if let Some(running) = self.running.as_ref() {
                     running
@@ -125,9 +105,11 @@ impl TaskWorker for NipartDnsWorker {
                 self.stop_server().await;
                 Ok(NipartDnsReply::None)
             }
-            NipartDnsCmd::Query => {
-                Ok(NipartDnsReply::Running(self.running.is_some()))
-            }
+            NipartDnsCmd::Query => Ok(NipartDnsReply::Running(
+                self.running
+                    .as_ref()
+                    .map(|running| running.config.to_schema_config()),
+            )),
         }
     }
 }

@@ -1108,27 +1108,40 @@ impl NipartCommander {
         &mut self,
         merged_state: &MergedNetworkState,
     ) -> Result<(), NipartError> {
-        if merged_state.dns.is_unchanged() {
-            // `dns-resolver` not mentioned: preserve both the host
-            // resolver configuration and the running cache.
-            return Ok(());
-        }
-        let auto_dns_servers = self.auto_dns_servers().await?;
+        let saved_state = self.conf_manager.query_state().await?;
+        let auto_dns = self
+            .auto_dns_snapshot(&saved_state, Some(merged_state))
+            .await?;
+        let dynamic_searches = if merged_state.dns.auto_search_allowed() {
+            auto_dns.domains.clone()
+        } else {
+            Vec::new()
+        };
+        // An apply not mentioning `dns-resolver` must still honor the saved
+        // cache: when the cache is running, `/etc/resolv.conf` must not
+        // bypass it with the DHCP-learned nameservers.
+        let effective_cache = merged_state
+            .dns
+            .cache()
+            .or(saved_state.dns_resolver.cache.as_ref());
         NipartNoDaemon::apply_dns_resolver_conf(
-            merged_state
-                .dns
-                .cache()
+            effective_cache
                 .filter(|cache| cache.enabled)
                 .and_then(|cache| cache.bind_addr())
                 .map(|addr| addr.ip()),
             &merged_state.dns.servers,
             &merged_state.dns.searches,
             &merged_state.dns.options,
-            &merged_state.dns.apply_dynamic_servers(),
+            &auto_dns.servers,
+            &dynamic_searches,
         )
         .await?;
+        if merged_state.dns.is_unchanged() {
+            // `dns-resolver` not mentioned: preserve the running cache.
+            return Ok(());
+        }
         self.dns_manager
-            .apply_config(merged_state.dns.cache(), &auto_dns_servers)
+            .apply_config(merged_state.dns.cache(), &auto_dns)
             .await
     }
 }
@@ -1155,9 +1168,12 @@ async fn apply_dns_resolver(
         &searches,
         &options,
         dynamic_servers,
+        &[],
     )
     .await?;
-    dns_manager.apply_config(resolver.cache.as_ref(), &[]).await
+    dns_manager
+        .apply_config(resolver.cache.as_ref(), &Default::default())
+        .await
 }
 
 /// Make the daemon-only config visible to the verification.

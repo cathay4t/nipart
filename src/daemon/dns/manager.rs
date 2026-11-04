@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::net::IpAddr;
-
 use nipart::{DnsCacheConfig, NipartError};
 
 use super::{NipartDnsCmd, NipartDnsReply, NipartDnsServerConfig};
-use crate::TaskManager;
+use crate::{TaskManager, dns_auto::AutoDnsSnapshot};
 
 /// Manager of the embedded DNS cache task.
 ///
@@ -31,12 +29,12 @@ impl NipartDnsManager {
 
     /// Start, reconfigure or stop the DNS cache according to `cache`.
     ///
-    /// `auto_dns_servers` carries nameservers learned from DHCP/IPv6-RA/VPN
-    /// used when `cache.fallback.auto-dns` is true.
+    /// `auto_dns` carries DNS information learned from DHCP/IPv6-RA/VPN
+    /// used when `cache.auto-dns` is true.
     pub(crate) async fn apply_config(
         &mut self,
         cache: Option<&DnsCacheConfig>,
-        auto_dns_servers: &[IpAddr],
+        auto_dns: &AutoDnsSnapshot,
     ) -> Result<(), NipartError> {
         let cache = match cache {
             Some(cache) => cache,
@@ -49,21 +47,8 @@ impl NipartDnsManager {
         if !cache.enabled {
             return self.stop().await;
         }
-        let config = NipartDnsServerConfig::new(cache, auto_dns_servers)?;
+        let config = NipartDnsServerConfig::new(cache, auto_dns)?;
         self.mgr.exec(NipartDnsCmd::Start(config)).await?;
-        Ok(())
-    }
-
-    /// Refresh the upstream nameservers of a running cache without
-    /// restarting it, e.g. after a DHCP lease changed the dynamic
-    /// nameservers. No-op when the cache is not running.
-    pub(crate) async fn refresh_auto_dns(
-        &mut self,
-        auto_dns_servers: &[IpAddr],
-    ) -> Result<(), NipartError> {
-        self.mgr
-            .exec(NipartDnsCmd::RefreshAutoDns(auto_dns_servers.to_vec()))
-            .await?;
         Ok(())
     }
 
@@ -90,9 +75,17 @@ impl NipartDnsManager {
     /// Whether the DNS cache server task is currently running.
     #[allow(dead_code)]
     pub(crate) async fn is_running(&mut self) -> Result<bool, NipartError> {
+        Ok(self.query_config().await?.is_some())
+    }
+
+    /// Effective running cache configuration, including generated DHCP
+    /// groups. `None` when no cache server is running.
+    pub(crate) async fn query_config(
+        &mut self,
+    ) -> Result<Option<DnsCacheConfig>, NipartError> {
         match self.mgr.exec(NipartDnsCmd::Query).await? {
-            NipartDnsReply::Running(running) => Ok(running),
-            NipartDnsReply::None => Ok(false),
+            NipartDnsReply::Running(config) => Ok(config),
+            NipartDnsReply::None => Ok(None),
         }
     }
 }
