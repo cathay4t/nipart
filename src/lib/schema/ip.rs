@@ -126,6 +126,22 @@ pub struct InterfaceIpv4 {
         deserialize_with = "crate::deserializer::option_bool_or_string"
     )]
     pub auto_gateway: Option<bool>,
+    /// Whether to apply DNS nameservers and search domains learned from
+    /// DHCPv4. Default to true.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "crate::deserializer::option_bool_or_string"
+    )]
+    pub auto_dns: Option<bool>,
+    /// Priority of the DHCPv4 learned DNS configuration. A bigger value is
+    /// preferred. Default to 0.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        deserialize_with = "crate::deserializer::option_u32_or_string"
+    )]
+    pub auto_dns_priority: Option<u32>,
     /// Metric of routes learned from DHCPv4. When not defined, nipart will
     /// use `iface-index * 100` as the metric. Use -1 to explicitly request
     /// the default metric.
@@ -153,6 +169,8 @@ impl InterfaceIpv4 {
             dhcp_state: None,
             addresses: None,
             auto_gateway: None,
+            auto_dns: None,
+            auto_dns_priority: None,
             auto_route_metric: None,
         }
     }
@@ -169,6 +187,16 @@ impl InterfaceIpv4 {
         self.is_enabled()
             && !self.is_auto()
             && !self.addresses.as_deref().unwrap_or_default().is_empty()
+    }
+
+    /// Whether DNS information learned from DHCPv4 should be applied.
+    pub fn auto_dns_enabled(&self) -> bool {
+        self.auto_dns.unwrap_or(true)
+    }
+
+    /// Effective priority of the DHCPv4 learned DNS configuration.
+    pub fn auto_dns_priority_value(&self) -> u32 {
+        self.auto_dns_priority.unwrap_or(0)
     }
 
     /// Return the metric to use for the DHCPv4 learned route at
@@ -242,10 +270,14 @@ impl InterfaceIpv4 {
             self.dhcp = None;
             self.addresses = None;
             self.auto_gateway = None;
+            self.auto_dns = None;
+            self.auto_dns_priority = None;
             self.auto_route_metric = None;
         }
         if self.dhcp != Some(true) {
             self.auto_gateway = None;
+            self.auto_dns = None;
+            self.auto_dns_priority = None;
             self.auto_route_metric = None;
         } else if let Some(metric) = self.auto_route_metric {
             if !(RouteEntry::USE_DEFAULT_METRIC..=u32::MAX as i64)
@@ -272,12 +304,15 @@ impl InterfaceIpv4 {
     ///   be latency after applied and query back.
     /// * Set current DHCP none to false.
     /// * Set current address none to empty array.
-    /// * Remove `auto_gateway` and `auto_route_metric` as they are
-    ///   configuration only properties, not reflected in running state.
+    /// * Remove `auto_gateway`, `auto_dns`, `auto_dns_priority` and
+    ///   `auto_route_metric` as they are configuration only properties, not
+    ///   reflected in running state.
     /// * Sort addresses in both desired and current state to canonical order so
     ///   that verification is order-independent.
     pub(crate) fn sanitize_before_verify(&mut self, current: &mut Self) {
         self.auto_gateway = None;
+        self.auto_dns = None;
+        self.auto_dns_priority = None;
         self.auto_route_metric = None;
         if let Some(addrs) = self.addresses.as_mut() {
             for addr in addrs.iter_mut() {
