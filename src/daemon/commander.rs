@@ -160,12 +160,15 @@ impl NipartCommander {
         let auto_dns = self.auto_dns_snapshot(saved_state, None).await?;
         let config = saved.config.clone().unwrap_or_default();
         let static_servers = config.server.clone().unwrap_or_default();
+        let cache_enabled =
+            saved.cache.as_ref().is_some_and(|cache| cache.enabled);
         let cache_bind_ip = saved
             .cache
             .as_ref()
             .filter(|cache| cache.enabled)
             .and_then(|cache| cache.bind_addr())
             .map(|addr| addr.ip());
+        auto_dns.warn_if_split_dns_unavailable(cache_enabled);
         let dynamic_searches =
             if super::dns_auto::auto_search_allowed(saved.config.as_ref()) {
                 auto_dns.domains.clone()
