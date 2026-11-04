@@ -47,6 +47,7 @@ impl MergedNetworkState {
     ) -> Result<Self, NipartError> {
         let desired_clone = desired.clone();
         desired.validate()?;
+        warn_auto_dns_conflict(&desired, saved_config.as_ref());
 
         let (
             saved_ifaces,
@@ -236,4 +237,52 @@ impl NetworkState {
             new_state.wait_online.clone().or(self.wait_online.clone());
         Ok(())
     }
+}
+
+/// Warn when the desired and previously applied auto-DNS settings disagree
+/// in a way that makes the DNS cache ignore DHCP-provided nameservers.
+fn warn_auto_dns_conflict(
+    desired: &NetworkState,
+    saved: Option<&NetworkState>,
+) {
+    let desired_iface_auto_true =
+        desired.ifaces.iter().any(|iface| {
+            iface.base_iface().ipv4.as_ref().is_some_and(|ipv4| {
+                ipv4.is_auto() && ipv4.auto_dns == Some(true)
+            })
+        });
+    let desired_cache_auto_false = desired
+        .dns_resolver
+        .cache
+        .as_ref()
+        .is_some_and(|cache| cache.enabled && !cache.auto_dns);
+    let Some(saved) = saved else {
+        if desired_iface_auto_true && desired_cache_auto_false {
+            log_auto_dns_conflict();
+        }
+        return;
+    };
+    let saved_iface_auto_true =
+        saved.ifaces.iter().any(|iface| {
+            iface.base_iface().ipv4.as_ref().is_some_and(|ipv4| {
+                ipv4.is_auto() && ipv4.auto_dns != Some(false)
+            })
+        });
+    let saved_cache_auto_false = saved
+        .dns_resolver
+        .cache
+        .as_ref()
+        .is_some_and(|cache| cache.enabled && !cache.auto_dns);
+    if (desired_iface_auto_true
+        && (saved_cache_auto_false || desired_cache_auto_false))
+        || (desired_cache_auto_false && saved_iface_auto_true)
+    {
+        log_auto_dns_conflict();
+    }
+}
+
+fn log_auto_dns_conflict() {
+    log::warn!(
+        "DHCP-provided DNS nameservers will be ignored by the nipart cache          service because interface auto-dns and cache auto-dns conflict"
+    );
 }
