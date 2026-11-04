@@ -47,7 +47,7 @@ default-features = false
 features = ["feature", "hostname", "socket"]
 
 [workspace.dependencies.mozim]
-version = "0.3.2"
+version = "0.3.4"
 default-features = false
 
 [workspace.dependencies.ethtool]
