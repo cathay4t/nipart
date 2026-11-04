@@ -43,8 +43,8 @@ const DNS_OPTS_WITH_VALUE: [&str; 3] = ["ndots", "timeout", "attempts"];
 ///   cache:
 ///     enabled: true
 ///     bind: 127.0.0.1:53
+///     auto-dns: true
 ///     fallback:
-///       auto-dns: true
 ///       nameservers:
 ///         - https://dns.example.org/dns-query
 ///     doh:
@@ -259,6 +259,10 @@ pub struct DnsCacheConfig {
     /// Whether to load `/etc/hosts` as static records. Default is true.
     #[serde(default = "default_true")]
     pub load_etc_hosts: bool,
+    /// Use nameservers learned from DHCP, IPv6-RA, VPN etc. Default is
+    /// true. They are appended after the static fallback nameservers.
+    #[serde(default = "default_true")]
+    pub auto_dns: bool,
     /// Upstream for domains not matched by any group.
     #[serde(default)]
     pub fallback: NipartDnsFallback,
@@ -291,6 +295,7 @@ impl Default for DnsCacheConfig {
             bind: default_dns_cache_bind(),
             max_cache_size: default_dns_cache_size(),
             load_etc_hosts: true,
+            auto_dns: true,
             fallback: NipartDnsFallback::default(),
             doh: None,
             groups: Vec::new(),
@@ -377,11 +382,6 @@ impl DnsCacheConfig {
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
 pub struct NipartDnsFallback {
-    /// Use nameservers learned from DHCP, IPv6-RA, VPN etc. Default is true.
-    /// They are prepended to [Self::nameservers], dynamic nameservers are
-    /// used first.
-    #[serde(default = "default_true")]
-    pub auto_dns: bool,
     /// Static fallback nameservers. Plain IP addresses or DoH URLs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nameservers: Vec<String>,
@@ -393,7 +393,6 @@ pub struct NipartDnsFallback {
 impl Default for NipartDnsFallback {
     fn default() -> Self {
         Self {
-            auto_dns: true,
             nameservers: Vec::new(),
             disable_ipv6: false,
         }
@@ -455,6 +454,11 @@ pub struct NipartDnsUpstreamGroup {
     /// Whether to suppress AAAA queries to this group.
     #[serde(default)]
     pub disable_ipv6: bool,
+    /// Whether this group was generated from DHCP information. Query-only:
+    /// it is set by `npt show` for DHCP-derived groups and is never saved
+    /// into the applied state.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_dhcp: bool,
 }
 
 impl NipartDnsUpstreamGroup {
