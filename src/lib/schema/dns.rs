@@ -482,6 +482,8 @@ impl NipartDnsUpstreamGroup {
 ///  * `2001:db8::53` (plaintext on 53, opportunistic DoT probe on 853)
 ///  * `[2001:db8::53]:5353` (port pinned for every attempt, DoT included)
 ///  * `[fe80::1%2]:53` (IPv6 with numeric scope id)
+///  * `192.0.2.53:53%eth1` (socket bound to an interface)
+///  * `[2001:db8::53]:53%eth1` (IPv6 socket bound to an interface)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DnsUpstreamServer {
     /// Plain DNS nameserver.
@@ -495,6 +497,7 @@ pub enum DnsUpstreamServer {
     Ip {
         addr: SocketAddr,
         port_explicit: bool,
+        interface: Option<String>,
     },
     Doh(String),
 }
@@ -506,6 +509,7 @@ impl DnsUpstreamServer {
         Self::Ip {
             addr: SocketAddr::new(ip, 53),
             port_explicit: false,
+            interface: None,
         }
     }
 
@@ -517,20 +521,27 @@ impl DnsUpstreamServer {
             return Ok(Self::Ip {
                 addr,
                 port_explicit: true,
+                interface: None,
             });
         }
-        // An interface name instead of the numeric scope id cannot be
-        // used to open a socket: reject it instead of silently dropping
-        // the scope and sending the query to the wrong link.
-        if srv.contains('%') {
-            return Err(NipartError::new(
-                ErrorKind::InvalidArgument,
-                format!(
-                    "Invalid DNS cache upstream server {srv}: interface name \
-                     is not supported, please use a numeric scope id, e.g. \
-                     [fe80::1%2]:53"
-                ),
-            ));
+        if let Some((addr_text, interface)) = srv.split_once('%') {
+            validate_interface_name(srv, interface)?;
+            let addr = addr_text.parse::<SocketAddr>().map_err(|_| {
+                NipartError::new(
+                    ErrorKind::InvalidArgument,
+                    format!(
+                        "Invalid DNS cache upstream server {srv}: an \
+                         interface can only be specified after an IP literal \
+                         with an explicit port, such as `192.0.2.53:53%eth1` \
+                         or `[2001:db8::53]:53%eth1`"
+                    ),
+                )
+            })?;
+            return Ok(Self::Ip {
+                addr,
+                port_explicit: true,
+                interface: Some(interface.to_string()),
+            });
         }
         // Plain IP address without a port.
         let ip = parse_dns_server(srv)?;
@@ -548,13 +559,25 @@ impl std::fmt::Display for DnsUpstreamServer {
             Self::Ip {
                 addr,
                 port_explicit: true,
+                interface: Some(interface),
+            } => write!(f, "{addr}%{interface}"),
+            Self::Ip {
+                addr,
+                port_explicit: true,
+                interface: None,
             } => write!(f, "{addr}"),
             // Dropping the implicit port lets mudz probe DNS over TLS on
             // 853 before falling back to plaintext on 53.
             Self::Ip {
                 addr,
                 port_explicit: false,
+                interface: None,
             } => write!(f, "{}", addr.ip()),
+            Self::Ip {
+                addr,
+                port_explicit: false,
+                interface: Some(interface),
+            } => write!(f, "{}%{interface}", addr.ip()),
             Self::Doh(url) => write!(f, "{url}"),
         }
     }
@@ -715,6 +738,26 @@ fn host_in_hosts_file(hostname: &str, path: &str) -> bool {
         parts.next().is_some()
             && parts.any(|name| name.eq_ignore_ascii_case(hostname))
     })
+}
+
+/// Validate an interface name accepted by `SO_BINDTODEVICE`.
+fn validate_interface_name(
+    nameserver: &str,
+    interface: &str,
+) -> Result<(), NipartError> {
+    if interface.is_empty()
+        || interface.chars().any(|c| matches!(c, '%' | ':' | '/'))
+        || interface.chars().any(char::is_whitespace)
+    {
+        return Err(NipartError::new(
+            ErrorKind::InvalidArgument,
+            format!(
+                "Invalid interface '{interface}' in DNS nameserver \
+                 '{nameserver}'"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn is_ipv6_link_local(ip: &Ipv6Addr) -> bool {
