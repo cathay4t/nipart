@@ -104,8 +104,9 @@ impl NipartCommander {
         // `npt apply` can retry the DNS configuration.
         let saved_dns_resolver = saved_state.dns_resolver.clone();
         if !saved_dns_resolver.is_empty()
-            && let Err(e) =
-                self.restore_saved_dns_resolver(&saved_dns_resolver).await
+            && let Err(e) = self
+                .restore_saved_dns_resolver(&saved_dns_resolver, &saved_state)
+                .await
         {
             log::warn!(
                 "Failed to restore saved DNS resolver configuration: {e}"
@@ -154,8 +155,9 @@ impl NipartCommander {
     async fn restore_saved_dns_resolver(
         &mut self,
         saved: &DnsResolver,
+        saved_state: &NetworkState,
     ) -> Result<(), NipartError> {
-        let auto_dns_servers = self.auto_dns_servers().await?;
+        let auto_dns = self.auto_dns_snapshot(saved_state, None).await?;
         let config = saved.config.clone().unwrap_or_default();
         let static_servers = config.server.clone().unwrap_or_default();
         let cache_bind_ip = saved
@@ -164,30 +166,20 @@ impl NipartCommander {
             .filter(|cache| cache.enabled)
             .and_then(|cache| cache.bind_addr())
             .map(|addr| addr.ip());
-        let cache_bind_str = cache_bind_ip.map(|ip| ip.to_string());
-
-        // The static configuration of the saved state is what nipart
-        // wrote into `/etc/resolv.conf` before; every other nameserver in
-        // the file was learned dynamically or added by another tool and
-        // must be kept.
-        let dynamic_servers: Vec<String> = NipartNoDaemon::query_dns_resolver()
-            .await?
-            .running
-            .and_then(|running| running.server)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|srv| {
-                !static_servers.contains(srv)
-                    && cache_bind_str.as_deref() != Some(srv.as_str())
-            })
-            .collect();
+        let dynamic_searches =
+            if super::dns_auto::auto_search_allowed(saved.config.as_ref()) {
+                auto_dns.domains.clone()
+            } else {
+                Vec::new()
+            };
 
         NipartNoDaemon::apply_dns_resolver_conf(
             cache_bind_ip,
             &static_servers,
             &config.search.clone().unwrap_or_default(),
             &config.options.clone().unwrap_or_default(),
-            &dynamic_servers,
+            &auto_dns.servers,
+            &dynamic_searches,
         )
         .await?;
         log::info!(
@@ -201,7 +193,7 @@ impl NipartCommander {
             }
         );
         self.dns_manager
-            .apply_config(saved.cache.as_ref(), &auto_dns_servers)
+            .apply_config(saved.cache.as_ref(), &auto_dns)
             .await
     }
 

@@ -15,7 +15,8 @@ use tokio::{
 
 use super::{
     api::process_api_connection, commander::NipartCommander,
-    lock::NipartLockManager, resume::NipartResumeMonitor,
+    dns_auto::AutoDnsSnapshot, lock::NipartLockManager,
+    resume::NipartResumeMonitor,
 };
 
 pub(crate) static DAEMON_IS_ONLINE: SetOnce<()> = SetOnce::const_new();
@@ -60,7 +61,7 @@ pub(crate) struct NipartDaemon {
     sigterm: Signal,
     sigint: Signal,
     dns_auto_timer: tokio::time::Interval,
-    last_auto_dns_servers: Vec<std::net::IpAddr>,
+    last_auto_dns: AutoDnsSnapshot,
     resume_monitor: NipartResumeMonitor,
     /// Signalled once the initial boot link-event batch has been applied.
     /// The boot task holds the transaction lock until then, so client
@@ -171,7 +172,7 @@ impl NipartDaemon {
             sigterm,
             sigint,
             dns_auto_timer: tokio::time::interval(DNS_AUTO_REFRESH_INTERVAL),
-            last_auto_dns_servers: Vec::new(),
+            last_auto_dns: AutoDnsSnapshot::default(),
             resume_monitor: NipartResumeMonitor::new(),
             boot_applied,
         })
@@ -198,7 +199,7 @@ impl NipartDaemon {
                     break;
                 },
                 _ = self.dns_auto_timer.tick() => {
-                    self.refresh_dns_cache_auto_dns().await;
+                    self.refresh_auto_dns().await;
                 }
                 suspended = self.resume_monitor.wait_for_resume() => {
                     log::info!(
@@ -214,23 +215,32 @@ impl NipartDaemon {
         self.commander.shutdown().await;
     }
 
-    /// Refresh the DNS cache `auto-dns` upstream when the DHCP learned
-    /// nameservers changed.  The DNS cache worker ignores the refresh when
-    /// no cache server is running.
-    async fn refresh_dns_cache_auto_dns(&mut self) {
-        let servers = match self.commander.auto_dns_servers().await {
-            Ok(s) => s,
+    /// Refresh the resolver and DNS cache `auto-dns` information when the
+    /// DHCP learned DNS data changed.
+    async fn refresh_auto_dns(&mut self) {
+        let saved_state = match self.commander.conf_manager.query_state().await
+        {
+            Ok(state) => state,
             Err(e) => {
-                log::debug!("Failed to query DHCP nameservers: {e}");
+                log::debug!("Failed to query saved state: {e}");
                 return;
             }
         };
-        if servers == self.last_auto_dns_servers {
+        let snapshot =
+            match self.commander.auto_dns_snapshot(&saved_state, None).await {
+                Ok(snapshot) => snapshot,
+                Err(e) => {
+                    log::debug!("Failed to query DHCP DNS information: {e}");
+                    return;
+                }
+            };
+        if snapshot == self.last_auto_dns {
             return;
         }
-        self.last_auto_dns_servers = servers;
-        if let Err(e) = self.commander.refresh_dns_cache_auto_dns().await {
-            log::debug!("Failed to refresh DNS cache upstreams: {e}");
+        self.last_auto_dns = snapshot.clone();
+        if let Err(e) = self.commander.apply_auto_dns_snapshot(&snapshot).await
+        {
+            log::debug!("Failed to refresh auto DNS: {e}");
         }
     }
 
@@ -327,6 +337,7 @@ impl NipartDaemon {
                          {iface_name} after DHCPv4 lease: {e}"
                     );
                 }
+                self.refresh_auto_dns().await;
                 self.update_daemon_online_state().await;
             }
         }
