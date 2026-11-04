@@ -26,6 +26,8 @@ pub(crate) struct AutoDnsIface {
     pub saved_order: usize,
     pub nameservers: Vec<String>,
     pub domains: Vec<String>,
+    /// DHCPv4 option 119 domain search entries.
+    pub domain_search: Vec<String>,
 }
 
 /// Sorted DHCPv4 DNS information used by the standard resolver and the
@@ -41,11 +43,23 @@ pub(crate) struct AutoDnsSnapshot {
     pub cache_servers: Vec<String>,
     /// Deduplicated search domains in effective order.
     pub domains: Vec<String>,
+    /// Whether any effective interface received DHCPv4 option 119.
+    pub has_domain_search: bool,
     /// Cache groups generated from DHCP-provided domains.
     pub groups: Vec<NipartDnsUpstreamGroup>,
 }
 
-impl AutoDnsSnapshot {}
+impl AutoDnsSnapshot {
+    /// Warn when domain-based DNS splitting cannot work because the cache
+    /// is disabled.
+    pub(crate) fn warn_if_split_dns_unavailable(&self, cache_enabled: bool) {
+        if !cache_enabled && self.has_domain_search {
+            log::warn!(
+                "DHCPv4 option 119 domain-search was received but the DNS                  cache is disabled: per-domain DNS splitting is not available"
+            );
+        }
+    }
+}
 
 /// Build the effective auto-DNS snapshot.
 ///
@@ -86,6 +100,12 @@ pub(crate) fn collect_auto_dns(
         if nameservers.is_empty() && domains.is_empty() {
             continue;
         }
+        let domain_search: Vec<String> = info
+            .domain_search
+            .iter()
+            .map(|domain| domain.to_lowercase())
+            .filter(|domain| !domain.is_empty())
+            .collect();
         ifaces.push(AutoDnsIface {
             iface: iface_name.clone(),
             priority,
@@ -95,6 +115,7 @@ pub(crate) fn collect_auto_dns(
                 .unwrap_or(usize::MAX),
             nameservers,
             domains,
+            domain_search,
         });
     }
     ifaces.sort_by(|a, b| {
@@ -107,8 +128,12 @@ pub(crate) fn collect_auto_dns(
     let mut servers: Vec<String> = Vec::new();
     let mut cache_servers: Vec<String> = Vec::new();
     let mut domains: Vec<String> = Vec::new();
+    let mut has_domain_search = false;
     let mut groups: Vec<NipartDnsUpstreamGroup> = Vec::new();
     for iface in &ifaces {
+        if !iface.domain_search.is_empty() {
+            has_domain_search = true;
+        }
         for srv in &iface.nameservers {
             if !servers.contains(srv) {
                 servers.push(srv.clone());
@@ -137,6 +162,7 @@ pub(crate) fn collect_auto_dns(
         servers,
         cache_servers,
         domains,
+        has_domain_search,
         groups,
     }
 }
@@ -215,12 +241,15 @@ impl NipartCommander {
         let resolver = saved_state.dns_resolver.clone();
         let config = resolver.config.clone().unwrap_or_default();
         let static_servers = config.server.clone().unwrap_or_default();
+        let cache_enabled =
+            resolver.cache.as_ref().is_some_and(|cache| cache.enabled);
         let cache_bind_ip = resolver
             .cache
             .as_ref()
             .filter(|cache| cache.enabled)
             .and_then(|cache| cache.bind_addr())
             .map(|addr| addr.ip());
+        snapshot.warn_if_split_dns_unavailable(cache_enabled);
         let searches = config.search.clone().unwrap_or_default();
         let dynamic_searches = if auto_search_allowed(resolver.config.as_ref())
         {
@@ -262,6 +291,7 @@ mod tests {
         NipartDhcpDnsInfo {
             nameservers: servers.iter().map(|s| s.to_string()).collect(),
             domains: domains.iter().map(|s| s.to_string()).collect(),
+            domain_search: Vec::new(),
         }
     }
 
@@ -330,6 +360,29 @@ mod tests {
 
         let snapshot = collect_auto_dns(&dhcp_info, &saved, None);
         assert!(snapshot.servers.is_empty());
+    }
+
+    #[test]
+    fn test_domain_search_flag() {
+        let saved: NetworkState = rmsd_yaml::from_str(
+            r#"
+            interfaces:
+              - name: eth1
+                type: ethernet
+                state: up
+                ipv4:
+                  enabled: true
+                  dhcp: true
+            "#,
+        )
+        .unwrap();
+        let mut dhcp_info = HashMap::new();
+        let mut info = dns_info(&["192.0.2.1"], &["example.org"]);
+        info.domain_search = vec!["example.org".to_string()];
+        dhcp_info.insert("eth1".to_string(), info);
+
+        let snapshot = collect_auto_dns(&dhcp_info, &saved, None);
+        assert!(snapshot.has_domain_search);
     }
 
     #[test]

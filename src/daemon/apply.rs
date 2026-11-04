@@ -1124,6 +1124,9 @@ impl NipartCommander {
             .dns
             .cache()
             .or(saved_state.dns_resolver.cache.as_ref());
+        auto_dns.warn_if_split_dns_unavailable(
+            effective_cache.is_some_and(|cache| cache.enabled),
+        );
         NipartNoDaemon::apply_dns_resolver_conf(
             effective_cache
                 .filter(|cache| cache.enabled)
