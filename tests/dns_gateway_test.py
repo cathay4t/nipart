@@ -364,8 +364,8 @@ def test_dns_cache_retries_upstream_after_gateway_change(
               cache:
                 enabled: true
                 bind: "{DNS_CACHE_BIND}"
+                auto-dns: false
                 fallback:
-                  auto-dns: false
                   nameservers:
                     - "{UPSTREAM_ADDR}"
             """),
