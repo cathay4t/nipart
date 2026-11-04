@@ -18,10 +18,19 @@ const DEFAULT_ROUTE_TABLE_ID: u32 = 254;
 const DHCPV6_INIT_RETRY_COUNT: usize = 30;
 const DHCPV6_INIT_RETRY_INTERVAL_MS: u64 = 1000;
 
+/// DNS information learned from one DHCPv4 lease in no-daemon mode.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct DhcpDns {
+    pub iface: String,
+    pub nameservers: Vec<String>,
+    pub domains: Vec<String>,
+}
+
 impl NipartNoDaemon {
     pub(crate) async fn run_dhcp_once(
         merged_ifaces: &MergedInterfaces,
-    ) -> Result<(), NipartError> {
+    ) -> Result<Vec<DhcpDns>, NipartError> {
+        let mut dhcp_dns: Vec<DhcpDns> = Vec::new();
         // DHCPv4
         let mut v4_get_lease_futures = FuturesUnordered::new();
 
@@ -42,6 +51,17 @@ impl NipartNoDaemon {
         while let Some(result) = v4_get_lease_futures.next().await {
             // Should fail the whole apply action for any errors of DHCP.
             let (kernel_iface_name, lease) = result?;
+            dhcp_dns.push(DhcpDns {
+                iface: kernel_iface_name.to_string(),
+                nameservers: lease
+                    .dns_srvs
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|srv| srv.to_string())
+                    .collect(),
+                domains: lease_domains(&lease),
+            });
             apply_lease_v4(merged_ifaces, kernel_iface_name, lease).await?;
         }
 
@@ -67,8 +87,25 @@ impl NipartNoDaemon {
             let (kernel_iface_name, lease) = result?;
             apply_lease_v6(merged_ifaces, kernel_iface_name, lease).await?;
         }
-        Ok(())
+        Ok(dhcp_dns)
     }
+}
+
+/// DHCPv4 domain information: option 15 followed by option 119, without
+/// duplicates.
+fn lease_domains(lease: &DhcpV4Lease) -> Vec<String> {
+    let mut ret: Vec<String> = Vec::new();
+    if let Some(domain) = lease.domain_name.as_deref()
+        && !domain.is_empty()
+    {
+        ret.push(domain.to_string());
+    }
+    for domain in lease.domain_search.as_deref().unwrap_or_default() {
+        if !domain.is_empty() && !ret.iter().any(|d| d == domain) {
+            ret.push(domain.to_string());
+        }
+    }
+    ret
 }
 
 async fn get_lease_v4<'a>(
