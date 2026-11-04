@@ -65,6 +65,28 @@ Each entry in the list should contain the following fields:
   seconds. If not specified, the IP address will be considered as static IP and
   preferred indefinitely.
 
+## `auto-dns`: Apply DHCP DNS information
+
+When `ipv4.dhcp` is enabled, `auto-dns: false` makes nipart ignore the
+nameservers and search domains retrieved from the DHCPv4 server on this
+interface. Default is `true`.
+
+`auto-dns-priority` orders DHCP-learned DNS information between interfaces.
+A bigger value is preferred. When two interfaces have the same priority,
+the order in the saved configuration is used. Default is `0`.
+
+```yaml
+interfaces:
+- name: eth1
+  type: ethernet
+  state: up
+  ipv4:
+    enabled: true
+    dhcp: true
+    auto-dns: true
+    auto-dns-priority: 100
+```
+
 ## `autoconf`: Enable IPv6 autoconfiguration
 
 When set to `true`, the interface will attempt to obtain an IPv6 address via

@@ -45,8 +45,31 @@ dns-resolver:
 The `running` section holds DNS config of current host, it could be
 the combination of static DNS config and dynamic DNS configuration learn from
 DHCP or IPv6-RA.
-The `config` section holds the static configuration, when using with
-`auto-dns: true`, static DNS configuration is appended to dynamic ones.
+The `config` section holds the static configuration. Static nameservers and
+search domains are written before the DHCP-learned ones.
+
+The DNS information learned from DHCPv4 is controlled per interface with
+`interfaces[].ipv4.auto-dns` and ordered with
+`interfaces[].ipv4.auto-dns-priority` (bigger is better):
+
+```yaml
+version: 1
+interfaces:
+- name: eth1
+  type: ethernet
+  state: up
+  ipv4:
+    enabled: true
+    dhcp: true
+    auto-dns: true
+    auto-dns-priority: 100
+```
+
+If `auto-dns` is `false`, the DHCPv4-provided nameservers and search domains
+of that interface are ignored. Interfaces with the same priority keep the
+order of the saved configuration. If the static DNS configuration explicitly
+sets `search: []`, DHCP search domains are not appended, but DHCP nameservers
+are still used.
 
 ## Cached DNS
 
@@ -81,10 +104,11 @@ dns-resolver:
     max-cache-size: 4096
     # read /etc/hosts or not, default true
     load-etc-hosts: true
+    # Use nameserver from DHCP, IPv6-RA, VPN etc or not. Default is true.
+    # They are appended after the static fallback nameservers.
+    auto-dns: true
     # fallback is the group of DNS nameservers for unmatched DNS domains query
     fallback:
-      # Use nameserver from DHCP, IPv6-RA, VPN etc or not. Default if true.
-      auto-dns: true
       nameservers:
         - "https://dns.example.org/dns-query"
         - "https://doh.example.com/dns-query"
@@ -123,6 +147,13 @@ dns-resolver:
   `dns-resolver.config.server`, otherwise the host resolver would never
   send a query to the cache. Such an apply is rejected instead of silently
   leaving the cache unused.
+- When the cache is enabled, `/etc/resolv.conf` contains only the static
+  DNS configuration plus the cache bind address. DHCP-learned nameservers
+  are not written there because the cache forwards them itself.
+- DHCP-provided domains (DHCPv4 options 15 and 119) create runtime cache
+  groups whose upstream sockets are bound to the interface that learned
+  them. They are shown by `npt show` with `from-dhcp: true` and are not
+  written to `npt show -s` or the saved state.
 - A group with an empty `nameservers` list is a blocking group: matching
   queries get `NXDOMAIN` without any upstream query.
 - Domain matching is longest suffix match, so a more specific domain in one

@@ -77,10 +77,11 @@ dns-resolver:
     max-cache-size: 1048576
     # 是否读取 /etc/hosts，默认为 true
     load-etc-hosts: true
+    # 是否使用来自 DHCP、IPv6-RA、VPN 等的名称服务器。默认为 true。
+    # 它们会追加在静态 fallback 名称服务器之后。
+    auto-dns: true
     # fallback 是未匹配任何 DNS 域的查询所使用的名称服务器组
     fallback:
-      # 是否使用来自 DHCP、IPv6-RA、VPN 等的名称服务器。默认为 true。
-      auto-dns: true
       nameservers:
         - "https://dns.alidns.com/dns-query"
         - "https://doh.pub/dns-query"
