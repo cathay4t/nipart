@@ -208,17 +208,22 @@ pub(crate) fn write_static_dns(
     dedup(&mut static_option_list);
 
     let mut auto_servers: Vec<String> = Vec::new();
-    let mut auto_searches: Vec<String> = Vec::new();
     if !cache_enabled {
         for srv in dynamic_servers {
             push_unique(&mut auto_servers, srv.clone());
         }
-        for domain in dynamic_searches {
-            if !static_search_list.contains(domain) {
-                push_unique(&mut auto_searches, domain.clone());
-            }
-        }
     }
+
+    // resolv.conf only honors the last `search` directive, so every search
+    // domain must be emitted on one line. This is independent of whether
+    // the cache is enabled: the search list is local to the host resolver.
+    for domain in dynamic_searches {
+        push_unique(&mut static_search_list, domain.clone());
+    }
+    for domain in existing.foreign_searches() {
+        push_unique(&mut static_search_list, domain);
+    }
+    truncate_search_list(&mut static_search_list);
 
     let mut foreign_servers: Vec<String> = Vec::new();
     if !cache_enabled {
@@ -226,14 +231,6 @@ pub(crate) fn write_static_dns(
             if !static_srvs.contains(&srv) {
                 push_unique(&mut foreign_servers, srv);
             }
-        }
-    }
-    let mut foreign_searches: Vec<String> = Vec::new();
-    for domain in existing.foreign_searches() {
-        if !static_search_list.contains(&domain)
-            && !auto_searches.contains(&domain)
-        {
-            push_unique(&mut foreign_searches, domain);
         }
     }
     let mut foreign_options: Vec<String> = Vec::new();
@@ -248,9 +245,9 @@ pub(crate) fn write_static_dns(
         &static_search_list,
         &static_option_list,
         &auto_servers,
-        &auto_searches,
+        &[],
         &foreign_servers,
-        &foreign_searches,
+        &[],
         &foreign_options,
     )
 }
@@ -354,6 +351,27 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     }
 }
 
+/// Keep the combined search line within the glibc parser limit without
+/// truncating a domain in the middle.
+fn truncate_search_list(searches: &mut Vec<String>) {
+    let mut used = 0usize;
+    searches.retain(|domain| {
+        if domain.is_empty() || domain.contains(char::is_whitespace) {
+            return false;
+        }
+        let extra = if used == 0 {
+            domain.len()
+        } else {
+            domain.len() + 1
+        };
+        if used + extra > 254 {
+            return false;
+        }
+        used += extra;
+        true
+    });
+}
+
 fn dedup(values: &mut Vec<String>) {
     let mut seen: Vec<String> = Vec::new();
     values.retain(|value| {
@@ -453,6 +471,30 @@ nameserver 203.0.113.53
             vec!["example.net".to_string()]
         );
         assert_eq!(conf.foreign_servers(), vec!["203.0.113.53".to_string()]);
+    }
+
+    #[test]
+    fn test_truncate_search_list() {
+        let mut searches = vec![
+            "a.example".to_string(),
+            "with space".to_string(),
+            "b.example".to_string(),
+        ];
+        truncate_search_list(&mut searches);
+        assert_eq!(
+            searches,
+            vec!["a.example".to_string(), "b.example".to_string()]
+        );
+
+        let mut searches: Vec<String> = (0..40)
+            .map(|i| format!("domain-{i:02}.example.org"))
+            .collect();
+        truncate_search_list(&mut searches);
+        let total: usize = searches.iter().map(|d| d.len()).sum::<usize>()
+            + searches.len()
+            - 1;
+        assert!(total <= 254);
+        assert!(!searches.is_empty());
     }
 
     #[test]
