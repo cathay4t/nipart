@@ -103,7 +103,10 @@ impl std::fmt::Display for NipartDhcpCmd {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct NipartDhcpDnsInfo {
     pub(crate) nameservers: Vec<String>,
+    /// DHCPv4 option 15 domain followed by option 119 domain search.
     pub(crate) domains: Vec<String>,
+    /// DHCPv4 option 119 domain search entries.
+    pub(crate) domain_search: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,6 +202,7 @@ struct NipartDhcpShareData {
     state: DhcpState,
     nameservers: Vec<String>,
     domains: Vec<String>,
+    domain_search: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -261,6 +265,7 @@ impl NipartDhcpV4Thread {
             Ok(data) => Ok(NipartDhcpDnsInfo {
                 nameservers: data.nameservers.clone(),
                 domains: data.domains.clone(),
+                domain_search: data.domain_search.clone(),
             }),
             Err(e) => Err(NipartError::new(
                 ErrorKind::Bug,
@@ -529,12 +534,24 @@ fn gen_lease_domains(lease: &DhcpV4Lease) -> Vec<String> {
     {
         ret.push(domain.to_string());
     }
-    for domain in lease.domain_search.as_deref().unwrap_or_default() {
-        if !domain.is_empty() && !ret.iter().any(|d| d == domain) {
-            ret.push(domain.to_string());
+    for domain in gen_lease_domain_search(lease) {
+        if !ret.contains(&domain) {
+            ret.push(domain);
         }
     }
     ret
+}
+
+/// DHCPv4 option 119 domain search entries without empty values.
+fn gen_lease_domain_search(lease: &DhcpV4Lease) -> Vec<String> {
+    lease
+        .domain_search
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter(|domain| !domain.is_empty())
+        .cloned()
+        .collect()
 }
 
 async fn apply_lease(
@@ -564,6 +581,7 @@ async fn apply_lease(
                 .map(|srv| srv.to_string())
                 .collect();
             share_data.domains = gen_lease_domains(lease);
+            share_data.domain_search = gen_lease_domain_search(lease);
         }
         Err(e) => {
             log::warn!(
