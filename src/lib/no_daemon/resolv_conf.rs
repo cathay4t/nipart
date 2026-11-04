@@ -135,14 +135,6 @@ impl ResolvConf {
     fn static_options(&self) -> Vec<String> {
         self.entries_of(&self.options, EntryOrigin::Static)
     }
-
-    #[cfg(test)]
-    fn dynamic_entries(
-        &self,
-        entries: &[(EntryOrigin, String)],
-    ) -> Vec<String> {
-        self.entries_of(entries, EntryOrigin::Dynamic)
-    }
 }
 
 /// Query the running DNS resolver state from `/etc/resolv.conf`.
@@ -425,7 +417,7 @@ search example.net
 options ndots:2 trust-ad
 ";
         let conf = ResolvConf::parse(content);
-        assert_eq!(conf.dynamic_servers(), vec!["192.0.2.1".to_string()]);
+        assert_eq!(conf.foreign_servers(), vec!["192.0.2.1".to_string()]);
         assert_eq!(
             conf.static_servers(),
             vec!["192.0.2.53".to_string(), "2001:db8::53".to_string()]
@@ -434,6 +426,50 @@ options ndots:2 trust-ad
         assert_eq!(
             conf.static_options(),
             vec!["ndots:2".to_string(), "trust-ad".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_resolv_conf_origins() {
+        let content = "\
+# nipart: static
+nameserver 192.0.2.53
+search example.org
+# nipart: dynamic
+nameserver 198.51.100.53
+search example.net
+# nipart: foreign
+nameserver 203.0.113.53
+";
+        let conf = ResolvConf::parse(content);
+        assert_eq!(conf.static_servers(), vec!["192.0.2.53".to_string()]);
+        assert_eq!(conf.static_searches(), vec!["example.org".to_string()]);
+        assert_eq!(
+            conf.entries_of(&conf.servers, EntryOrigin::Dynamic),
+            vec!["198.51.100.53".to_string()]
+        );
+        assert_eq!(
+            conf.entries_of(&conf.searches, EntryOrigin::Dynamic),
+            vec!["example.net".to_string()]
+        );
+        assert_eq!(conf.foreign_servers(), vec!["203.0.113.53".to_string()]);
+    }
+
+    #[test]
+    fn test_write_section_skips_empty() {
+        let mut content = String::new();
+        write_section(&mut content, "# test", &[], &[], &[]);
+        assert!(content.is_empty());
+        write_section(
+            &mut content,
+            "# test",
+            &["192.0.2.53".to_string()],
+            &["example.org".to_string()],
+            &[],
+        );
+        assert_eq!(
+            content,
+            "# test\nnameserver 192.0.2.53\nsearch example.org\n"
         );
     }
 
@@ -469,7 +505,7 @@ dns-resolver:
             Default::default(),
         )
         .unwrap();
-        let err = NipartNoDaemon::apply_dns_resolver(&merged_state)
+        let err = NipartNoDaemon::apply_dns_resolver(&merged_state, &[])
             .await
             .expect_err("no-daemon mode must reject the DNS cache");
         assert_eq!(err.kind(), crate::ErrorKind::NoSupport);
