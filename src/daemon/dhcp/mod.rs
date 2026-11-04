@@ -15,7 +15,9 @@ use nipart::{
 
 pub(crate) use self::{
     dhcp_manager::NipartDhcpV4Manager,
-    dhcp_worker::{NipartDhcpCmd, NipartDhcpReply, NipartDhcpV4Worker},
+    dhcp_worker::{
+        NipartDhcpCmd, NipartDhcpDnsInfo, NipartDhcpReply, NipartDhcpV4Worker,
+    },
     dhcpv6_manager::NipartDhcpV6Manager,
     dhcpv6_worker::{NipartDhcpV6Cmd, NipartDhcpV6Reply, NipartDhcpV6Worker},
 };
