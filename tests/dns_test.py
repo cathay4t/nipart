@@ -244,8 +244,8 @@ dns-resolver:
     bind: "{DNS_CACHE_BIND}"
     max-cache-size: 4096
     load-etc-hosts: true
+    auto-dns: false
     fallback:
-      auto-dns: false
       nameservers:
         - "127.0.0.1:{upstream.port}"
 """
@@ -302,8 +302,8 @@ dns-resolver:
   cache:
     enabled: true
     bind: "{bind}"
+    auto-dns: false
     fallback:
-      auto-dns: false
       nameservers:
         - "127.0.0.1:{port}"
 """
@@ -463,8 +463,8 @@ dns-resolver:
   cache:
     enabled: true
     bind: "{DNS_CACHE_BIND}"
+    auto-dns: false
     fallback:
-      auto-dns: false
       nameservers:
         - "127.0.0.1:{upstream.port}"
 """
@@ -521,8 +521,8 @@ def test_dns_cache_disabled_by_manual_applied_state_edit(resolv_conf_backup):
       cache:
         enabled: true
         bind: "{DNS_CACHE_BIND}"
+        auto-dns: false
         fallback:
-          auto-dns: false
     """
     NipartClient().apply_network_state(load_yaml(desired))
     assert _dns_cache_port_in_use()
