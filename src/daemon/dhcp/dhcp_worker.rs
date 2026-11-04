@@ -68,9 +68,10 @@ pub(crate) enum NipartDhcpCmd {
     StartIfaceDhcp(Box<BaseInterface>),
     StopIfaceDhcp(String),
     Query,
-    /// Nameservers learned from the current leases, keyed by interface
-    /// name.  Used as `auto-dns` upstream of the DNS cache.
-    Nameservers,
+    /// DNS information learned from the current leases, keyed by interface
+    /// name. Used as `auto-dns` upstream of the DNS cache and
+    /// `/etc/resolv.conf`.
+    DnsInfo,
     /// Set the sender used to notify the daemon.  Must be invoked right
     /// after the worker started; without it the DHCP worker cannot report
     /// a changed default gateway to the daemon.
@@ -89,8 +90,8 @@ impl std::fmt::Display for NipartDhcpCmd {
             Self::Query => {
                 write!(f, "query-dhcp")
             }
-            Self::Nameservers => {
-                write!(f, "nameservers-dhcp")
+            Self::DnsInfo => {
+                write!(f, "dns-info-dhcp")
             }
             Self::SetCommanderSender(_) => {
                 write!(f, "set-commander-sender-dhcp")
@@ -99,11 +100,17 @@ impl std::fmt::Display for NipartDhcpCmd {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct NipartDhcpDnsInfo {
+    pub(crate) nameservers: Vec<String>,
+    pub(crate) domains: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum NipartDhcpReply {
     None,
     QueryReply(HashMap<String, DhcpState>),
-    NameserverReply(HashMap<String, Vec<String>>),
+    DnsInfoReply(HashMap<String, NipartDhcpDnsInfo>),
 }
 
 type FromManager =
@@ -171,15 +178,17 @@ impl TaskWorker for NipartDhcpV4Worker {
 
                 Ok(NipartDhcpReply::QueryReply(ret))
             }
-            NipartDhcpCmd::Nameservers => {
+            NipartDhcpCmd::DnsInfo => {
                 let mut ret = HashMap::new();
                 for (iface_name, thread) in self.threads.iter() {
-                    let nameservers = thread.get_nameservers()?;
-                    if !nameservers.is_empty() {
-                        ret.insert(iface_name.to_string(), nameservers);
+                    let dns_info = thread.get_dns_info()?;
+                    if !dns_info.nameservers.is_empty()
+                        || !dns_info.domains.is_empty()
+                    {
+                        ret.insert(iface_name.to_string(), dns_info);
                     }
                 }
-                Ok(NipartDhcpReply::NameserverReply(ret))
+                Ok(NipartDhcpReply::DnsInfoReply(ret))
             }
         }
     }
@@ -189,6 +198,7 @@ impl TaskWorker for NipartDhcpV4Worker {
 struct NipartDhcpShareData {
     state: DhcpState,
     nameservers: Vec<String>,
+    domains: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -244,9 +254,14 @@ impl NipartDhcpV4Thread {
         }
     }
 
-    pub(crate) fn get_nameservers(&self) -> Result<Vec<String>, NipartError> {
+    pub(crate) fn get_dns_info(
+        &self,
+    ) -> Result<NipartDhcpDnsInfo, NipartError> {
         match self.share_data.lock() {
-            Ok(data) => Ok(data.nameservers.clone()),
+            Ok(data) => Ok(NipartDhcpDnsInfo {
+                nameservers: data.nameservers.clone(),
+                domains: data.domains.clone(),
+            }),
             Err(e) => Err(NipartError::new(
                 ErrorKind::Bug,
                 format!(
@@ -505,6 +520,23 @@ async fn dhcp_thread(
     Ok(())
 }
 
+/// DHCPv4 domain information: option 15 (single domain) followed by option
+/// 119 (domain search list), deduplicated while preserving order.
+fn gen_lease_domains(lease: &DhcpV4Lease) -> Vec<String> {
+    let mut ret: Vec<String> = Vec::new();
+    if let Some(domain) = lease.domain_name.as_deref()
+        && !domain.is_empty()
+    {
+        ret.push(domain.to_string());
+    }
+    for domain in lease.domain_search.as_deref().unwrap_or_default() {
+        if !domain.is_empty() && !ret.iter().any(|d| d == domain) {
+            ret.push(domain.to_string());
+        }
+    }
+    ret
+}
+
 async fn apply_lease(
     base_iface: &BaseInterface,
     lease: &DhcpV4Lease,
@@ -520,8 +552,8 @@ async fn apply_lease(
         base_iface.iface_type
     );
 
-    // Remember the nameservers of the current lease: the DNS cache uses
-    // them as `auto-dns` upstream.
+    // Remember the DNS information of the current lease: it feeds the
+    // standard resolver and the `auto-dns` upstream of the DNS cache.
     match share_data.lock() {
         Ok(mut share_data) => {
             share_data.nameservers = lease
@@ -531,10 +563,11 @@ async fn apply_lease(
                 .iter()
                 .map(|srv| srv.to_string())
                 .collect();
+            share_data.domains = gen_lease_domains(lease);
         }
         Err(e) => {
             log::warn!(
-                "Failed to store DHCPv4 nameservers for interface {}: {e}",
+                "Failed to store DHCPv4 DNS information for interface {}:                  {e}",
                 base_iface.name
             );
         }

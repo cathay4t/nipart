@@ -9,9 +9,9 @@ use nipart::{
 };
 
 use super::{
-    NipartDhcpCmd, NipartDhcpReply, NipartDhcpV4Worker, desired_ssid_for_phy,
-    should_touch_dhcp, should_touch_unchanged_dhcp, wait_wifi_ssid,
-    wifi_cfg_ssid_changed, wifi_ssid_changed,
+    NipartDhcpCmd, NipartDhcpDnsInfo, NipartDhcpReply, NipartDhcpV4Worker,
+    desired_ssid_for_phy, should_touch_dhcp, should_touch_unchanged_dhcp,
+    wait_wifi_ssid, wifi_cfg_ssid_changed, wifi_ssid_changed,
 };
 use crate::{
     TaskManager, daemon::NipartManagerCmd, log_debug,
@@ -73,15 +73,15 @@ impl NipartDhcpV4Manager {
         Ok(())
     }
 
-    /// Nameservers learned from the current DHCPv4 leases, keyed by
+    /// DNS information learned from the current DHCPv4 leases, keyed by
     /// interface name.
-    pub(crate) async fn nameservers(
+    pub(crate) async fn dns_info(
         &mut self,
-    ) -> Result<HashMap<String, Vec<String>>, NipartError> {
-        if let NipartDhcpReply::NameserverReply(nameservers) =
-            self.mgr.exec(NipartDhcpCmd::Nameservers).await?
+    ) -> Result<HashMap<String, NipartDhcpDnsInfo>, NipartError> {
+        if let NipartDhcpReply::DnsInfoReply(dns_info) =
+            self.mgr.exec(NipartDhcpCmd::DnsInfo).await?
         {
-            Ok(nameservers)
+            Ok(dns_info)
         } else {
             Ok(HashMap::new())
         }
@@ -152,7 +152,11 @@ impl NipartDhcpV4Manager {
             // `profile-name`) must not restart a healthy DHCP client, so
             // remember whether this diff actually touched IPv4 before the
             // fallback below adds the merged config.
-            let ipv4_changed = apply_iface.base_iface().ipv4.is_some();
+            let ipv4_changed = apply_iface
+                .base_iface()
+                .ipv4
+                .as_ref()
+                .is_some_and(ipv4_diff_needs_dhcp_restart);
             // `for_apply` is a diff against the current state, so unchanged
             // DHCP settings may be omitted even when the SSID changed and
             // the DHCP client must be restarted. Fall back to the merged
@@ -270,4 +274,18 @@ impl NipartDhcpV4Manager {
 
         Ok(())
     }
+}
+
+/// Whether an IPv4 diff requires restarting the DHCP client.
+///
+/// `auto-dns` and `auto-dns-priority` only change how the lease's DNS
+/// information is consumed, so they are applied by refreshing the DNS
+/// configuration instead of restarting DHCP.
+fn ipv4_diff_needs_dhcp_restart(diff: &nipart::InterfaceIpv4) -> bool {
+    diff.enabled.is_some()
+        || diff.dhcp.is_some()
+        || diff.dhcp_state.is_some()
+        || diff.addresses.is_some()
+        || diff.auto_gateway.is_some()
+        || diff.auto_route_metric.is_some()
 }
