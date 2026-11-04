@@ -22,6 +22,11 @@ pub struct MergedDnsResolver {
     pub running: Option<DnsResolverClient>,
     pub servers: Vec<String>,
     pub searches: Vec<String>,
+    /// Whether the saved static search list is explicitly defined. An
+    /// explicitly empty list suppresses DHCP search domains, while an
+    /// undefined list allows them.
+    #[serde(default)]
+    pub search_defined: bool,
     pub options: Vec<String>,
     /// Dynamic nameservers learned from DHCP/IPv6-RA/VPN which must be
     /// preserved in the final resolver configuration.
@@ -67,6 +72,11 @@ impl MergedDnsResolver {
             .as_ref()
             .and_then(|c| c.search.clone())
             .unwrap_or_default();
+        let mut search_defined = current
+            .config
+            .as_ref()
+            .and_then(|c| c.search.as_ref())
+            .is_some();
         let mut options = current
             .config
             .as_ref()
@@ -99,6 +109,7 @@ impl MergedDnsResolver {
             }
             if let Some(des_searches) = conf.search.as_ref() {
                 searches = des_searches.clone();
+                search_defined = true;
             }
             if let Some(des_options) = conf.options.as_ref() {
                 options = des_options.clone();
@@ -107,6 +118,7 @@ impl MergedDnsResolver {
             // `config: {}`: purge all static DNS configuration.
             servers.clear();
             searches.clear();
+            search_defined = false;
             options.clear();
         }
 
@@ -120,6 +132,7 @@ impl MergedDnsResolver {
             running,
             servers,
             searches,
+            search_defined,
             options,
             dynamic_servers,
             previous_static_servers,
@@ -147,11 +160,17 @@ impl MergedDnsResolver {
         self.desired.is_none()
     }
 
+    /// Whether DHCP search domains may be appended to the static search
+    /// list. An explicitly empty static search list suppresses them.
+    pub fn auto_search_allowed(&self) -> bool {
+        !(self.search_defined && self.searches.is_empty())
+    }
+
     /// The static client configuration to persist.
     pub fn config(&self) -> DnsResolverClient {
         DnsResolverClient {
             server: Some(self.servers.clone()),
-            search: Some(self.searches.clone()),
+            search: self.search_defined.then(|| self.searches.clone()),
             options: Some(self.options.clone()),
         }
     }

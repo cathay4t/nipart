@@ -16,30 +16,43 @@ use crate::{
 
 pub(crate) const RESOLV_CONF_PATH: &str = "/etc/resolv.conf";
 const STATIC_MARKER: &str = "# nipart: static";
+const DYNAMIC_MARKER: &str = "# nipart: dynamic";
+const FOREIGN_MARKER: &str = "# nipart: foreign";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum EntryOrigin {
+    Static,
+    Dynamic,
+    #[default]
+    Foreign,
+}
 
 #[derive(Debug, Default)]
 struct ResolvConf {
-    /// `(is_nipart_static, server)` in file order.
-    servers: Vec<(bool, String)>,
-    /// `(is_nipart_static, search_domain)` in file order.  The keyword
-    /// kind (`search` or `domain`) is normalized to a search entry.
-    searches: Vec<(bool, String)>,
-    /// `(is_nipart_static, option)` in file order.
-    options: Vec<(bool, String)>,
+    /// `(origin, server)` in file order.
+    servers: Vec<(EntryOrigin, String)>,
+    /// `(origin, search_domain)` in file order.  The keyword kind
+    /// (`search` or `domain`) is normalized to a search entry.
+    searches: Vec<(EntryOrigin, String)>,
+    /// `(origin, option)` in file order.
+    options: Vec<(EntryOrigin, String)>,
 }
 
 impl ResolvConf {
     fn parse(content: &str) -> Self {
         let mut ret = Self::default();
-        let mut is_static = false;
+        let mut origin = EntryOrigin::Foreign;
         for line in content.lines() {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
             if trimmed.starts_with('#') {
-                if trimmed == STATIC_MARKER {
-                    is_static = true;
+                match trimmed {
+                    STATIC_MARKER => origin = EntryOrigin::Static,
+                    DYNAMIC_MARKER => origin = EntryOrigin::Dynamic,
+                    FOREIGN_MARKER => origin = EntryOrigin::Foreign,
+                    _ => (),
                 }
                 continue;
             }
@@ -52,17 +65,17 @@ impl ResolvConf {
                     if let Some(srv) = parts.next()
                         && srv.parse::<IpAddr>().is_ok()
                     {
-                        ret.servers.push((is_static, srv.to_string()));
+                        ret.servers.push((origin, srv.to_string()));
                     }
                 }
                 "search" | "domain" => {
                     for domain in parts {
-                        ret.searches.push((is_static, domain.to_string()));
+                        ret.searches.push((origin, domain.to_string()));
                     }
                 }
                 "options" => {
                     for opt in parts {
-                        ret.options.push((is_static, opt.to_string()));
+                        ret.options.push((origin, opt.to_string()));
                     }
                 }
                 _ => (),
@@ -84,49 +97,51 @@ impl ResolvConf {
         }
     }
 
-    fn dynamic_servers(&self) -> Vec<String> {
-        self.dynamic_entries(&self.servers)
-    }
-
-    fn dynamic_searches(&self) -> Vec<String> {
-        self.dynamic_entries(&self.searches)
-    }
-
-    fn dynamic_options(&self) -> Vec<String> {
-        self.dynamic_entries(&self.options)
-    }
-
-    fn dynamic_entries(&self, entries: &[(bool, String)]) -> Vec<String> {
+    fn entries_of(
+        &self,
+        entries: &[(EntryOrigin, String)],
+        origin: EntryOrigin,
+    ) -> Vec<String> {
         entries
             .iter()
-            .filter(|(is_static, _)| !is_static)
+            .filter(|(entry_origin, _)| *entry_origin == origin)
             .map(|(_, value)| value.clone())
             .collect()
     }
 
-    /// Static entries of the file, used to preserve the previous static
-    /// configuration when the desired `config` omits a property.
-    #[allow(dead_code)]
+    fn foreign_servers(&self) -> Vec<String> {
+        self.entries_of(&self.servers, EntryOrigin::Foreign)
+    }
+
+    fn foreign_searches(&self) -> Vec<String> {
+        self.entries_of(&self.searches, EntryOrigin::Foreign)
+    }
+
+    fn foreign_options(&self) -> Vec<String> {
+        self.entries_of(&self.options, EntryOrigin::Foreign)
+    }
+
+    #[cfg(test)]
     fn static_servers(&self) -> Vec<String> {
-        self.static_entries(&self.servers)
+        self.entries_of(&self.servers, EntryOrigin::Static)
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn static_searches(&self) -> Vec<String> {
-        self.static_entries(&self.searches)
+        self.entries_of(&self.searches, EntryOrigin::Static)
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn static_options(&self) -> Vec<String> {
-        self.static_entries(&self.options)
+        self.entries_of(&self.options, EntryOrigin::Static)
     }
 
-    fn static_entries(&self, entries: &[(bool, String)]) -> Vec<String> {
-        entries
-            .iter()
-            .filter(|(is_static, _)| *is_static)
-            .map(|(_, value)| value.clone())
-            .collect()
+    #[cfg(test)]
+    fn dynamic_entries(
+        &self,
+        entries: &[(EntryOrigin, String)],
+    ) -> Vec<String> {
+        self.entries_of(entries, EntryOrigin::Dynamic)
     }
 }
 
@@ -164,71 +179,139 @@ pub(crate) fn query_running_dns() -> Result<DnsResolver, NipartError> {
     })
 }
 
-/// Write the static DNS configuration to `/etc/resolv.conf`, preserving
-/// dynamic nameservers/domains already present in the file.
+/// Write the DNS configuration to `/etc/resolv.conf`.
+///
+/// Nipart-managed entries are written with explicit origin markers so a
+/// later read can tell static entries, DHCP-learned dynamic entries and
+/// entries owned by other tools apart. Static entries always come first,
+/// followed by dynamic entries and finally preserved foreign entries.
 ///
 /// `cache_bind_ip` is the DNS cache listen address which must be written
-/// first (when the cache is enabled).
+/// first (when the cache is enabled). When the cache is enabled, dynamic
+/// and foreign nameservers are not written: the cache handles the dynamic
+/// upstreams itself and the host resolver must only query the cache.
 pub(crate) fn write_static_dns(
     cache_bind_ip: Option<IpAddr>,
     static_servers: &[String],
     static_searches: &[String],
     static_options: &[String],
     dynamic_servers: &[String],
+    dynamic_searches: &[String],
 ) -> Result<(), NipartError> {
     let existing = ResolvConf::read()?;
-    let mut servers: Vec<String> = Vec::new();
+    let cache_enabled = cache_bind_ip.is_some();
+    let mut static_srvs: Vec<String> = Vec::new();
     if let Some(bind_ip) = cache_bind_ip {
         // The cache must be the first nameserver so the host resolver
         // always queries it first (the same ordering is enforced by
         // `DnsResolver::validate()`).
-        servers.push(bind_ip.to_string());
+        push_unique(&mut static_srvs, bind_ip.to_string());
     }
     for srv in static_servers {
-        if !servers.contains(srv) {
-            servers.push(srv.clone());
-        }
+        push_unique(&mut static_srvs, srv.clone());
     }
-    for srv in dynamic_servers {
-        if !servers.contains(srv) {
-            servers.push(srv.clone());
+    let mut static_search_list = static_searches.to_vec();
+    dedup(&mut static_search_list);
+    let mut static_option_list = static_options.to_vec();
+    dedup(&mut static_option_list);
+
+    let mut auto_servers: Vec<String> = Vec::new();
+    let mut auto_searches: Vec<String> = Vec::new();
+    if !cache_enabled {
+        for srv in dynamic_servers {
+            push_unique(&mut auto_servers, srv.clone());
         }
-    }
-    for srv in existing.dynamic_servers() {
-        if !servers.contains(&srv) {
-            servers.push(srv);
+        for domain in dynamic_searches {
+            if !static_search_list.contains(domain) {
+                push_unique(&mut auto_searches, domain.clone());
+            }
         }
     }
 
-    write_resolv_conf(&servers, static_searches, static_options)
+    let mut foreign_servers: Vec<String> = Vec::new();
+    if !cache_enabled {
+        for srv in existing.foreign_servers() {
+            if !static_srvs.contains(&srv) {
+                push_unique(&mut foreign_servers, srv);
+            }
+        }
+    }
+    let mut foreign_searches: Vec<String> = Vec::new();
+    for domain in existing.foreign_searches() {
+        if !static_search_list.contains(&domain)
+            && !auto_searches.contains(&domain)
+        {
+            push_unique(&mut foreign_searches, domain);
+        }
+    }
+    let mut foreign_options: Vec<String> = Vec::new();
+    for option in existing.foreign_options() {
+        if !static_option_list.contains(&option) {
+            push_unique(&mut foreign_options, option);
+        }
+    }
+
+    write_resolv_conf(
+        &static_srvs,
+        &static_search_list,
+        &static_option_list,
+        &auto_servers,
+        &auto_searches,
+        &foreign_servers,
+        &foreign_searches,
+        &foreign_options,
+    )
 }
 
-/// Remove nipart managed static DNS configuration from `/etc/resolv.conf`.
+/// Remove nipart managed DNS configuration from `/etc/resolv.conf`,
+/// preserving entries owned by other tools.
 pub(crate) fn purge_dns_resolver() -> Result<(), NipartError> {
     let existing = ResolvConf::read()?;
-    let servers = existing.dynamic_servers();
-    let searches = existing.dynamic_searches();
-    let options = existing.dynamic_options();
-    write_resolv_conf(&servers, &searches, &options)
+    write_resolv_conf(
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &existing.foreign_servers(),
+        &existing.foreign_searches(),
+        &existing.foreign_options(),
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_resolv_conf(
-    servers: &[String],
-    searches: &[String],
-    options: &[String],
+    static_servers: &[String],
+    static_searches: &[String],
+    static_options: &[String],
+    auto_servers: &[String],
+    auto_searches: &[String],
+    foreign_servers: &[String],
+    foreign_searches: &[String],
+    foreign_options: &[String],
 ) -> Result<(), NipartError> {
     let mut content = String::new();
-    content.push_str(STATIC_MARKER);
-    content.push('\n');
-    for srv in servers {
-        content.push_str(&format!("nameserver {srv}\n"));
-    }
-    if !searches.is_empty() {
-        content.push_str(&format!("search {}\n", searches.join(" ")));
-    }
-    if !options.is_empty() {
-        content.push_str(&format!("options {}\n", options.join(" ")));
-    }
+    write_section(
+        &mut content,
+        STATIC_MARKER,
+        static_servers,
+        static_searches,
+        static_options,
+    );
+    write_section(
+        &mut content,
+        DYNAMIC_MARKER,
+        auto_servers,
+        auto_searches,
+        &[],
+    );
+    write_section(
+        &mut content,
+        FOREIGN_MARKER,
+        foreign_servers,
+        foreign_searches,
+        foreign_options,
+    );
 
     let path = std::path::Path::new(RESOLV_CONF_PATH);
     // Write through a temporary file + rename.  `rename()` replaces the
@@ -250,14 +333,55 @@ fn write_resolv_conf(
     })
 }
 
+fn write_section(
+    content: &mut String,
+    marker: &str,
+    servers: &[String],
+    searches: &[String],
+    options: &[String],
+) {
+    if servers.is_empty() && searches.is_empty() && options.is_empty() {
+        return;
+    }
+    content.push_str(marker);
+    content.push('\n');
+    for srv in servers {
+        content.push_str(&format!("nameserver {srv}\n"));
+    }
+    if !searches.is_empty() {
+        content.push_str(&format!("search {}\n", searches.join(" ")));
+    }
+    if !options.is_empty() {
+        content.push_str(&format!("options {}\n", options.join(" ")));
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
+
+fn dedup(values: &mut Vec<String>) {
+    let mut seen: Vec<String> = Vec::new();
+    values.retain(|value| {
+        if seen.contains(value) {
+            false
+        } else {
+            seen.push(value.clone());
+            true
+        }
+    });
+}
+
 impl NipartNoDaemon {
     /// Query the running DNS resolver state from `/etc/resolv.conf`.
     pub async fn query_dns_resolver() -> Result<DnsResolver, NipartError> {
         query_running_dns()
     }
 
-    /// Apply the static DNS resolver configuration to `/etc/resolv.conf`
-    /// from explicit server/search/option lists.
+    /// Apply the DNS resolver configuration to `/etc/resolv.conf` from
+    /// explicit static and dynamic server/search/option lists.
     #[allow(clippy::too_many_arguments)]
     pub async fn apply_dns_resolver_conf(
         cache_bind_ip: Option<IpAddr>,
@@ -265,6 +389,7 @@ impl NipartNoDaemon {
         static_searches: &[String],
         static_options: &[String],
         dynamic_servers: &[String],
+        dynamic_searches: &[String],
     ) -> Result<(), NipartError> {
         write_static_dns(
             cache_bind_ip,
@@ -272,6 +397,7 @@ impl NipartNoDaemon {
             static_searches,
             static_options,
             dynamic_servers,
+            dynamic_searches,
         )
     }
 
